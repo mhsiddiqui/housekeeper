@@ -85,6 +85,17 @@ impl Housekeeper {
 
     /// Reads every selected source in parallel. A source that fails or panics is reported, not fatal.
     pub fn scan(&self, selection: &Selection<'_>) -> Scan {
+        self.scan_with(selection, |_, _| {})
+    }
+
+    /// Like [`scan`](Self::scan), but hands each source's report and packages to `on_report` as soon as that source
+    /// finishes, so a caller can show progress per source. The returned `Scan` is the same as `scan` returns.
+    ///
+    /// `on_report` runs once per selected source, on that source's scanning thread, so calls come concurrently from
+    /// several threads in the order the sources finish. It sees every outcome: available, unavailable, failed, and a
+    /// panicking source (reported as failed). If `on_report` itself panics, that source is treated like a panicking
+    /// source: the scan reports it as failed with no packages, and the other sources are unaffected.
+    pub fn scan_with(&self, selection: &Selection<'_>, on_report: impl Fn(&SourceReport, &[Package]) + Sync) -> Scan {
         let selected: Vec<&dyn Source> = self
             .platform
             .sources()
@@ -93,10 +104,17 @@ impl Housekeeper {
             .filter(|source| selection.includes(&source.info()))
             .collect();
 
+        let on_report = &on_report;
         let results: Vec<(SourceReport, Vec<Package>)> = thread::scope(|scope| {
             let handles: Vec<_> = selected
                 .iter()
-                .map(|source| scope.spawn(|| scan_one(*source, &self.host)))
+                .map(|source| {
+                    scope.spawn(move || {
+                        let (report, packages) = scan_one(*source, &self.host);
+                        on_report(&report, &packages);
+                        (report, packages)
+                    })
+                })
                 .collect();
             handles
                 .into_iter()
@@ -174,7 +192,7 @@ mod tests {
     use crate::model::{PackageKind, Scope, SourceId, SourceKind};
     use crate::source::SourceError;
     use crate::testing::{FakeRunner, Fixture};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     struct Stub {
         info: SourceInfo,
@@ -280,5 +298,38 @@ mod tests {
         assert_eq!(scan.sources.len(), 1);
         assert_eq!(scan.packages.len(), 1);
         assert_eq!(scan.packages[0].name, "two");
+    }
+
+    #[test]
+    fn progress_reports_each_selected_source_once_with_its_own_packages() {
+        let hk = housekeeper(vec![
+            stub("good", true, || Ok(vec![app("good", "zed"), app("good", "Alacritty")])),
+            stub("other", true, || Ok(vec![app("other", "vim")])),
+            stub("broken", true, || Err(SourceError::parse("db", "garbage"))),
+            stub("panics", true, || panic!("bug")),
+            stub("absent", false, || unreachable!("unavailable sources are not read")),
+            stub("skipped", true, || Ok(vec![app("skipped", "nano")])),
+        ]);
+        let only = ["good", "other", "broken", "panics", "absent"].map(String::from);
+        let seen = Mutex::new(Vec::new());
+        let scan = hk.scan_with(&Selection::Only(&only), |report, packages| {
+            seen.lock().unwrap().push((report.clone(), packages.to_vec()));
+        });
+
+        let mut seen = seen.into_inner().unwrap();
+        seen.sort_by(|a, b| a.0.info.id.cmp(&b.0.info.id));
+        let ids: Vec<_> = seen.iter().map(|(report, _)| report.info.id.as_str()).collect();
+        assert_eq!(ids, ["absent", "broken", "good", "other", "panics"]);
+        for (report, packages) in &seen {
+            assert!(scan.sources.contains(report), "report of {}", report.info.id);
+            let in_scan: Vec<_> = scan.packages.iter().filter(|p| p.source == report.info.id).collect();
+            let mut streamed: Vec<_> = packages.iter().collect();
+            streamed.sort_by_key(|p| p.display_name().to_lowercase());
+            assert_eq!(streamed, in_scan, "packages of {}", report.info.id);
+        }
+        assert!(matches!(seen[0].0.status, SourceStatus::Unavailable { .. }));
+        assert!(matches!(seen[1].0.status, SourceStatus::Failed { .. }));
+        assert!(matches!(seen[4].0.status, SourceStatus::Failed { .. }));
+        assert_eq!(seen[2].1.len(), 2);
     }
 }
