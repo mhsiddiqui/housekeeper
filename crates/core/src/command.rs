@@ -204,9 +204,7 @@ fn wait_with_deadline(child: &mut Child, timeout: Duration) -> io::Result<Option
 }
 
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    path.metadata().is_ok_and(|meta| crate::host::is_executable(&meta))
 }
 
 #[cfg(test)]
