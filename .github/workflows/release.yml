@@ -1,5 +1,5 @@
 # Publishing a GitHub release tagged vX.Y.Z builds the packages, tests them on every supported distribution and
-# attaches them to the release. See docs/RELEASING.md.
+# attaches them to the release. See docs/development/releasing.md.
 name: Release
 
 on:

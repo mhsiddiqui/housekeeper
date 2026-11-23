@@ -1,6 +1,6 @@
 //! Operating-system independent core of Housekeeper.
 //!
-//! See `docs/ARCHITECTURE.md` for how platforms, sources and the host fit together.
+//! See `docs/architecture/README.md` for how platforms, sources and the host fit together.
 
 pub mod command;
 pub mod host;

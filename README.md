@@ -7,7 +7,7 @@ AppImage, npm, pipx, uv, cargo, or a script), and removes each one the way its o
 
 It is a front door to the native tools, not a replacement for them.
 
-> **Status:** early development. See the [build plan](docs/PLAN.md) for what works today.
+> **Status:** early development. See the [build plan](docs/planning/plan.md) for what works today.
 
 ## Install
 Download the package for your distribution from the
@@ -35,14 +35,17 @@ housekeeper list --json                   # machine-readable scan (schema 1)
 Nothing is changed on the system: this version only reads. From a source checkout, use
 `cargo run -p housekeeper-cli -- <command>` instead.
 
-## Documents
-- [Product spec](docs/SPEC.md): what Housekeeper does and why.
-- [Architecture](docs/ARCHITECTURE.md): how the code is organised and the design decisions.
-- [Build plan](docs/PLAN.md): phases and chunks, with status.
-- [Changelog](CHANGELOG.md).
-- [Contributing](CONTRIBUTING.md): branch-per-task workflow and the checks CI runs.
-- [Releasing](docs/RELEASING.md): how a release builds and tests the packages.
-- [Interactive mockup](design/mockup/index.html): open in a browser; keep `store-snapshot.js` next to it.
+## Documentation
+All documentation lives in [docs/](docs/README.md), grouped by section:
+
+- **Product**: [spec](docs/product/spec.md), [interactive mockup](design/mockup/index.html) (open in a browser).
+- **Architecture**: [overview and decisions](docs/architecture/README.md),
+  [illustrated guide](docs/architecture/guide.html) (how to add a distribution or operating system).
+- **Planning**: [build plan](docs/planning/plan.md), phases and chunks with status.
+- **Development**: [contributing](CONTRIBUTING.md), [releasing](docs/development/releasing.md).
+- **History**: [change records](docs/changes/README.md) (one per change), [changelog](CHANGELOG.md) (per release).
+
+Working on the code with an AI agent? It follows [AGENTS.md](AGENTS.md).
 
 ## Licence
 MIT

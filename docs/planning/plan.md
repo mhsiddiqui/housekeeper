@@ -2,12 +2,13 @@
 
 Housekeeper is built in small chunks. Each chunk is one reviewable change that compiles, passes CI, and leaves the
 tool usable. Later phases only add capabilities; they never require rewriting earlier ones (see
-[ARCHITECTURE.md](ARCHITECTURE.md)).
+[architecture](../architecture/README.md)).
 
 Status: ✅ done · 🚧 in progress · ⬜ not started.
 
-How work is done (see [CONTRIBUTING.md](../CONTRIBUTING.md)): every chunk gets its own branch and pull request; CI must
-pass before merging; each chunk updates the docs it affects (this plan, README, CHANGELOG, architecture).
+How work is done (see [CONTRIBUTING.md](../../CONTRIBUTING.md) and [AGENTS.md](../../AGENTS.md)): every chunk gets its
+own branch and pull request; CI must pass before merging; each chunk adds a [change record](../changes/README.md) and
+updates the docs it affects (this plan, README, CHANGELOG, architecture).
 
 ## Phase 0: Foundation 🚧
 | Chunk | Delivers |
