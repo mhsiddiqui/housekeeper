@@ -1,12 +1,15 @@
 //! Arch packages (Arch, Manjaro, EndeavourOS…), read from pacman's local database files.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, Scope, Source, SourceError, SourceId,
+    SourceInfo, SourceKind,
 };
+
+use crate::owner::{OwnerQuery, args};
+use crate::provider::{Context, Family, LinuxSource, Native};
 
 pub const ID: SourceId = SourceId::new("pacman");
 
@@ -43,6 +46,29 @@ const CORE_PACKAGES: &[&str] = &[
 ];
 
 pub struct PacmanSource;
+
+impl LinuxSource for PacmanSource {
+    const NATIVE: Option<Native> = Some(Native {
+        families: &[Family {
+            name: "arch",
+            distro_ids: &[
+                "arch",
+                "manjaro",
+                "endeavouros",
+                "garuda",
+                "cachyos",
+                "artix",
+                "arcolinux",
+                "steamos",
+            ],
+        }],
+        program: "pacman",
+    });
+
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for PacmanSource {
     fn info(&self) -> SourceInfo {
@@ -89,6 +115,33 @@ impl Source for PacmanSource {
         }
         Ok(packages)
     }
+
+    fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
+        Some(self)
+    }
+}
+
+impl OwnerLookup for PacmanSource {
+    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError> {
+        OwnerQuery {
+            command: |paths| Cmd::new("pacman").arg("-Qo").args(args(paths)),
+            // Unowned paths make pacman exit 1 (messages on stderr); only a killed pacman is a failure.
+            failed: |output| output.code.is_none(),
+            parse: owned,
+        }
+        .run(host, paths)
+    }
+}
+
+/// Lines are `/path is owned by pkg version`; directories get a trailing slash. Errors go to stderr.
+fn owned(stdout: &str, wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
+    stdout
+        .lines()
+        .filter_map(|line| line.rsplit_once(" is owned by "))
+        .map(|(path, _)| Path::new(path.trim_end_matches('/')))
+        .filter(|path| wanted.contains(path))
+        .map(Path::to_path_buf)
+        .collect()
 }
 
 /// The `Pacman v7.0.0 - libalpm v15.0.0` token in `pacman --version`, which sits beside ASCII art.
@@ -391,5 +444,24 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
                 version: Some("7.0.0".into())
             }
         );
+    }
+
+    #[test]
+    fn owner_lookup_reads_owner_lines_and_directory_slashes() {
+        use crate::owner::tests::{exit, paths, sorted};
+        let runner = FakeRunner::new().respond_with(
+            "pacman -Qo /opt/visual-studio-code /usr/local/bin/tool /opt/manual",
+            exit(
+                1,
+                "/opt/visual-studio-code/ is owned by visual-studio-code-bin 1.95.3-1\n\
+                 /usr/local/bin/tool is owned by tool-git r12.abc-1\n",
+                "error: No package owns /opt/manual\n",
+            ),
+        );
+        let host = Fixture::new().host(runner);
+        let owned = PacmanSource
+            .owned_paths(&host, &paths(&["/opt/visual-studio-code", "/usr/local/bin/tool", "/opt/manual"]))
+            .unwrap();
+        assert_eq!(sorted(owned), paths(&["/opt/visual-studio-code", "/usr/local/bin/tool"]));
     }
 }

@@ -1,14 +1,17 @@
 //! RPM packages (Fedora, RHEL and rebuilds, openSUSE, Silverblue), read through `rpm --queryformat`.
 
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, Scope, Source, SourceError, SourceId,
+    SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
 use super::version_line;
+use crate::owner::{OwnerQuery, args};
+use crate::provider::{Context, Family, LinuxSource, Native};
 
 pub const ID: SourceId = SourceId::new("rpm");
 
@@ -51,6 +54,45 @@ const CORE_PACKAGES: &[&str] = &[
 /// Reads RPM packages. On image-based systems (Silverblue and friends) the install reason comes from `rpm-ostree`.
 pub struct RpmSource {
     image_based: bool,
+}
+
+impl LinuxSource for RpmSource {
+    const NATIVE: Option<Native> = Some(Native {
+        families: &[
+            Family {
+                name: "fedora",
+                distro_ids: &[
+                    "fedora",
+                    "rhel",
+                    "centos",
+                    "rocky",
+                    "almalinux",
+                    "ol",
+                    "nobara",
+                    "ultramarine",
+                    "amzn",
+                    "bazzite",
+                ],
+            },
+            Family {
+                name: "suse",
+                distro_ids: &[
+                    "opensuse",
+                    "opensuse-leap",
+                    "opensuse-tumbleweed",
+                    "opensuse-microos",
+                    "sles",
+                    "sled",
+                    "suse",
+                ],
+            },
+        ],
+        program: "rpm",
+    });
+
+    fn create(context: &Context<'_>) -> Self {
+        Self::new(context.distro.image_based)
+    }
 }
 
 impl RpmSource {
@@ -105,6 +147,38 @@ impl Source for RpmSource {
         }
         parse_listing(&listing, &reasons, &protected)
     }
+
+    fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
+        Some(self)
+    }
+}
+
+impl OwnerLookup for RpmSource {
+    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError> {
+        OwnerQuery {
+            // The owning packages' file lists: unlike `%{NAME}`, they say which argument was owned even when an
+            // argument has several owners or none (missing files print nothing on stdout).
+            command: |paths| {
+                Cmd::new("rpm")
+                    .args(["-qf", "--queryformat", "[%{FILENAMES}\\n]"])
+                    .args(args(paths))
+            },
+            // Unowned or missing paths make rpm exit non-zero; only a killed rpm is a failure.
+            failed: |output| output.code.is_none(),
+            parse: owned,
+        }
+        .run(host, paths)
+    }
+}
+
+/// One file of an owning package per line; "file … is not owned by any package" lines never equal a path.
+fn owned(stdout: &str, wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
+    stdout
+        .lines()
+        .map(Path::new)
+        .filter(|path| wanted.contains(path))
+        .map(Path::to_path_buf)
+        .collect()
 }
 
 /// Where install reasons come from on this system.
@@ -444,5 +518,26 @@ vim-enhanced\t2\t9.1.825\t1.fc41\tx86_64\t4100000\t1731300100\tA version of the 
                 version: Some("4.20.0".into())
             }
         );
+    }
+
+    #[test]
+    fn owner_lookup_matches_paths_in_owner_file_lists() {
+        use crate::owner::tests::{exit, paths, sorted};
+        let stdout = "\
+/opt/google
+/opt/google/chrome
+/opt/google/chrome/chrome
+/usr/bin/google-chrome-stable
+file /opt/manual is not owned by any package
+";
+        let runner = FakeRunner::new().respond_with(
+            "rpm -qf --queryformat [%{FILENAMES}\\n] /opt/google /opt/manual /opt/gone",
+            exit(2, stdout, "error: file /opt/gone: No such file or directory\n"),
+        );
+        let host = Fixture::new().host(runner);
+        let owned = RpmSource::new(false)
+            .owned_paths(&host, &paths(&["/opt/google", "/opt/manual", "/opt/gone"]))
+            .unwrap();
+        assert_eq!(sorted(owned), paths(&["/opt/google"]));
     }
 }

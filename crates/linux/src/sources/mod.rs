@@ -1,17 +1,9 @@
-//! One module per way software gets installed on Linux.
+//! One file per way software gets installed on Linux.
+//!
+//! Every file here is a source and is registered automatically by `build.rs`: it must contain exactly one
+//! `impl LinuxSource for <Type>` (see [`crate::provider`]). Shared helpers that are not sources live outside this folder.
 
-pub mod appimage;
-pub mod cargo;
-pub mod dpkg;
-pub mod flatpak;
-pub mod manual;
-pub mod npm;
-pub mod pacman;
-pub mod pip;
-pub mod pipx;
-pub mod rpm;
-pub mod snap;
-pub mod uv;
+include!(concat!(env!("OUT_DIR"), "/sources.rs"));
 
 /// First non-empty line of a program's output.
 pub(crate) fn version_line(output: &str) -> Option<String> {

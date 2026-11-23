@@ -9,6 +9,8 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
+use crate::provider::{Context, LinuxSource};
+
 pub const ID: SourceId = SourceId::new("cargo");
 
 const CRATES_IO: [&str; 2] = [
@@ -17,6 +19,12 @@ const CRATES_IO: [&str; 2] = [
 ];
 
 pub struct CargoSource;
+
+impl LinuxSource for CargoSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for CargoSource {
     fn info(&self) -> SourceInfo {
