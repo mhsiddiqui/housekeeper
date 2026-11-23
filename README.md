@@ -3,7 +3,7 @@
 *Every app, however it got here.*
 
 Housekeeper shows every app installed on a Linux machine, whatever installed it (apt/dnf/zypper/pacman, Flatpak, Snap,
-AppImage, npm, pipx, uv, cargo, or a script), and removes each one the way its own installer intended.
+Homebrew, AppImage, npm, pipx, uv, pip, cargo, or a script), and removes each one the way its own installer intended.
 
 It is a front door to the native tools, not a replacement for them.
 
@@ -38,7 +38,7 @@ Nothing is changed on the system: this version only reads. From a source checkou
 ## Documentation
 All documentation lives in [docs/](docs/README.md), grouped by section:
 
-- **Product**: [spec](docs/product/spec.md), [interactive mockup](design/mockup/index.html) (open in a browser).
+- **Product**: [spec](docs/product/spec.md), [interactive mockup](docs/design/mockup/index.html) (open in a browser).
 - **Architecture**: [overview and decisions](docs/architecture/README.md),
   [illustrated guide](docs/architecture/guide.html) (how to add a distribution or operating system).
 - **Planning**: [build plan](docs/planning/plan.md), phases and chunks with status.

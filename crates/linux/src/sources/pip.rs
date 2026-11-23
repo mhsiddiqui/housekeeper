@@ -7,9 +7,17 @@ use housekeeper_core::{
     SourceInfo, SourceKind,
 };
 
+use crate::provider::{Context, LinuxSource};
+
 pub const ID: SourceId = SourceId::new("pip");
 
 pub struct PipUserSource;
+
+impl LinuxSource for PipUserSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for PipUserSource {
     fn info(&self) -> SourceInfo {

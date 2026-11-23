@@ -89,7 +89,7 @@ impl Housekeeper {
             .platform
             .sources()
             .iter()
-            .map(Box::as_ref)
+            .map(|source| source.as_ref())
             .filter(|source| selection.includes(&source.info()))
             .collect();
 
@@ -174,6 +174,7 @@ mod tests {
     use crate::model::{PackageKind, Scope, SourceId, SourceKind};
     use crate::source::SourceError;
     use crate::testing::{FakeRunner, Fixture};
+    use std::sync::Arc;
 
     struct Stub {
         info: SourceInfo,
@@ -199,14 +200,14 @@ mod tests {
 
     struct TestPlatform {
         system: SystemInfo,
-        sources: Vec<Box<dyn Source>>,
+        sources: Vec<Arc<dyn Source>>,
     }
 
     impl Platform for TestPlatform {
         fn system(&self) -> &SystemInfo {
             &self.system
         }
-        fn sources(&self) -> &[Box<dyn Source>] {
+        fn sources(&self) -> &[Arc<dyn Source>] {
             &self.sources
         }
     }
@@ -215,8 +216,8 @@ mod tests {
         id: &'static str,
         available: bool,
         behaviour: fn() -> Result<Vec<Package>, SourceError>,
-    ) -> Box<dyn Source> {
-        Box::new(Stub {
+    ) -> Arc<dyn Source> {
+        Arc::new(Stub {
             info: SourceInfo::new(id, id, SourceKind::System),
             behaviour,
             available,
@@ -229,7 +230,7 @@ mod tests {
         package
     }
 
-    fn housekeeper(sources: Vec<Box<dyn Source>>) -> Housekeeper {
+    fn housekeeper(sources: Vec<Arc<dyn Source>>) -> Housekeeper {
         let system = SystemInfo {
             os: "linux".into(),
             name: "Test".into(),

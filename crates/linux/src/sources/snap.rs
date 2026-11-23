@@ -11,12 +11,20 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
+use crate::provider::{Context, LinuxSource};
+
 pub const ID: SourceId = SourceId::new("snap");
 
 const SOCKET: &str = "/run/snapd.socket";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct SnapSource;
+
+impl LinuxSource for SnapSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for SnapSource {
     fn info(&self) -> SourceInfo {

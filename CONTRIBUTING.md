@@ -17,13 +17,16 @@ change can be tracked and reviewed on its own.
    - [CHANGELOG.md](CHANGELOG.md): an entry under **Unreleased** when users would notice.
    - [README.md](README.md): when usage or installation changes.
    - [docs/architecture/README.md](docs/architecture/README.md): when a design decision is made or changed.
-5. Push the branch and open a pull request against `main`. Merging is blocked until the `ci-ok` check is green, which
-   requires every CI job to pass ([repository settings](docs/development/repository-settings.md)).
+5. Push the branch and open a pull request **against `main`**, never against another branch. CI runs only for pull
+   requests into `main` and pushes to `main`; a pull request into another branch is merged untested and does not reach
+   `main`. Merging is blocked until the `ci-ok` check is green, which requires every CI job to pass
+   ([repository settings](docs/development/repository-settings.md)). If your work needs another branch that is not
+   merged yet, wait for it to land in `main` and start from there.
 
 AI coding agents follow the same rules, summarised in [AGENTS.md](AGENTS.md).
 
 ## Checks
-CI runs all of these on every pull request ([ci.yml](.github/workflows/ci.yml)). To run them locally:
+CI runs all of these on every pull request into `main` ([ci.yml](.github/workflows/ci.yml)). To run them locally:
 
 ```sh
 cargo fmt --all --check
@@ -45,8 +48,9 @@ docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" fedora:lat
 ```
 
 ## Code
-- Read [docs/architecture/README.md](docs/architecture/README.md) first. New ways of installing software are new `Source`
-  implementations; nothing else needs to change.
+- Read [docs/architecture/README.md](docs/architecture/README.md) first. A new way of installing software is one new
+  file in `crates/linux/src/sources/` implementing `Source` and `LinuxSource`; it registers itself, nothing else
+  changes ([how](docs/architecture/guide.html#new-provider)).
 - Sources read the machine only through `Host` (logical paths, injected command runner), so every source is tested
   with fixture files and recorded command output.
 - Tests should catch bugs a user would notice: wrong install reason, missed packages, crashes on unusual input.

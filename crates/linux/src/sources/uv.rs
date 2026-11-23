@@ -10,10 +10,17 @@ use housekeeper_core::{
 use serde::Deserialize;
 
 use super::pip::{normalize_name, site_packages, split_dist_info};
+use crate::provider::{Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("uv");
 
 pub struct UvToolSource;
+
+impl LinuxSource for UvToolSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for UvToolSource {
     fn info(&self) -> SourceInfo {

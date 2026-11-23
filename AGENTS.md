@@ -9,7 +9,7 @@ way software gets installed), `crates/cli` (the `housekeeper` command).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D19. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D20. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.
@@ -17,12 +17,12 @@ way software gets installed), `crates/cli` (the `housekeeper` command).
 
 ## Workflow
 1. Branch from an up-to-date `main`: `<type>/<short-description>` (`feat/desktop-entries`, `fix/snap-timeout`,
-   `docs/…`, `ci/…`). If the task depends on an unmerged pull request, branch from that pull request's branch and say so
-   in the change record.
+   `docs/…`, `ci/…`). Do not stack branches: if a task needs unmerged work, wait until that pull request is merged
+   into `main`, then branch from the new `main`.
 2. Commit in small steps with Conventional Commit subjects (`feat(linux): …`, `fix(cli): …`, `docs: …`). Never commit to
    `main` directly, never force-push shared branches.
-3. Push the branch and open a pull request against `main` (or against the branch it is stacked on). GitHub blocks the
-   merge until the `ci-ok` check is green, i.e. every CI job passed
+3. Push the branch and open a pull request **against `main`**, always. CI runs only for pull requests into `main` (and
+   pushes to it), and GitHub blocks the merge until the `ci-ok` check is green, i.e. every CI job passed
    ([repository settings](docs/development/repository-settings.md)). Never ask for the rule to be bypassed.
 
 ## Definition of done
@@ -44,10 +44,11 @@ A branch is ready for review only when all of these hold:
 The full "which document to update" table is in [docs/README.md](docs/README.md#which-document-to-update).
 
 ## Code rules
-- **Composition:** a new way of installing software is a new type implementing `Source` in `crates/linux/src/sources/`;
-  a new distribution family is a `Family` entry plus its native source (see the
-  [guide](docs/architecture/guide.html#new-distro)); a new operating system is a new crate implementing `Platform`.
-  Core never mentions an OS, distribution or package manager.
+- **Composition:** a new way of installing software is **one new file** in `crates/linux/src/sources/` with a type that
+  implements `Source` and `LinuxSource`; `build.rs` registers it, so no list is edited (D20). A new distribution is the
+  same: its native package manager's file declares `LinuxSource::NATIVE` (families and `os-release` IDs) and
+  implements `OwnerLookup` (see the [guide](docs/architecture/guide.html#new-distro)). A new operating system is a new
+  crate implementing `Platform`. Core never mentions an OS, distribution or package manager.
 - **Optional abilities** (owner lookup, removal, install, update) are separate traits returned as
   `Option<&dyn …>` from a source, never methods every source must stub.
 - **All machine access goes through `Host`**: logical absolute paths (`host.read_to_string`, `host.read_dir`, …) and

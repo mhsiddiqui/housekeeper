@@ -8,12 +8,20 @@ use housekeeper_core::{
 };
 use serde_json::Value;
 
+use crate::provider::{Context, LinuxSource};
+
 pub const ID: SourceId = SourceId::new("npm");
 
 /// Shipped with Node itself rather than installed by the user.
 const BUNDLED: [&str; 2] = ["npm", "corepack"];
 
 pub struct NpmSource;
+
+impl LinuxSource for NpmSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for NpmSource {
     fn info(&self) -> SourceInfo {

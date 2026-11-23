@@ -6,8 +6,8 @@ how these documents are kept up to date.
 | Section | Document | What it answers |
 |---|---|---|
 | **Product** | [product/spec.md](product/spec.md) | What Housekeeper does, for whom, and why; supported distributions; how uninstall works |
-| | [Interactive mockup](../design/mockup/index.html) | What the desktop app will look like (open in a browser) |
-| **Architecture** | [architecture/README.md](architecture/README.md) | Crates, traits and every design decision (D1–D19) |
+| | [design/mockup/index.html](design/mockup/index.html) | Interactive mockup of the desktop app (open in a browser; keep `store-snapshot.js` next to it) |
+| **Architecture** | [architecture/README.md](architecture/README.md) | Crates, traits and every design decision (D1–D20) |
 | | [architecture/guide.html](architecture/guide.html) | Illustrated guide: composition, and how to add a distribution or operating system (open in a browser) |
 | **Planning** | [planning/plan.md](planning/plan.md) | Phases and chunks, with status |
 | **Development** | [CONTRIBUTING.md](../CONTRIBUTING.md) | Branch-per-task workflow, checks, testing on real distributions |

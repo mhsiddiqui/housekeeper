@@ -9,6 +9,8 @@ use housekeeper_core::{
     SourceInfo, SourceKind,
 };
 
+use crate::provider::{Context, LinuxSource};
+
 pub const ID: SourceId = SourceId::new("appimage");
 
 /// Directories scanned for AppImages, relative to the home directory. Their files only, not subdirectories.
@@ -27,6 +29,12 @@ const PLATFORM_WORDS: &[&str] = &[
 ];
 
 pub struct AppImageSource;
+
+impl LinuxSource for AppImageSource {
+    fn create(_: &Context<'_>) -> Self {
+        Self
+    }
+}
 
 impl Source for AppImageSource {
     fn info(&self) -> SourceInfo {

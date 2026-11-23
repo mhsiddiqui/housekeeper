@@ -1,9 +1,12 @@
 name: CI
 
+# Only for `main`: pull requests into it and what lands on it. Pull requests into other branches run nothing, so every
+# pull request should target `main` (see CONTRIBUTING.md).
 on:
   push:
     branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

@@ -1,52 +1,20 @@
 //! Which Linux distribution this is, from `os-release`.
+//!
+//! This module only reads what the distribution says about itself. Which package manager serves which distribution is
+//! declared by the native sources ([`crate::provider::Native`]), so supporting a new distribution never touches this
+//! file.
 
 use housekeeper_core::Host;
 use housekeeper_core::text::key_values;
 
-/// Distribution family. Decides the native package manager.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Family {
-    Debian,
-    /// Fedora, RHEL and rebuilds.
-    Fedora,
-    Suse,
-    Arch,
-    Unknown,
-}
-
-impl Family {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Debian => "debian",
-            Self::Fedora => "fedora",
-            Self::Suse => "suse",
-            Self::Arch => "arch",
-            Self::Unknown => "unknown",
-        }
-    }
-
-    fn from_id(id: &str) -> Self {
-        match id {
-            "debian" | "ubuntu" | "linuxmint" | "pop" | "elementary" | "zorin" | "kali" | "raspbian" | "neon"
-            | "devuan" | "mx" | "deepin" | "pureos" => Self::Debian,
-            "fedora" | "rhel" | "centos" | "rocky" | "almalinux" | "ol" | "nobara" | "ultramarine" | "amzn"
-            | "bazzite" => Self::Fedora,
-            "opensuse" | "opensuse-leap" | "opensuse-tumbleweed" | "opensuse-microos" | "sles" | "suse" | "sled" => {
-                Self::Suse
-            }
-            "arch" | "manjaro" | "endeavouros" | "garuda" | "cachyos" | "artix" | "arcolinux" | "steamos" => Self::Arch,
-            _ if id.starts_with("opensuse") => Self::Suse,
-            _ => Self::Unknown,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Distro {
+    /// `ID`, e.g. `ubuntu`.
     pub id: String,
+    /// `ID_LIKE`, closest relative first, e.g. `["ubuntu", "debian"]` for Linux Mint.
+    pub id_like: Vec<String>,
     pub name: String,
     pub version: Option<String>,
-    pub family: Family,
     /// Booted from an OSTree image (Fedora Silverblue, Kinoite, Bazzite…).
     pub image_based: bool,
 }
@@ -75,19 +43,22 @@ impl Distro {
                 _ => {}
             }
         }
-        let id = id.unwrap_or_else(|| "linux".to_string());
-        let family = std::iter::once(id.as_str())
-            .chain(id_like.as_deref().unwrap_or_default().split_whitespace())
-            .map(Family::from_id)
-            .find(|family| *family != Family::Unknown)
-            .unwrap_or(Family::Unknown);
         Self {
+            id: id.unwrap_or_else(|| "linux".to_string()),
+            id_like: id_like
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_string)
+                .collect(),
             name: pretty.or(name).unwrap_or_else(|| "Linux".to_string()),
-            id,
             version,
-            family,
             image_based: false,
         }
+    }
+
+    /// `ID`, then each `ID_LIKE` entry: the order in which a native package manager is looked for.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.id.as_str()).chain(self.id_like.iter().map(String::as_str))
     }
 }
 
@@ -97,21 +68,10 @@ mod tests {
     use housekeeper_core::testing::{FakeRunner, Fixture};
 
     #[test]
-    fn families_from_id_and_id_like() {
-        let cases = [
-            ("ID=ubuntu\nID_LIKE=debian\n", Family::Debian),
-            ("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n", Family::Debian),
-            ("ID=fedora\n", Family::Fedora),
-            ("ID=rocky\nID_LIKE=\"rhel centos fedora\"\n", Family::Fedora),
-            ("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n", Family::Suse),
-            ("ID=endeavouros\nID_LIKE=arch\n", Family::Arch),
-            ("ID=somethingnew\nID_LIKE=arch\n", Family::Arch),
-            ("ID=nixos\n", Family::Unknown),
-            ("", Family::Unknown),
-        ];
-        for (text, family) in cases {
-            assert_eq!(Distro::parse(text).family, family, "{text:?}");
-        }
+    fn ids_in_lookup_order() {
+        let mint = Distro::parse("ID=linuxmint\nID_LIKE=\"ubuntu debian\"\n");
+        assert_eq!(mint.ids().collect::<Vec<_>>(), ["linuxmint", "ubuntu", "debian"]);
+        assert_eq!(Distro::parse("").ids().collect::<Vec<_>>(), ["linux"]);
     }
 
     #[test]
@@ -134,7 +94,7 @@ mod tests {
             )
             .file("/run/ostree-booted", "");
         let distro = Distro::detect(&fixture.host(FakeRunner::new()));
-        assert_eq!(distro.family, Family::Fedora);
+        assert_eq!(distro.id, "fedora");
         assert!(distro.image_based);
         assert_eq!(distro.name, "Fedora Linux 41 (Silverblue)");
     }

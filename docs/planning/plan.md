@@ -13,7 +13,7 @@ updates the docs it affects (this plan, README, CHANGELOG, architecture).
 ## Phase 0: Foundation 🚧
 | Chunk | Delivers |
 |---|---|
-| 0.1 ✅ | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
+| 0.1 ✅ | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup (now under `docs/design/mockup/`) |
 | 0.2 ✅ | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
 | 0.3 ✅ | Full test pipeline: lint, tests, minimum Rust version (1.85), docs, dependency audit (`cargo deny`), packages installed and removed on every supported distribution for x86_64 and aarch64, Silverblue image (29 jobs) |
 | 0.4 🚧 | Releases: publishing a GitHub release builds static `.deb`, `.rpm`, Arch package and tarball for x86_64 and aarch64, tests them, and attaches them with `SHA256SUMS`. Build and tests run on every pull request; the upload step is confirmed by the first release (v0.1.0) |
@@ -33,13 +33,14 @@ source, without root and without changing anything.
 | 1.6 ✅ | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder; native-owned paths left out), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew, Volta, oh-my-zsh) |
 | 1.7 ✅ | CLI: `housekeeper sources`, `housekeeper list` (table/JSON, filters) |
 | 1.8 ✅ | CI smoke test inside Debian, Ubuntu, Fedora, openSUSE Tumbleweed and Arch containers |
+| 1.9 ✅ | Homebrew on Linux (formulae, taps, casks) and one-file providers: every file in `crates/linux/src/sources/` registers itself; native package managers declare their distributions |
 
 ## Phase 2: Identity and ownership ⬜
 | Chunk | Delivers |
 |---|---|
 | 2.1 | Desktop entries: map `.desktop` files to packages; app vs library/runtime/system; display names, icons |
 | 2.2 | Group one app installed from several sources (AppStream ID, desktop ID, name) without merging the installs |
-| 2.3 | `OwnerLookup` capability: `housekeeper who <command or path>` |
+| 2.3 🚧 | Ownership: `OwnerLookup` capability on native sources ✅ (done in 1.9); `housekeeper who <command or path>` ⬜ |
 | 2.4 | `housekeeper show <id>`: details, files, launchers, dependants |
 
 ## Phase 3: Removal planning (no changes made) ⬜
