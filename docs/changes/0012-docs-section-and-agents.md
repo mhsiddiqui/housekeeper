@@ -3,7 +3,7 @@
 - **Date:** 2026-11-23
 - **Branch / PR:** `docs/docs-section` (stacked on #1)
 - **Plan chunks:** none (documentation and workflow)
-- **Commits:** fill in before merging
+- **Commits:** `a79222f`, `99eeca7`, plus the commit that added these hashes
 
 ## What changed
 - All documentation moved under `docs/`, grouped by section, with an index ([docs/README.md](../README.md)):
