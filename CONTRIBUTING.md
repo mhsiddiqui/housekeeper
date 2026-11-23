@@ -25,6 +25,10 @@ change can be tracked and reviewed on its own.
 
 AI coding agents follow the same rules, summarised in [AGENTS.md](AGENTS.md).
 
+## Licence of contributions
+Housekeeper is licensed under [GPL-3.0-or-later](LICENSE). By submitting a contribution you agree that it is
+licensed under the same terms. Do not copy code from projects under licences that are incompatible with the GPL.
+
 ## Checks
 CI runs all of these on every pull request into `main` ([ci.yml](.github/workflows/ci.yml)). To run them locally:
 
