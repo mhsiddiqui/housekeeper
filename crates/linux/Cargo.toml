@@ -12,6 +12,7 @@ authors.workspace = true
 housekeeper-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 housekeeper-core = { workspace = true, features = ["test-support"] }
