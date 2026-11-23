@@ -12,7 +12,7 @@ Status: ✅ done · 🚧 in progress · ⬜ not started. Every chunk is committe
 | 0.1 | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
 | 0.2 | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
 
-## Phase 1: Inventory (read-only) 🚧
+## Phase 1: Inventory (read-only) ✅
 Goal: `housekeeper list` shows every installed app on Ubuntu/Debian, Fedora, openSUSE, Arch and Silverblue, from every
 source, without root and without changing anything.
 
@@ -23,7 +23,7 @@ source, without root and without changing anything.
 | 1.3 ✅ | rpm source (incl. rpm-ostree layered packages), pacman source (local database files) |
 | 1.4 ✅ | Flatpak source (CLI columns), Snap source (snapd REST API over `/run/snapd.socket`) |
 | 1.5 ✅ | npm (all nvm/fnm/system prefixes), pipx (venv metadata), `uv tool`, `pip install --user`, cargo (`.crates2.json`) sources |
-| 1.6 | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew) |
+| 1.6 ✅ | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder; native-owned paths left out), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew, Volta, oh-my-zsh) |
 | 1.7 ✅ | CLI: `housekeeper sources`, `housekeeper list` (table/JSON, filters) |
 | 1.8 ✅ | CI smoke test inside Debian, Ubuntu, Fedora, openSUSE Tumbleweed and Arch containers |
 

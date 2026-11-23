@@ -1,14 +1,17 @@
 //! Linux platform for Housekeeper.
 
 pub mod distro;
+pub mod owner;
 pub mod sources;
 
 use housekeeper_core::{Host, Platform, Source, SystemInfo};
 
 use crate::distro::{Distro, Family};
+use crate::owner::NativeManager;
 use crate::sources::{
-    cargo::CargoSource, dpkg::DpkgSource, flatpak::FlatpakSource, npm::NpmSource, pacman::PacmanSource,
-    pip::PipUserSource, pipx::PipxSource, rpm::RpmSource, snap::SnapSource, uv::UvToolSource,
+    appimage::AppImageSource, cargo::CargoSource, dpkg::DpkgSource, flatpak::FlatpakSource, manual::ManualSource,
+    npm::NpmSource, pacman::PacmanSource, pip::PipUserSource, pipx::PipxSource, rpm::RpmSource, snap::SnapSource,
+    uv::UvToolSource,
 };
 
 /// A Linux system and the sources that apply to it.
@@ -30,18 +33,26 @@ impl LinuxPlatform {
             image_based: distro.image_based,
             arch: std::env::consts::ARCH.into(),
         };
+        let native = native_manager(&distro, host);
         let mut sources: Vec<Box<dyn Source>> = Vec::new();
-        if let Some(native) = native_source(&distro, host) {
-            sources.push(native);
+        if let Some(native) = native {
+            sources.push(match native {
+                NativeManager::Dpkg => Box::new(DpkgSource),
+                NativeManager::Rpm => Box::new(RpmSource::new(distro.image_based)),
+                NativeManager::Pacman => Box::new(PacmanSource),
+            });
         }
         sources.extend([
             Box::new(FlatpakSource) as Box<dyn Source>,
             Box::new(SnapSource),
+            Box::new(AppImageSource),
             Box::new(NpmSource),
             Box::new(PipxSource),
             Box::new(UvToolSource),
             Box::new(PipUserSource),
             Box::new(CargoSource),
+            // Last: it leaves out whatever the native manager owns.
+            Box::new(ManualSource::new(native)),
         ]);
         Self {
             distro,
@@ -67,23 +78,19 @@ impl Platform for LinuxPlatform {
 
 /// Exactly one native package manager (decision D2): the family's own, or the first one found on unknown distros.
 /// A stray `rpm` on Ubuntu therefore never shows up as a second system source.
-fn native_source(distro: &Distro, host: &Host) -> Option<Box<dyn Source>> {
-    let rpm = || Box::new(RpmSource::new(distro.image_based)) as Box<dyn Source>;
+fn native_manager(distro: &Distro, host: &Host) -> Option<NativeManager> {
     match distro.family {
-        Family::Debian => Some(Box::new(DpkgSource)),
-        Family::Fedora | Family::Suse => Some(rpm()),
-        Family::Arch => Some(Box::new(PacmanSource)),
-        Family::Unknown => {
-            if host.has_program("dpkg-query") {
-                Some(Box::new(DpkgSource))
-            } else if host.has_program("rpm") {
-                Some(rpm())
-            } else if host.has_program("pacman") {
-                Some(Box::new(PacmanSource))
-            } else {
-                None
-            }
-        }
+        Family::Debian => Some(NativeManager::Dpkg),
+        Family::Fedora | Family::Suse => Some(NativeManager::Rpm),
+        Family::Arch => Some(NativeManager::Pacman),
+        Family::Unknown => [
+            ("dpkg-query", NativeManager::Dpkg),
+            ("rpm", NativeManager::Rpm),
+            ("pacman", NativeManager::Pacman),
+        ]
+        .into_iter()
+        .find(|(program, _)| host.has_program(program))
+        .map(|(_, manager)| manager),
     }
 }
 

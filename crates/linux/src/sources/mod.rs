@@ -1,8 +1,10 @@
 //! One module per way software gets installed on Linux.
 
+pub mod appimage;
 pub mod cargo;
 pub mod dpkg;
 pub mod flatpak;
+pub mod manual;
 pub mod npm;
 pub mod pacman;
 pub mod pip;
