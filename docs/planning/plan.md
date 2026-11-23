@@ -46,16 +46,16 @@ source, without root and without changing anything.
 ## Phase 3: Removal planning (no changes made) ⬜
 | Chunk | Delivers |
 |---|---|
-| 3.1 | `Remover` capability and removal tiers 1–6 (own uninstaller → package manager → format convention → recipe → tracked manifest → unknown) |
+| 3.1 | Package tools separate from the package databases (apt, dnf, zypper, rpm-ostree, pacman; decision D24); `Remover` capability and removal tiers 1–6 (own uninstaller → package manager → format convention → recipe → tracked manifest → unknown), each plan step marked as run by the user or by the root helper (D25) |
 | 3.2 | Protected packages (dpkg Essential/Priority required, pacman `base`, dnf `protected_packages`) |
 | 3.3 | Simulation through the package manager (`apt-get -s`, `dnf --assumeno`, `pacman -Rp`, `zypper -D`) to list everything that would go |
-| 3.4 | Recipe format (TOML) with an allowlisted action vocabulary; first recipes for common script installers |
+| 3.4 | Recipe format (TOML) with an allowlisted action vocabulary, holding both detection and removal of a script-installed tool (D26); the manual source's installer list moves into the first recipes |
 | 3.5 | Leftover discovery (config, cache, data dirs) and `housekeeper remove --dry-run` |
 
 ## Phase 4: Making changes safely ⬜
 | Chunk | Delivers |
 |---|---|
-| 4.1 | `housekeeper-helper`: privileged binary run through `pkexec`, polkit policy, one typed JSON operation on stdin, argv only, validated input |
+| 4.1 | `housekeeper-helper`: privileged binary run through `pkexec`, polkit policy, one typed JSON operation on stdin, argv only, names checked against the package database (D25) |
 | 4.2 | Operation queue: one change per backend at a time, package-manager lock detection and waiting, cancellation |
 | 4.3 | History log (JSONL under `$XDG_STATE_HOME/housekeeper`) |
 | 4.4 | Leftovers go to the freedesktop Trash, never `rm -rf` |
