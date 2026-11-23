@@ -7,7 +7,8 @@ use housekeeper_core::{Host, Platform, Source, SystemInfo};
 
 use crate::distro::{Distro, Family};
 use crate::sources::{
-    dpkg::DpkgSource, flatpak::FlatpakSource, pacman::PacmanSource, rpm::RpmSource, snap::SnapSource,
+    cargo::CargoSource, dpkg::DpkgSource, flatpak::FlatpakSource, npm::NpmSource, pacman::PacmanSource,
+    pip::PipUserSource, pipx::PipxSource, rpm::RpmSource, snap::SnapSource, uv::UvToolSource,
 };
 
 /// A Linux system and the sources that apply to it.
@@ -33,8 +34,15 @@ impl LinuxPlatform {
         if let Some(native) = native_source(&distro, host) {
             sources.push(native);
         }
-        sources.push(Box::new(FlatpakSource));
-        sources.push(Box::new(SnapSource));
+        sources.extend([
+            Box::new(FlatpakSource) as Box<dyn Source>,
+            Box::new(SnapSource),
+            Box::new(NpmSource),
+            Box::new(PipxSource),
+            Box::new(UvToolSource),
+            Box::new(PipUserSource),
+            Box::new(CargoSource),
+        ]);
         Self {
             distro,
             system,
