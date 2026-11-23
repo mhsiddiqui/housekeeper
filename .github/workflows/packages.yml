@@ -59,7 +59,7 @@ jobs:
           - fedora:latest
           - almalinux:9
           - almalinux:10
-          - opensuse/leap:15.6
+          - opensuse/leap:latest
           - opensuse/tumbleweed:latest
           - archlinux:latest
         exclude:

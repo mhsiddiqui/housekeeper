@@ -23,23 +23,24 @@ if [ -e /run/ostree-booted ]; then
   pkg=$(one "$dist/*.tar.gz")
   tar -xzf "$pkg" -C /tmp
   PATH="$(dirname "$(one "/tmp/housekeeper-*/housekeeper")"):$PATH"
+# The package has no dependencies, so it installs without contacting any repository: no mirror or expired-key
+# problem can break the test.
 elif command -v apt-get >/dev/null; then
   native=dpkg
   pkg=$(one "$dist/*.deb")
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq
   apt-get install -y -qq "$pkg" >/dev/null
   remove() { apt-get remove -y -qq housekeeper >/dev/null; }
 elif command -v zypper >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
-  zypper --non-interactive install --allow-unsigned-rpm "$pkg"
-  remove() { zypper --non-interactive remove housekeeper; }
+  zypper --non-interactive --no-refresh install --allow-unsigned-rpm "$pkg"
+  remove() { zypper --non-interactive --no-refresh remove housekeeper; }
 elif command -v dnf >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
-  dnf install -y "$pkg"
-  remove() { dnf remove -y housekeeper; }
+  dnf install -y --disablerepo='*' "$pkg"
+  remove() { dnf remove -y --disablerepo='*' housekeeper; }
 elif command -v pacman >/dev/null; then
   native=pacman
   pkg=$(one "$dist/*.pkg.tar.zst")

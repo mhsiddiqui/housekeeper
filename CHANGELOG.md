@@ -18,5 +18,5 @@ the project uses [Semantic Versioning](https://semver.org/).
     and well-known script installers (rustup, nvm, pyenv, atuin, bun, deno, SDKMAN, Homebrew, Volta, oh-my-zsh).
 - Packages for every release: `.deb`, `.rpm`, Arch package and tarball for x86_64 and aarch64, statically linked.
 - CI: lint, tests, minimum Rust version, docs, dependency audit, and package install/remove tests on Debian 12 and 13,
-  Ubuntu 22.04, 24.04 and latest, Fedora, AlmaLinux 9 and 10, openSUSE Leap 15.6 and Tumbleweed, Arch Linux, and
+  Ubuntu 22.04, 24.04 and latest, Fedora, AlmaLinux 9 and 10, openSUSE Leap and Tumbleweed, Arch Linux, and
   Fedora Silverblue.
