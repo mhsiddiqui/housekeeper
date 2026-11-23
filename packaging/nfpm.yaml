@@ -11,8 +11,8 @@ priority: optional
 maintainer: Muhammad Hassan Siddiqi <mhassan.eeng@gmail.com>
 description: |-
   Every installed app, however it got here.
-  Lists apps from the distribution's package manager, Flatpak, Snap, AppImage,
-  npm, pipx, uv, pip, cargo and manual installs.
+  Lists apps from the distribution's package manager, Flatpak, Snap, Homebrew,
+  AppImage, npm, pipx, uv, pip, cargo and manual installs.
 vendor: Housekeeper
 homepage: https://github.com/mhsiddiqui/housekeeper
 license: MIT

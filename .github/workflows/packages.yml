@@ -89,3 +89,20 @@ jobs:
       - name: Pretend to be booted from the image
         run: touch /run/ostree-booted
       - run: sh scripts/test-package.sh dist
+
+  # Homebrew on Linux: install a formula with brew in Homebrew's official image, then check what Housekeeper reads.
+  test-homebrew:
+    name: test (homebrew, x86_64)
+    needs: build
+    runs-on: ubuntu-24.04
+    container:
+      image: homebrew/brew:latest
+      # The checkout belongs to the runner's user; the script switches to `linuxbrew` for brew itself.
+      options: --user root
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: packages-x86_64
+          path: dist
+      - run: sh scripts/test-homebrew.sh dist

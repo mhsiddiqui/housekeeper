@@ -33,7 +33,7 @@ impl fmt::Display for SourceId {
 pub enum SourceKind {
     /// The distribution's own package manager (dpkg, rpm, pacman).
     System,
-    /// Cross-distribution app formats with their own store (Flatpak, Snap).
+    /// Cross-distribution package systems with their own repository (Flatpak, Snap, Homebrew).
     Universal,
     /// Programming-language package managers (npm, pipx, cargo).
     Language,

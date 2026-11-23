@@ -33,10 +33,12 @@ Rust has no class inheritance; Housekeeper is assembled from small objects behin
 | Trait | Role | Implemented by |
 |---|---|---|
 | `Platform` | Describes the system and owns the list of sources | `LinuxPlatform` |
-| `Source` | One way software gets installed: dpkg, Flatpak, npm… Reports availability and inventory | `DpkgSource`, `FlatpakSource`, … |
+| `Source` | One way software gets installed: dpkg, Flatpak, Homebrew, npm… Reports availability and inventory | `DpkgSource`, `FlatpakSource`, `HomebrewSource`, … |
+| `LinuxSource` | How a Linux source is created, and whether it is a distribution's native package manager | every Linux source |
+| `OwnerLookup` | Optional ability: which paths belong to an installed package | `DpkgSource`, `RpmSource`, `PacmanSource` |
 | `CommandRunner` | Runs a program (argv only, never a shell) with a timeout | `SystemRunner`, `FakeRunner` (tests) |
 
-Capabilities that only some sources have are separate traits, exposed by a source as optional components rather than
+Abilities that only some sources have are separate traits, exposed by a source as optional components rather than
 as methods every source must stub out:
 
 ```rust
@@ -44,8 +46,8 @@ trait Source {
     fn info(&self) -> SourceInfo;
     fn probe(&self, host: &Host) -> Availability;
     fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError>;
+    fn owner_lookup(&self) -> Option<&dyn OwnerLookup> { None }      // native package managers
     // Added in later phases, each defaulting to None:
-    // fn owner_lookup(&self) -> Option<&dyn OwnerLookup> { None }   // Phase 2
     // fn remover(&self) -> Option<&dyn Remover> { None }             // Phase 3
     // fn file_installer(&self) -> Option<&dyn FileInstaller> { None } // Phase 5
     // fn updater(&self) -> Option<&dyn Updater> { None }             // Phase 7
@@ -54,6 +56,38 @@ trait Source {
 
 A front end asks "can this source remove things?" by checking for the component, so a new capability never forces
 changes on sources that don't support it.
+
+### Adding a provider is one file
+
+Every file in `crates/linux/src/sources/` is a source and registers itself: `crates/linux/build.rs` finds the file's
+`impl LinuxSource for <Type>` and adds it to the generated provider list. Nothing else is edited.
+
+```rust
+// crates/linux/src/sources/homebrew.rs (the whole registration)
+pub struct HomebrewSource;
+
+impl LinuxSource for HomebrewSource {
+    fn create(_: &Context<'_>) -> Self { Self }
+}
+impl Source for HomebrewSource { /* info, probe, inventory */ }
+```
+
+A distribution's own package manager also declares which distributions it serves, so supporting a new distribution
+is the same single file:
+
+```rust
+impl LinuxSource for DpkgSource {
+    const NATIVE: Option<Native> = Some(Native {
+        families: &[Family { name: "debian", distro_ids: &["debian", "ubuntu", "linuxmint", /* … */] }],
+        program: "dpkg-query",
+    });
+    fn create(_: &Context<'_>) -> Self { Self }
+}
+```
+
+`LinuxPlatform` matches the distribution's `ID`, then each `ID_LIKE` entry, against every native source's families,
+creates that one native source first, and passes it to the others through `Context` (the manual source asks its
+`owner_lookup()` which files a package owns). It never names a source.
 
 ### The Host
 
@@ -74,7 +108,7 @@ Each challenge raised during design review, and the decision taken.
 | # | Challenge | Decision |
 |---|---|---|
 | D1 | Package-manager output changes between versions (apt 3, dnf5) | Use stable machine interfaces only: `dpkg-query --showformat`, `rpm --queryformat`, pacman's local database files, the snapd REST API, metadata files for pipx, cargo and npm. Force `LC_ALL=C`. Keep fixtures per distro; smoke-test inside real distro containers in CI. |
-| D2 | Several package managers can be present (rpm on Ubuntu) | Exactly one native backend, chosen from `os-release` (`ID`, then `ID_LIKE`); unknown distros fall back to probing dpkg → rpm → pacman. |
+| D2 | Several package managers can be present (rpm on Ubuntu) | Exactly one native source, chosen from `os-release` (`ID`, then each `ID_LIKE` entry) against the families each native source declares; on a distribution no family claims, the first native source (in file-name order) whose program is installed. |
 | D3 | Image-based distros (Silverblue, Kinoite) | Detect `/run/ostree-booted`. rpm lists the image; packages the user layered (`rpm-ostree status --json`) are the user's apps. Removal goes through `rpm-ostree` and needs a reboot, and the plan says so. |
 | D4 | Running as root is dangerous | The app and CLI never run as root. Changes that need root go to a separate `housekeeper-helper` started with `pkexec`, which accepts one typed operation (JSON on stdin), validates names against the inventory and runs argv vectors, never shell strings. |
 | D5 | Removing a package can drag system packages with it | Always simulate first through the package manager and show everything that would go. Protected packages (dpkg Essential / Priority required, pacman `base`, dnf `protected_packages`) block the plan. |
@@ -92,3 +126,4 @@ Each challenge raised during design review, and the decision taken.
 | D17 | Name | "Housekeeper". "Linux" in a product name needs a Linux Foundation sublicence. |
 | D18 | One binary for every distribution | The CLI is linked statically against musl, so the same file runs on old and new distributions regardless of their glibc. All dependencies are pure Rust, so this costs nothing. |
 | D19 | Proving it works on each distribution | CI installs every package with the native package manager in containers of each supported release (Debian, Ubuntu, Fedora, AlmaLinux, openSUSE, Arch; x86_64 and aarch64), runs it against the real package database, checks it lists its own package, and removes it. Silverblue is checked from its official image using the tarball. |
+| D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and is registered by `build.rs`, which finds its `impl LinuxSource for <Type>`; a file without exactly one such impl fails the build with a clear message. Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. |

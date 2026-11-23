@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use housekeeper_core::{
     Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, Source, SourceError, SourceId,
@@ -11,7 +12,7 @@ use housekeeper_core::{
 };
 
 use super::appimage::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::owner::NativeManager;
+use crate::provider::{Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -135,13 +136,20 @@ const INSTALLERS: &[Installer] = &[
 ];
 
 pub struct ManualSource {
-    native: Option<NativeManager>,
+    native: Option<Arc<dyn Source>>,
 }
 
 impl ManualSource {
-    /// `native` decides which package manager is asked about `/opt` and `/usr/local/bin`; `None` asks nobody.
-    pub fn new(native: Option<NativeManager>) -> Self {
+    /// `native`'s owner lookup decides which `/opt` and `/usr/local/bin` entries belong to packages; `None` asks
+    /// nobody.
+    pub fn new(native: Option<Arc<dyn Source>>) -> Self {
         Self { native }
+    }
+}
+
+impl LinuxSource for ManualSource {
+    fn create(context: &Context<'_>) -> Self {
+        Self::new(context.native.clone())
     }
 }
 
@@ -179,8 +187,8 @@ impl Source for ManualSource {
                     .map(|entry| entry.path.clone()),
             )
             .collect();
-        let owned = match self.native {
-            Some(native) => native.owned_paths(host, &asked)?,
+        let owned = match self.native.as_ref().and_then(|native| native.owner_lookup()) {
+            Some(lookup) => lookup.owned_paths(host, &asked)?,
             None => HashSet::new(),
         };
 
@@ -418,6 +426,7 @@ mod tests {
     use super::*;
     use housekeeper_core::Scope;
     use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
+    use crate::sources::dpkg::DpkgSource;
 
     const ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";
     const APPIMAGE: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00\x00\x00\x00";
@@ -454,7 +463,7 @@ if __name__ == \"__main__\":
         format!("{HOME}/{path}")
     }
 
-    fn scan(fixture: &Fixture, runner: FakeRunner, native: Option<NativeManager>) -> Vec<Package> {
+    fn scan(fixture: &Fixture, runner: FakeRunner, native: Option<Arc<dyn Source>>) -> Vec<Package> {
         ManualSource::new(native).inventory(&fixture.host(runner)).unwrap()
     }
 
@@ -491,7 +500,7 @@ if __name__ == \"__main__\":
                 stderr: "dpkg-query: no path found matching pattern /opt/sdk\n".into(),
             },
         );
-        let packages = scan(&fixture, runner, Some(NativeManager::Dpkg));
+        let packages = scan(&fixture, runner, Some(Arc::new(DpkgSource)));
         assert_eq!(
             ids(&packages),
             [

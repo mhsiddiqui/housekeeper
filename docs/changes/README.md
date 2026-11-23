@@ -28,3 +28,4 @@ links back.
 | [0012](0012-docs-section-and-agents.md) | Documentation section, change records and AGENTS.md | none | #2 |
 | [0013](0013-merge-gate.md) | Block merging until every CI job is green | 0.5 | `ci/required-checks` |
 | [0014](0014-move-design-into-docs.md) | Move the design mockup into the docs section | none | `docs/move-design` |
+| [0015](0015-homebrew-and-one-file-providers.md) | Homebrew on Linux, and providers that are one file | 1.9, 2.3 (part) | `feat/homebrew-source` |

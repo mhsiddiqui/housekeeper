@@ -10,7 +10,8 @@ the project uses [Semantic Versioning](https://semver.org/).
 - Read-only inventory from every source, scanned in parallel; a failing source is reported without hiding the rest:
   - native packages: dpkg (with apt's auto-installed marks), rpm (zypp auto-installed marks, rpm-ostree layered
     packages, dnf protected packages), pacman (local database, AUR/foreign packages);
-  - Flatpak (system, user and custom installations) and Snap (snapd API);
+  - Flatpak (system, user and custom installations), Snap (snapd API) and Homebrew on Linux (formulae with
+    explicit/dependency reasons and taps, casks);
   - AppImage files in the usual folders;
   - npm globals for system Node, npm prefixes, every nvm and fnm version; pipx; `uv tool`; `pip install --user`;
     `cargo install`;

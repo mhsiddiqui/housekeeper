@@ -1,5 +1,6 @@
 //! The extension point for every way software gets installed.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::command::RunError;
@@ -8,8 +9,9 @@ use crate::model::{Availability, Package, SourceInfo};
 
 /// One way software gets installed: a package manager, an app format, a language tool, or manual installs.
 ///
-/// Sources only read. Capabilities that change the system (removing, installing, updating) are separate traits a
-/// source exposes as optional components, added in later phases.
+/// Sources only read. Abilities only some sources have are separate traits a source offers as optional components
+/// (`owner_lookup` today; removing, installing and updating in later phases), so a new ability never forces every
+/// source to implement or stub it.
 pub trait Source: Send + Sync {
     fn info(&self) -> SourceInfo;
 
@@ -18,6 +20,18 @@ pub trait Source: Send + Sync {
 
     /// Everything this source has installed. Only called when `probe` reported the source available.
     fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError>;
+
+    /// "Which of these files did you install?", for sources that track individual files (package managers).
+    fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
+        None
+    }
+}
+
+/// Ability: tell which paths belong to an installed package.
+pub trait OwnerLookup: Send + Sync {
+    /// The subset of `paths` (logical, absolute) that an installed package owns. Exact matches only. Implementations
+    /// ask about all paths in one call.
+    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError>;
 }
 
 #[derive(Debug, thiserror::Error)]
