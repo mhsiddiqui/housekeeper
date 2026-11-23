@@ -309,7 +309,9 @@ the file, so a forgotten registration cannot slip through (decision D20).</p>
   <path class="arrow" d="M553 225 H317"/><text class="label" x="335" y="218">packages, or an error, or a panic</text>
   <path class="arrow" d="M313 260 H97"/><text class="label" x="110" y="253">Scan: system, per-source status, sorted packages</text>
 </svg>
-<figcaption>A source that fails or even panics is reported as "failed" with a reason; the others still appear (decision D14).</figcaption>
+<figcaption>A source that fails or even panics is reported as "failed" with a reason; the others still appear (decision D14).
+<code>scan_with</code> does the same scan but also hands each source's result to a callback as soon as that source
+finishes, so the desktop app can show progress per source.</figcaption>
 </figure>
 
 <!-- ======================================================================= -->
