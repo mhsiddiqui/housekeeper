@@ -98,8 +98,8 @@ Sources never touch `std::fs` paths or `std::process` directly. They go through 
 - `host.home()` and `host.var("CARGO_HOME")` give the user's home and environment.
 - `host.run(&cmd)` executes through the injected `CommandRunner`.
 
-This is what makes every source testable with recorded output and fixture files, and what will let the same sources
-inspect another machine over SSH later (Phase 12) by swapping the runner.
+This is what makes every source testable with recorded output and fixture files. The runner is swapped only for tests:
+Housekeeper inspects the machine it runs on and no other (D22).
 
 ## Decisions
 
@@ -128,3 +128,4 @@ Each challenge raised during design review, and the decision taken.
 | D19 | Proving it works on each distribution | CI installs every package with the native package manager in containers of each supported release (Debian, Ubuntu, Fedora, AlmaLinux, openSUSE, Arch; x86_64 and aarch64), runs it against the real package database, checks it lists its own package, and removes it. Silverblue is checked from its official image using the tarball. |
 | D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and is registered by `build.rs`, which finds its `impl LinuxSource for <Type>`; a file without exactly one such impl fails the build with a clear message. Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. |
 | D21 | Licence: nobody may turn Housekeeper into closed software | GNU GPL v3.0 or later. Anyone distributing it, modified or not, must provide the source under the same licence. "Or later" (the FSF's recommendation) lets the project move to a future GPL version without asking every contributor. MIT and Apache-2.0 were rejected because they allow closed forks; AGPL was not needed because Housekeeper is not a network service. Dependencies stay permissive (MIT, Apache-2.0, Unicode-3.0), all GPL-compatible; `cargo deny` enforces it. |
+| D22 | Managing other computers (over SSH) | Not planned. Housekeeper manages only the machine it runs on; `Host` and `CommandRunner` stay local, and the runner is swapped only for tests. Earlier documents disagreed on how it would work (swap the runner, run `housekeeper --json` on the other machine, install nothing there), and swapping the runner alone could not work because `Host` reads files locally. Bringing it back needs a new decision that picks one design. |
