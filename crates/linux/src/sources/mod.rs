@@ -2,6 +2,8 @@
 
 pub mod dpkg;
 pub mod flatpak;
+pub mod pacman;
+pub mod rpm;
 pub mod snap;
 
 /// First non-empty line of a program's output.

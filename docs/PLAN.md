@@ -20,7 +20,7 @@ source, without root and without changing anything.
 |---|---|
 | 1.1 ✅ | Core model (`Package`, `SourceInfo`), `Source` and `Platform` traits, `Host` (root prefix, home, env), `CommandRunner` with timeouts, parallel `Inventory` scan |
 | 1.2 ✅ | Linux platform: `/etc/os-release` parsing, distro family, image-based detection, native backend selection; dpkg source |
-| 1.3 | rpm source (incl. rpm-ostree layered packages), pacman source (local database files) |
+| 1.3 ✅ | rpm source (incl. rpm-ostree layered packages), pacman source (local database files) |
 | 1.4 ✅ | Flatpak source (CLI columns), Snap source (snapd REST API over `/run/snapd.socket`) |
 | 1.5 | npm (all nvm/fnm/system prefixes), pipx (venv metadata), `uv tool`, `pip install --user`, cargo (`.crates2.json`) sources |
 | 1.6 | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew) |
