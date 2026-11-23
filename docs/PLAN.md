@@ -4,13 +4,18 @@ Housekeeper is built in small chunks. Each chunk is one reviewable change that c
 tool usable. Later phases only add capabilities; they never require rewriting earlier ones (see
 [ARCHITECTURE.md](ARCHITECTURE.md)).
 
-Status: ✅ done · 🚧 in progress · ⬜ not started. Every chunk is committed and pushed as soon as it is done.
+Status: ✅ done · 🚧 in progress · ⬜ not started.
 
-## Phase 0: Foundation ✅
+How work is done (see [CONTRIBUTING.md](../CONTRIBUTING.md)): every chunk gets its own branch and pull request; CI must
+pass before merging; each chunk updates the docs it affects (this plan, README, CHANGELOG, architecture).
+
+## Phase 0: Foundation 🚧
 | Chunk | Delivers |
 |---|---|
-| 0.1 | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
-| 0.2 | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
+| 0.1 ✅ | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
+| 0.2 ✅ | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
+| 0.3 🚧 | Full test pipeline: lint, tests, minimum Rust version (1.85), docs, dependency audit (`cargo deny`), packages installed and removed on every supported distribution for x86_64 and aarch64, Silverblue image |
+| 0.4 🚧 | Releases: publishing a GitHub release builds static `.deb`, `.rpm`, Arch package and tarball for x86_64 and aarch64, tests them, and attaches them with `SHA256SUMS` |
 
 ## Phase 1: Inventory (read-only) ✅
 Goal: `housekeeper list` shows every installed app on Ubuntu/Debian, Fedora, openSUSE, Arch and Silverblue, from every
@@ -67,7 +72,7 @@ source, without root and without changing anything.
 | 6.1 | Tauri 2 shell, strict CSP, no remote scripts, minimal capabilities; port the mockup's Library view |
 | 6.2 | Install from file (drag and drop), Activity, History views |
 | 6.3 | First-run setup, settings, accessibility, light/dark themes |
-| 6.4 | Packaging: `.deb`, `.rpm`, AUR `PKGBUILD`, AppImage (portable mode) |
+| 6.4 | Desktop app packaging (the CLI is already packaged since 0.4): polkit policy and helper in `.deb`/`.rpm`/Arch, AUR `PKGBUILD`, AppImage (portable mode) |
 
 **v1 = Phases 1–6**: see every app, remove it the right way, install downloaded files.
 
@@ -92,3 +97,7 @@ install can be removed later (removal tier 5).
 ## Phase 12: Beyond one Linux machine ⬜
 Other computers over SSH (runs `housekeeper --json` remotely), optional "Back up my apps" to a secret GitHub Gist,
 further platforms (macOS: Homebrew and `.app`; Windows: winget) as new platform crates.
+
+## Later: Website ⬜
+A project website (what it does, install instructions, downloads from GitHub releases). Not started; planned once the
+desktop app exists.
