@@ -11,7 +11,7 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("snap");
 
@@ -25,6 +25,7 @@ impl LinuxSource for SnapSource {
         Self
     }
 }
+register!(SnapSource);
 
 impl Source for SnapSource {
     fn info(&self) -> SourceInfo {

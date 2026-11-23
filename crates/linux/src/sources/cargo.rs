@@ -9,7 +9,7 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("cargo");
 
@@ -25,6 +25,7 @@ impl LinuxSource for CargoSource {
         Self
     }
 }
+register!(CargoSource);
 
 impl Source for CargoSource {
     fn info(&self) -> SourceInfo {

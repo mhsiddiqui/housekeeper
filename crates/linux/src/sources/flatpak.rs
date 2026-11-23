@@ -9,7 +9,7 @@ use housekeeper_core::{
 };
 
 use super::version_line;
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("flatpak");
 
@@ -26,6 +26,7 @@ impl LinuxSource for FlatpakSource {
         Self
     }
 }
+register!(FlatpakSource);
 
 impl Source for FlatpakSource {
     fn info(&self) -> SourceInfo {

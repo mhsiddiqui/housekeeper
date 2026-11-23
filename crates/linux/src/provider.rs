@@ -1,9 +1,12 @@
 //! How Linux sources are discovered and assembled.
 //!
 //! **To add a provider, create one file in `src/sources/` with a type that implements [`Source`] and
-//! [`LinuxSource`].** The build script finds every `impl LinuxSource for <Type>` in that folder and registers it; no
-//! other file changes. A distribution's own package manager additionally declares [`LinuxSource::NATIVE`], which is
-//! how a new distribution gets supported.
+//! [`LinuxSource`], and call `register!(<Type>);` next to the `impl LinuxSource`.** The build script declares every
+//! file in that folder as a module and lists its `PROVIDER` constant, which `register!` defines; no other file
+//! changes. A file without `register!` fails to compile. A distribution's own package manager additionally declares
+//! [`LinuxSource::NATIVE`], which is how a new distribution gets supported.
+//!
+//! Sources never import from each other; code two sources share lives in a module outside `src/sources/`.
 
 use std::sync::Arc;
 
@@ -42,11 +45,19 @@ pub trait LinuxSource: Source + Sized + 'static {
     fn create(context: &Context<'_>) -> Self;
 }
 
-/// One registered source type. The build script lists one per `LinuxSource` implementation.
+/// One registered source type. Each file in `src/sources/` defines one with `register!`.
 pub struct Provider {
     pub native: Option<Native>,
     create: fn(&Context<'_>) -> Arc<dyn Source>,
 }
+
+/// Registers a source type: `register!(MySource);` defines the file's `PROVIDER`, which the build script lists.
+macro_rules! register {
+    ($ty:ty) => {
+        pub(crate) const PROVIDER: crate::provider::Provider = crate::provider::Provider::of::<$ty>();
+    };
+}
+pub(crate) use register;
 
 impl Provider {
     pub const fn of<T: LinuxSource>() -> Self {

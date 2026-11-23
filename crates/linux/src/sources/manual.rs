@@ -11,8 +11,8 @@ use housekeeper_core::{
     SourceInfo, SourceKind,
 };
 
-use super::appimage::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{Context, LinuxSource};
+use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -152,6 +152,7 @@ impl LinuxSource for ManualSource {
         Self::new(context.native.clone())
     }
 }
+register!(ManualSource);
 
 impl Source for ManualSource {
     fn info(&self) -> SourceInfo {
