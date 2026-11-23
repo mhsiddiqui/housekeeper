@@ -22,7 +22,7 @@ jobs:
           - { arch: x86_64, runner: ubuntu-24.04, nfpm: x86_64 }
           - { arch: aarch64, runner: ubuntu-24.04-arm, nfpm: arm64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.arch }}-unknown-linux-musl
@@ -34,7 +34,7 @@ jobs:
           curl -sSfL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${{ matrix.nfpm }}.tar.gz" \
             | sudo tar -xz -C /usr/local/bin nfpm
       - run: scripts/package.sh ${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.arch }}
           path: dist/
@@ -66,8 +66,8 @@ jobs:
           # Arch Linux publishes x86_64 only; Arch Linux ARM is a separate project.
           - { arch: aarch64, image: "archlinux:latest" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: packages-${{ matrix.arch }}
           path: dist
@@ -78,10 +78,11 @@ jobs:
     name: test (silverblue, x86_64)
     needs: build
     runs-on: ubuntu-24.04
-    container: quay.io/fedora-ostree-desktops/silverblue:45
+    # Fedora's official image; fedora-ostree-desktops/silverblue has more layers than Docker can stack.
+    container: quay.io/fedora/fedora-silverblue:45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: packages-x86_64
           path: dist

@@ -8,7 +8,8 @@
 # release tarball is checked instead.
 set -eu
 
-dist=${1:?usage: test-package.sh <dist-dir>}
+# Absolute path: apt-get treats `dist/x.deb` (no leading ./ or /) as a package name, not a file.
+dist=$(cd "${1:?usage: test-package.sh <dist-dir>}" && pwd)
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 one() { set -- $1; [ -e "$1" ] || fail "no file matching $1"; echo "$1"; }
