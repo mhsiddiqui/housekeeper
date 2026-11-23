@@ -15,7 +15,7 @@ description: |-
   AppImage, npm, pipx, uv, pip, cargo and manual installs.
 vendor: Housekeeper
 homepage: https://github.com/mhsiddiqui/housekeeper
-license: MIT
+license: GPL-3.0-or-later
 
 contents:
   - src: ./target/package/housekeeper

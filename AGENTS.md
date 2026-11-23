@@ -9,7 +9,7 @@ way software gets installed), `crates/cli` (the `housekeeper` command).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D20. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D21. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.
@@ -59,7 +59,8 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
   instead of failing the scan (D14).
 - Rust 1.85 is the minimum (`rust-version`): no features newer than that (for example no let-chains).
 - `clippy -D warnings` clean, `rustfmt` (max width 120), no `unwrap`/`expect` outside tests, no dead code, no TODOs.
-- New dependencies need a reason in the change record and must pass `cargo deny` (permissive licences only).
+- New dependencies need a reason in the change record and must pass `cargo deny` (permissive, GPL-compatible
+  licences only). Housekeeper itself is GPL-3.0-or-later (D21); never copy code from GPL-incompatible projects.
 - No sign-in or telemetry (D15).
 - Tests use `housekeeper_core::testing::{Fixture, FakeRunner}`; follow `crates/linux/src/sources/dpkg.rs`.
 

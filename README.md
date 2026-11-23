@@ -48,4 +48,9 @@ All documentation lives in [docs/](docs/README.md), grouped by section:
 Working on the code with an AI agent? It follows [AGENTS.md](AGENTS.md).
 
 ## Licence
-MIT
+Copyright (C) 2026 Muhammad Hassan Siddiqi.
+
+Housekeeper is free software: you can redistribute it and/or modify it under the terms of the
+[GNU General Public License](LICENSE) as published by the Free Software Foundation, either version 3 of the License,
+or (at your option) any later version (`GPL-3.0-or-later`). Anyone who distributes Housekeeper, modified or not, must
+make the source available under the same licence.

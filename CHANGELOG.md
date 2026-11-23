@@ -5,6 +5,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Changed
+- Licence: Housekeeper is now under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`) instead of MIT,
+  so every distributed version, modified or not, must stay open source.
+
 ### Added
 - `housekeeper sources` and `housekeeper list` (`--all`, `--source`, `--search`, `--json` with schema version 1).
 - Read-only inventory from every source, scanned in parallel; a failing source is reported without hiding the rest:
