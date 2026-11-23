@@ -1,0 +1,20 @@
+[package]
+name = "housekeeper-platform"
+description = "Picks the Housekeeper platform for the operating system it is built for"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+housekeeper-core.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+housekeeper-linux.workspace = true
+
+[lints]
+workspace = true

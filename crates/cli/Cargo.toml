@@ -17,11 +17,9 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 housekeeper-core.workspace = true
+housekeeper-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-housekeeper-linux.workspace = true
 
 [lints]
 workspace = true

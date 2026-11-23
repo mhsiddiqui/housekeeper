@@ -7,7 +7,7 @@ use std::io::{self, Write};
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use housekeeper_core::{Availability, Host, Housekeeper, Platform, Selection, SourceStatus};
+use housekeeper_core::{Availability, Host, Housekeeper, Selection, SourceStatus};
 use serde::Serialize;
 
 use crate::filter::Filter;
@@ -48,7 +48,7 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let host = Host::local();
-    let housekeeper = Housekeeper::new(platform(&host)?, host);
+    let housekeeper = Housekeeper::new(housekeeper_platform::detect(&host)?, host);
     let mut out = io::stdout().lock();
     let result = match cli.command {
         Command::Sources { json } => sources(&housekeeper, json, &mut out),
@@ -77,16 +77,6 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
                 .and_then(|e| e.io_error_kind())
         }) == Some(io::ErrorKind::BrokenPipe)
     })
-}
-
-#[cfg(target_os = "linux")]
-fn platform(host: &Host) -> Result<Box<dyn Platform>> {
-    Ok(Box::new(housekeeper_linux::LinuxPlatform::detect(host)))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn platform(_host: &Host) -> Result<Box<dyn Platform>> {
-    bail!("Housekeeper supports Linux only for now")
 }
 
 fn sources(housekeeper: &Housekeeper, json: bool, out: &mut impl Write) -> Result<()> {
