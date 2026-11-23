@@ -49,49 +49,9 @@ fn main() {
     fs::write(&out, generated).unwrap_or_else(|e| panic!("cannot write {}: {e}", out.display()));
 }
 
-/// A lowercase Rust identifier that is not a keyword, so it can name a module.
+/// A lowercase Rust identifier, so it can name a module. (A keyword such as `type` is rejected by the compiler.)
 fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars.next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        && !matches!(
-            name,
-            "_" | "as"
-                | "crate"
-                | "fn"
-                | "impl"
-                | "in"
-                | "let"
-                | "match"
-                | "mod"
-                | "move"
-                | "ref"
-                | "self"
-                | "super"
-                | "type"
-                | "use"
-                | "where"
-                | "async"
-                | "await"
-                | "dyn"
-                | "loop"
-                | "static"
-                | "struct"
-                | "trait"
-                | "true"
-                | "false"
-                | "enum"
-                | "else"
-                | "if"
-                | "for"
-                | "while"
-                | "return"
-                | "pub"
-                | "const"
-                | "extern"
-                | "break"
-                | "continue"
-                | "mut"
-                | "unsafe"
-        )
 }
