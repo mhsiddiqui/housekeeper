@@ -3,7 +3,7 @@
 - **Date:** 2026-11-23
 - **Branch / PR:** `ci/required-checks`
 - **Plan chunks:** 0.5
-- **Commits:** fill in before merging
+- **Commits:** `b0aaabf`, `bf01f72`, plus the commit that added these hashes
 
 ## What changed
 - New final CI job `ci-ok` in [ci.yml](../../.github/workflows/ci.yml): runs even when earlier jobs fail
