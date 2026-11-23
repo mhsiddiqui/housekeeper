@@ -1,0 +1,23 @@
+# Dependency policy, checked in CI with `cargo deny check`.
+
+[graph]
+all-features = true
+
+[advisories]
+# Fail on any RustSec advisory: vulnerable, unmaintained or yanked crates.
+yanked = "deny"
+
+[licenses]
+# Permissive licences compatible with shipping Housekeeper under MIT.
+allow = ["MIT", "Apache-2.0", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace crates depend on each other by path; they are never published to crates.io.
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

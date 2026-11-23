@@ -1,0 +1,90 @@
+# Builds the release packages and tests them on every supported distribution.
+# Called by ci.yml (every push and pull request) and release.yml (attaches the packages to a release).
+name: Packages
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NFPM_VERSION: 2.49.0
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04, nfpm: x86_64 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm, nfpm: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.arch }}-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-${{ matrix.arch }}
+      - name: Install nfpm
+        run: |
+          curl -sSfL "https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VERSION}/nfpm_${NFPM_VERSION}_Linux_${{ matrix.nfpm }}.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin nfpm
+      - run: scripts/package.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}
+          path: dist/
+          if-no-files-found: error
+
+  # Install, use and remove the package with the distribution's own package manager (decision D1).
+  test:
+    name: test (${{ matrix.image }}, ${{ matrix.arch }})
+    needs: build
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+        image:
+          - debian:oldstable
+          - debian:stable
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - ubuntu:latest
+          - fedora:latest
+          - almalinux:9
+          - almalinux:10
+          - opensuse/leap:15.6
+          - opensuse/tumbleweed:latest
+          - archlinux:latest
+        exclude:
+          # Arch Linux publishes x86_64 only; Arch Linux ARM is a separate project.
+          - { arch: aarch64, image: "archlinux:latest" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ matrix.arch }}
+          path: dist
+      - run: sh scripts/test-package.sh dist
+
+  # Image-based Fedora (Silverblue): layering needs a reboot, so the release tarball is checked in the image.
+  test-image-based:
+    name: test (silverblue, x86_64)
+    needs: build
+    runs-on: ubuntu-24.04
+    container: quay.io/fedora-ostree-desktops/silverblue:45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages-x86_64
+          path: dist
+      - name: Pretend to be booted from the image
+        run: touch /run/ostree-booted
+      - run: sh scripts/test-package.sh dist
