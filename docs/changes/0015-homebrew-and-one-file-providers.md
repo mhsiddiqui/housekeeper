@@ -41,6 +41,10 @@ else. Before this change a provider needed edits in `sources/mod.rs` and `lib.rs
 - Homebrew unit tests: receipts in Homebrew 4 format, linked vs highest version, taps, casks, two prefixes with
   `HOMEBREW_PREFIX`, probe, broken receipt.
 - On this machine (no Homebrew): `homebrew` reports "not available: Homebrew is not installed".
+- Real Homebrew, locally in `homebrew/brew:latest` (Ubuntu 22.04): `brew install jq` installed jq 1.8.2 and its
+  dependency oniguruma 6.9.10; Housekeeper listed jq as `explicit` / `app` and oniguruma as `dependency`
+  (`scripts/test-homebrew.sh`). The first version of the script checked the JSON with the jq brew had just
+  installed, which could not run on the image's older glibc; it now uses `grep`.
 
 ## Known limits and follow-ups
 - Formula descriptions and sizes are not read (not in the receipt; a directory walk would be slow).

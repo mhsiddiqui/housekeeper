@@ -25,11 +25,11 @@ su linuxbrew -c "HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 $prefix
 "$hk" list --all --source homebrew --json > /tmp/brew.json
 grep -q '"state": "ok"' /tmp/brew.json || fail "the homebrew source did not read the installation"
 
-# jq itself (installed just now by brew) reads the scan.
-jq="$prefix/bin/jq"
-"$jq" -e '.packages[] | select(.id == "formula/jq") | .reason == "explicit" and .kind == "app"' /tmp/brew.json \
-  >/dev/null || fail "jq is not listed as an app installed on purpose"
-"$jq" -e '.packages[] | select(.id == "formula/oniguruma") | .reason == "dependency"' /tmp/brew.json \
-  >/dev/null || fail "oniguruma is not listed as a dependency"
+# A package's fields in the pretty-printed scan, from its id to its install reason. Not brew's own jq: Homebrew's
+# bottles may need a newer glibc than the image has.
+fields() { grep -A 8 "\"id\": \"$1\"" /tmp/brew.json; }
+fields formula/jq | grep -q '"reason": "explicit"' || fail "jq is not listed as installed on purpose"
+fields formula/jq | grep -q '"kind": "app"' || fail "jq is not listed as an app"
+fields formula/oniguruma | grep -q '"reason": "dependency"' || fail "oniguruma is not listed as a dependency"
 "$hk" list --source homebrew | grep -q '^jq ' || fail "jq is missing from the default list"
 echo "OK: Homebrew formulae and their install reasons are read correctly"
