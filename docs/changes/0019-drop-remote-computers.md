@@ -1,7 +1,7 @@
 # 0019: Drop managing other computers over SSH
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `docs/drop-remote-computers`
+- **Branch / PR:** `docs/drop-remote-computers`, #9
 - **Plan chunks:** Phase 12 (scope)
 - **Commits:** 0cd4e18
 
