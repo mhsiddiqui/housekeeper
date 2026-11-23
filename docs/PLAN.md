@@ -25,7 +25,7 @@ source, without root and without changing anything.
 | 1.5 | npm (all nvm/fnm/system prefixes), pipx (venv metadata), `uv tool`, `pip install --user`, cargo (`.crates2.json`) sources |
 | 1.6 | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew) |
 | 1.7 ✅ | CLI: `housekeeper sources`, `housekeeper list` (table/JSON, filters) |
-| 1.8 | CI smoke test inside Debian, Fedora, openSUSE Tumbleweed and Arch containers |
+| 1.8 ✅ | CI smoke test inside Debian, Ubuntu, Fedora, openSUSE Tumbleweed and Arch containers |
 
 ## Phase 2: Identity and ownership ⬜
 | Chunk | Delivers |

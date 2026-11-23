@@ -21,3 +21,48 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo test --workspace --all-features
+
+  build:
+    # Oldest supported glibc, so the binary runs in every distro container below.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p housekeeper-cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: housekeeper
+          path: target/release/housekeeper
+
+  # Real package databases change format between distro releases (decision D1): read them in real containers.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: "debian:stable", native: dpkg }
+          - { image: "ubuntu:latest", native: dpkg }
+          - { image: "fedora:latest", native: rpm }
+          - { image: "opensuse/tumbleweed:latest", native: rpm }
+          - { image: "archlinux:latest", native: pacman }
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: housekeeper
+      - name: Native packages are read
+        run: |
+          chmod +x housekeeper
+          ./housekeeper sources
+          ./housekeeper list --all --source ${{ matrix.native }} --json > scan.json
+          grep -q '"state": "ok"' scan.json
+          count=$(./housekeeper list --all --source ${{ matrix.native }} | wc -l)
+          echo "$count lines"
+          test "$count" -gt 50
+      - name: Every source completes without failing
+        run: |
+          ./housekeeper list --all --json > all.json
+          ! grep -q '"state": "failed"' all.json
