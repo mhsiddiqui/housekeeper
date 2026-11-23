@@ -3,7 +3,7 @@
 - **Date:** 2026-11-23
 - **Branch / PR:** `refactor/source-registration`
 - **Plan chunks:** none (architecture review finding; no chunk status change)
-- **Commits:** f6aee17, f20811f
+- **Commits:** f6aee17, f20811f, a4c22f0
 
 ## What changed
 - `crates/linux/build.rs` no longer reads source files. It lists the `*.rs` files in `src/sources/` (except `mod.rs`),
