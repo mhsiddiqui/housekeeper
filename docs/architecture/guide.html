@@ -67,7 +67,7 @@ what it takes to support a distribution (or an operating system) that Housekeepe
 <nav class="toc">
 <ol>
   <li><a href="#goal">The goal</a></li>
-  <li><a href="#layers">Three layers</a></li>
+  <li><a href="#layers">Four layers</a></li>
   <li><a href="#composition">Composition, not inheritance</a></li>
   <li><a href="#parts">The parts</a></li>
   <li><a href="#assembly">How the parts are assembled</a></li>
@@ -91,9 +91,9 @@ distribution be described as <strong>a list of parts</strong>. A new distributio
 part. Nothing that already works has to change.</p>
 
 <!-- ======================================================================= -->
-<h2 id="layers">2. Three layers</h2>
+<h2 id="layers">2. Four layers</h2>
 <figure>
-<svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Layer diagram">
+<svg viewBox="0 0 900 440" width="100%" role="img" aria-label="Layer diagram">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
     <marker id="diamond" viewBox="0 0 12 12" refX="1" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,6 L6,0 L12,6 L6,12 z" fill="var(--accent)"/></marker>
@@ -105,27 +105,35 @@ part. Nothing that already works has to change.</p>
   <rect class="box future" x="335" y="20" width="230" height="64" rx="10"/>
   <text class="title" x="450" y="47" text-anchor="middle">desktop app</text>
   <text class="small" x="450" y="68" text-anchor="middle">Phase 6 (Tauri)</text>
-  <text class="label" x="700" y="56">Front ends: show things,</text>
-  <text class="label" x="700" y="74">pick the platform</text>
+  <text class="label" x="700" y="56">Front ends: show things</text>
+  <!-- platform choice -->
+  <rect class="box" x="60" y="128" width="505" height="64" rx="10" style="stroke: var(--accent)"/>
+  <text class="title" x="312" y="155" text-anchor="middle">housekeeper-platform</text>
+  <text class="small" x="312" y="176" text-anchor="middle">detect(&amp;host): the platform for the OS it was built for</text>
+  <text class="label" x="700" y="156">Picks the OS crate,</text>
+  <text class="label" x="700" y="174">in one place</text>
   <!-- platforms -->
-  <rect class="box linux" x="60" y="128" width="230" height="64" rx="10"/>
-  <text class="title" x="175" y="155" text-anchor="middle">housekeeper-linux</text>
-  <text class="small" x="175" y="176" text-anchor="middle">LinuxPlatform + 12 sources</text>
-  <rect class="box future" x="335" y="128" width="230" height="64" rx="10"/>
-  <text class="title" x="450" y="155" text-anchor="middle">housekeeper-macos …</text>
-  <text class="small" x="450" y="176" text-anchor="middle">later, same contract</text>
-  <text class="label" x="700" y="164">Platforms: know one OS</text>
+  <rect class="box linux" x="60" y="236" width="230" height="64" rx="10"/>
+  <text class="title" x="175" y="263" text-anchor="middle">housekeeper-linux</text>
+  <text class="small" x="175" y="284" text-anchor="middle">LinuxPlatform + 12 sources</text>
+  <rect class="box future" x="335" y="236" width="230" height="64" rx="10"/>
+  <text class="title" x="450" y="263" text-anchor="middle">housekeeper-macos …</text>
+  <text class="small" x="450" y="284" text-anchor="middle">later, same contract</text>
+  <text class="label" x="700" y="272">Platforms: know one OS</text>
   <!-- core -->
-  <rect class="box core" x="60" y="236" width="505" height="72" rx="10"/>
-  <text class="title" x="312" y="264" text-anchor="middle">housekeeper-core</text>
-  <text class="small" x="312" y="286" text-anchor="middle">model · Source & Platform traits · Host · CommandRunner · Housekeeper (scan)</text>
-  <text class="label" x="700" y="268">Core: knows no OS at all</text>
+  <rect class="box core" x="60" y="344" width="505" height="72" rx="10"/>
+  <text class="title" x="312" y="372" text-anchor="middle">housekeeper-core</text>
+  <text class="small" x="312" y="394" text-anchor="middle">model · Source &amp; Platform traits · Host · CommandRunner · Housekeeper (scan)</text>
+  <text class="label" x="700" y="376">Core: knows no OS at all</text>
   <!-- arrows -->
   <path class="arrow" d="M175 84 V126"/>
   <path class="arrow" d="M450 84 V126"/>
-  <path class="arrow" d="M230 84 C 300 110, 300 200, 260 234"/>
   <path class="arrow" d="M175 192 V234"/>
   <path class="arrow" d="M450 192 V234"/>
+  <path class="arrow" d="M175 300 V342"/>
+  <path class="arrow" d="M450 300 V342"/>
+  <path class="arrow" d="M60 52 C 10 52, 10 380, 58 380"/>
+  <path class="arrow" d="M565 52 C 615 52, 615 380, 567 380"/>
 </svg>
 <figcaption>Arrows point from a crate to what it depends on. Dashed boxes do not exist yet; they plug in without changing
 the solid ones.</figcaption>
@@ -133,12 +141,15 @@ the solid ones.</figcaption>
 <div class="grid">
   <div class="card"><h4><span class="tag core">core</span>Knows no operating system</h4><p>Defines what a package
   is, what a source must be able to do, and services like "scan everything in parallel". It never mentions dpkg,
-  Flatpak or Linux.</p></div>
+  Flatpak or Linux, and it builds on any operating system.</p></div>
   <div class="card"><h4><span class="tag linux">linux</span>Knows Linux</h4><p>One small type per way software
   gets installed on Linux, plus <code>LinuxPlatform</code>, which detects the distribution and picks the right
   ones.</p></div>
+  <div class="card"><h4><span class="tag" style="color: var(--accent)">platform</span>Knows which OS crate</h4><p>One
+  function, <code>detect</code>, returns the platform for the OS Housekeeper was built for, or an
+  <code>Unsupported</code> error. It is the only crate that depends on the OS crates (decision D27).</p></div>
   <div class="card"><h4><span class="tag front">front end</span>Knows people</h4><p>Turns a scan into a table, JSON
-  or (later) a window. It chooses which platform to use for the OS it was built for, and that is all.</p></div>
+  or (later) a window. It calls <code>housekeeper_platform::detect</code> and talks to core from then on.</p></div>
 </div>
 
 <!-- ======================================================================= -->
@@ -196,8 +207,8 @@ tests, or another computer over SSH later.</p>
 
 <h3><code>Housekeeper</code>: the composition root</h3>
 <pre><code><span class="k">let</span> host = Host::local();
-<span class="k">let</span> platform = LinuxPlatform::detect(&amp;host);          <span class="c">// picks the parts for this distro</span>
-<span class="k">let</span> housekeeper = Housekeeper::new(Box::new(platform), host);
+<span class="k">let</span> platform = housekeeper_platform::detect(&amp;host)?;  <span class="c">// LinuxPlatform on Linux: the parts for this distro</span>
+<span class="k">let</span> housekeeper = Housekeeper::new(platform, host);
 <span class="k">let</span> scan = housekeeper.scan(&amp;Selection::All);          <span class="c">// every source, in parallel</span></code></pre>
 
 <!-- ======================================================================= -->
@@ -423,11 +434,17 @@ when it is implemented.</p>
 <span class="c">// sources: HomebrewSource, AppBundleSource (/Applications), MacAppStoreSource,
 // and the cross-platform ones (npm, pipx, uv, cargo) reused as-is from a shared crate.</span>
 
-<span class="c">// crates/cli/src/main.rs: the only front-end change</span>
+<span class="c">// crates/platform/src/lib.rs: the one place that registers it</span>
 #[cfg(target_os = <span class="s">"macos"</span>)]
-<span class="k">fn</span> platform(host: &amp;Host) -&gt; Result&lt;Box&lt;<span class="k">dyn</span> Platform&gt;&gt; { Ok(Box::new(housekeeper_macos::MacPlatform::detect(host))) }</code></pre>
-<p>Core needs no changes: it already reports <code>SystemInfo.os</code> as a plain string and treats every source the
-same way. The language-tool sources (npm, pipx, uv, cargo) read their own metadata files, so moving them into a
+<span class="k">pub fn</span> detect(host: &amp;Host) -&gt; Result&lt;Box&lt;<span class="k">dyn</span> Platform&gt;, Unsupported&gt; {
+    Ok(Box::new(housekeeper_macos::MacPlatform::detect(host)))
+}
+<span class="c">// the fallback that returns Unsupported becomes #[cfg(not(any(target_os = "linux", target_os = "macos")))],
+// and crates/platform/Cargo.toml gets, under [target.'cfg(target_os = "macos")'.dependencies]:
+// housekeeper-macos.workspace = true</span></code></pre>
+<p>The front ends do not change: they already call <code>housekeeper_platform::detect</code>. Core needs no changes
+either: it builds on any operating system (Unix-only checks sit behind <code>cfg(unix)</code>), reports
+<code>SystemInfo.os</code> as a plain string and treats every source the same way. The language-tool sources (npm, pipx, uv, cargo) read their own metadata files, so moving them into a
 shared crate is the one refactor this step would need.</p>
 
 <!-- ======================================================================= -->
@@ -481,8 +498,9 @@ message rather than silently skipping the source.</p>
   <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and assembles all sources</td></tr>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
-  <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line; picks the platform per OS</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D21)</td></tr>
+  <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for</td></tr>
+  <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D27)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

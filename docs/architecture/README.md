@@ -7,24 +7,29 @@ An illustrated walkthrough of this document, including a step-by-step example of
 
 ```mermaid
 flowchart TD
-    cli[housekeeper-cli<br/>binary: housekeeper] --> core
-    app[desktop app, Phase 6] --> core
-    cli --> linux
-    app --> linux
+    cli[housekeeper-cli<br/>binary: housekeeper] --> platform
+    app[desktop app, Phase 6] --> platform
+    cli --> core
+    app --> core
+    platform[housekeeper-platform<br/>detect: picks the OS crate] --> linux
+    platform -.-> future
     linux[housekeeper-linux<br/>LinuxPlatform + sources] --> core
     future[housekeeper-macos / -windows<br/>later] -.-> core
     core[housekeeper-core<br/>model, traits, Host, Inventory]
 ```
 
-- **`housekeeper-core`** knows nothing about any operating system. It defines the model (`Package`, `SourceInfo`),
-  the extension points (traits), the `Host` that sources read the machine through, and services such as
-  `Inventory`.
+- **`housekeeper-core`** knows nothing about any operating system and builds on any of them. It defines the model
+  (`Package`, `SourceInfo`), the extension points (traits), the `Host` that sources read the machine through, and
+  services such as `Inventory`.
 - **`housekeeper-linux`** implements a `Platform` for Linux and one `Source` per way software gets installed.
-- **Front ends** (`housekeeper-cli`, later the Tauri app) pick the platform for the OS they were built for and talk
-  only to core services.
+- **`housekeeper-platform`** is the one place that knows which OS crate to use: `detect(&host)` returns the
+  `Platform` for the OS it was built for, or `Unsupported`. Only it depends on the OS crates (D27).
+- **Front ends** (`housekeeper-cli`, later the Tauri app) call `housekeeper_platform::detect` and then talk only to
+  core services.
 
-Adding an operating system means adding one crate that implements `Platform` and its sources. Nothing in core or in
-the Linux crate changes.
+Adding an operating system means adding one crate that implements `Platform` and its sources, and registering it in
+`housekeeper-platform` (its `detect` and a target-specific dependency). Nothing in core, in the Linux crate or in the
+front ends changes.
 
 ## Composition, not inheritance
 
@@ -128,3 +133,4 @@ Each challenge raised during design review, and the decision taken.
 | D19 | Proving it works on each distribution | CI installs every package with the native package manager in containers of each supported release (Debian, Ubuntu, Fedora, AlmaLinux, openSUSE, Arch; x86_64 and aarch64), runs it against the real package database, checks it lists its own package, and removes it. Silverblue is checked from its official image using the tarball. |
 | D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and is registered by `build.rs`, which finds its `impl LinuxSource for <Type>`; a file without exactly one such impl fails the build with a clear message. Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. |
 | D21 | Licence: nobody may turn Housekeeper into closed software | GNU GPL v3.0 or later. Anyone distributing it, modified or not, must provide the source under the same licence. "Or later" (the FSF's recommendation) lets the project move to a future GPL version without asking every contributor. MIT and Apache-2.0 were rejected because they allow closed forks; AGPL was not needed because Housekeeper is not a network service. Dependencies stay permissive (MIT, Apache-2.0, Unicode-3.0), all GPL-compatible; `cargo deny` enforces it. |
+| D27 | Core must build on any OS, and every front end must pick the platform the same way | Core keeps Unix-only code (execute bits in `host.rs` and `command.rs`) behind `cfg(unix)`; elsewhere any file counts as executable. A small crate, `housekeeper-platform`, exposes `detect(&host) -> Result<Box<dyn Platform>, Unsupported>` and is the only crate that depends on an OS crate, each as a target-specific dependency. Front ends call it and depend on core otherwise. The alternative, each front end keeping its own `cfg(target_os)` functions, was rejected: the desktop app would have to copy them and could drift from the CLI. |
