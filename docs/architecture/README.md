@@ -45,8 +45,9 @@ as methods every source must stub out:
 trait Source {
     fn info(&self) -> SourceInfo;
     fn probe(&self, host: &Host) -> Availability;
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError>;
+    fn inventory(&self, host: &Host, scan: &ScanContext) -> Result<Vec<Package>, SourceError>;
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> { None }      // native package managers
+    fn install_roots(&self, host: &Host) -> Vec<PathBuf> { vec![] }  // where its programs live (pipx, npm…)
     // Added in later phases, each defaulting to None:
     // fn remover(&self) -> Option<&dyn Remover> { None }             // Phase 3
     // fn file_installer(&self) -> Option<&dyn FileInstaller> { None } // Phase 5
@@ -86,8 +87,11 @@ impl LinuxSource for DpkgSource {
 ```
 
 `LinuxPlatform` matches the distribution's `ID`, then each `ID_LIKE` entry, against every native source's families,
-creates that one native source first, and passes it to the others through `Context` (the manual source asks its
-`owner_lookup()` which files a package owns). It never names a source.
+and creates that one native source and every other source. It never names a source.
+
+Sources never hold each other. While a source is read, its `ScanContext` gives it every source of the platform
+and a place for warnings (D23). The manual source uses it to leave out what others account for: paths a native
+source's `owner_lookup()` says it owns, and programs that resolve into another source's `install_roots()`.
 
 ### The Host
 
@@ -128,3 +132,4 @@ Each challenge raised during design review, and the decision taken.
 | D19 | Proving it works on each distribution | CI installs every package with the native package manager in containers of each supported release (Debian, Ubuntu, Fedora, AlmaLinux, openSUSE, Arch; x86_64 and aarch64), runs it against the real package database, checks it lists its own package, and removes it. Silverblue is checked from its official image using the tarball. |
 | D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and is registered by `build.rs`, which finds its `impl LinuxSource for <Type>`; a file without exactly one such impl fails the build with a clear message. Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. |
 | D21 | Licence: nobody may turn Housekeeper into closed software | GNU GPL v3.0 or later. Anyone distributing it, modified or not, must provide the source under the same licence. "Or later" (the FSF's recommendation) lets the project move to a future GPL version without asking every contributor. MIT and Apache-2.0 were rejected because they allow closed forks; AGPL was not needed because Housekeeper is not a network service. Dependencies stay permissive (MIT, Apache-2.0, Unicode-3.0), all GPL-compatible; `cargo deny` enforces it. |
+| D23 | Sources that depend on other sources (the manual source must leave out what package managers, pipx, npm… installed) | Sources reach each other only at scan time, through the `ScanContext` passed to `inventory`: it lists every source of the platform and collects warnings. Each source declares where its programs live (`install_roots`), so a new source is never listed twice as a hand install and no other file knows its directories. A source that cannot fully answer (an owner lookup that times out) still reports what it found, with a warning, instead of failing. Construction-time wiring (`Context` holding the native source) was replaced because every new dependency between sources needed a new field. |

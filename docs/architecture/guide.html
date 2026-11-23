@@ -166,9 +166,14 @@ subclass inheriting (and overriding) a long list of methods. Two things go wrong
 <pre><code><span class="k">pub trait</span> <span class="t">Source</span>: Send + Sync {
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo;                                   <span class="c">// id "dpkg", label, kind (system, universal…)</span>
     <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability;                 <span class="c">// cheap: is it on this machine?</span>
-    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt;; <span class="c">// everything it installed</span>
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host, scan: &amp;ScanContext) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt;; <span class="c">// everything it installed</span>
     <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt; { None }    <span class="c">// optional ability (section 7)</span>
+    <span class="k">fn</span> install_roots(&amp;self, host: &amp;Host) -&gt; Vec&lt;PathBuf&gt; { vec![] }  <span class="c">// where its programs live</span>
 }</code></pre>
+<p>A source never holds another source. While it is read, its <code>ScanContext</code> gives it every source of the
+platform and a place to report warnings (decision D23). Only the manual source uses it today: it leaves out paths a
+native source's <code>owner_lookup()</code> owns and programs that resolve into another source's
+<code>install_roots()</code>, so a new source never shows up twice.</p>
 <p>Thirteen sources exist today. Each one is a single file that knows one format:</p>
 <table>
   <tr><th>Kind</th><th>Sources</th><th>How each reads the machine</th></tr>
@@ -231,8 +236,8 @@ tests, or another computer over SSH later.</p>
   <text class="small" x="350" y="238">② flatpak · homebrew · snap</text>
   <text class="small" x="350" y="262">③ appimage</text>
   <text class="small" x="350" y="286">④ npm · pipx · uv · pip · cargo</text>
-  <text class="small" x="350" y="310">⑤ manual (holds the native source,</text>
-  <text class="small" x="370" y="328">asks its owner_lookup())</text>
+  <text class="small" x="350" y="310">⑤ manual (asks the others through</text>
+  <text class="small" x="370" y="328">ScanContext at scan time)</text>
   <text class="small" x="350" y="360" style="fill: var(--accent)">← created from the generated</text>
   <text class="small" x="370" y="378" style="fill: var(--accent)">PROVIDERS list</text>
 
@@ -263,16 +268,17 @@ tests, or another computer over SSH later.</p>
 </figure>
 <p>This is the real assembly code in <code>crates/linux/src/lib.rs</code>, shortened. It never names a source:</p>
 <pre><code><span class="k">let</span> distro = Distro::detect(host);                                    <span class="c">// reads /etc/os-release</span>
-<span class="k">let</span> (native, family) = native_provider(&amp;distro, host, PROVIDERS);    <span class="c">// DpkgSource, "debian" on Ubuntu</span>
-<span class="k">let</span> native = native.map(|p| p.create(&amp;Context { distro: &amp;distro, native: None }));
-<span class="k">let</span> context = Context { distro: &amp;distro, native: native.clone() };
-<span class="k">let mut</span> sources: Vec&lt;Arc&lt;<span class="k">dyn</span> Source&gt;&gt; = native.into_iter().collect();
-sources.extend(PROVIDERS.iter().filter(|p| p.native.is_none()).map(|p| p.create(&amp;context)));
+<span class="k">let</span> native = native_provider(&amp;distro, host, PROVIDERS);          <span class="c">// DpkgSource, "debian" on Ubuntu</span>
+<span class="k">let</span> context = Context { distro: &amp;distro };
+<span class="k">let mut</span> sources: Vec&lt;Arc&lt;<span class="k">dyn</span> Source&gt;&gt; = native.map(|(p, _)| p).into_iter()
+    .chain(PROVIDERS.iter().filter(|p| p.native.is_none()))
+    .map(|p| p.create(&amp;context))
+    .collect();
 sources.sort_by_key(|s| (kind_order(s.info().kind), s.info().id));   <span class="c">// system first, manual last</span></code></pre>
 <p>Notice that Flatpak, Homebrew, npm and the rest are created on every distribution. Each one decides for itself, in
 <code>probe()</code>, whether it is present. A distribution only influences <strong>which native source</strong> is
-used, and that native source is handed to the others through <code>Context</code> (it is shared, hence
-<code>Arc</code>).</p>
+used. Sources are shared (<code>Arc</code>) so the scan can hand all of them to each source's
+<code>ScanContext</code>.</p>
 
 <h3 id="new-provider">Adding a provider: one file</h3>
 <p><code>PROVIDERS</code> is generated. <code>crates/linux/build.rs</code> reads every file in
@@ -288,7 +294,7 @@ provider is a new file with two impls and nothing else:</p>
 <span class="k">impl</span> Source <span class="k">for</span> HomebrewSource {                      <span class="c">// what it does</span>
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"homebrew"</span>, <span class="s">"Homebrew"</span>, SourceKind::Universal) }
     <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability { <span class="c">/* is there a brew? */</span> }
-    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; { <span class="c">/* Cellar, Caskroom */</span> }
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host, _: &amp;ScanContext) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; { <span class="c">/* Cellar, Caskroom */</span> }
 }</code></pre>
 <p>A file in that folder without exactly one <code>impl LinuxSource for</code> stops the build with a message naming
 the file, so a forgotten registration cannot slip through (decision D20).</p>
@@ -376,7 +382,7 @@ with no change at all, because detection checks <code>ID</code> first and then e
         <span class="k">else</span> { Availability::unavailable(<span class="s">"no apk database"</span>) }
     }
 
-    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; {
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host, _: &amp;ScanContext) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; {
         <span class="k">let</span> db = host.read_to_string(<span class="s">"/lib/apk/db/installed"</span>)?;
         <span class="k">let</span> world = host.read_optional(<span class="s">"/etc/apk/world"</span>)?.unwrap_or_default();
         parse(&amp;db, &amp;world)   <span class="c">// P:/V:/T:/I: blocks; names in `world` → Explicit, others → Dependency</span>
@@ -482,7 +488,7 @@ message rather than silently skipping the source.</p>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line; picks the platform per OS</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D21)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D23)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 
