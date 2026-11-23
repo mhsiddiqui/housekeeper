@@ -27,3 +27,4 @@ links back.
 | [0011](0011-architecture-guide.md) | Illustrated architecture guide | none | with 0012 |
 | [0012](0012-docs-section-and-agents.md) | Documentation section, change records and AGENTS.md | none | #2 |
 | [0013](0013-merge-gate.md) | Block merging until every CI job is green | 0.5 | `ci/required-checks` |
+| [0014](0014-move-design-into-docs.md) | Move the design mockup into the docs section | none | `docs/move-design` |

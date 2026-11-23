@@ -38,7 +38,7 @@ Nothing is changed on the system: this version only reads. From a source checkou
 ## Documentation
 All documentation lives in [docs/](docs/README.md), grouped by section:
 
-- **Product**: [spec](docs/product/spec.md), [interactive mockup](design/mockup/index.html) (open in a browser).
+- **Product**: [spec](docs/product/spec.md), [interactive mockup](docs/design/mockup/index.html) (open in a browser).
 - **Architecture**: [overview and decisions](docs/architecture/README.md),
   [illustrated guide](docs/architecture/guide.html) (how to add a distribution or operating system).
 - **Planning**: [build plan](docs/planning/plan.md), phases and chunks with status.
