@@ -337,17 +337,16 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 
 ## Architecture
 
-- **Tauri 2** (Rust backend + web UI). The HTML mockup becomes the frontend.
-- `trait Source { detect(), list(), details(id), install(req), remove(id, opts), updates(), owner(path) }`.
-  Native backends: `Apt`, `Dnf`, `Zypper`, `Pacman` (+ `Aur` via paru/yay), `RpmOstree`.
-  Universal: `Flatpak`, `Snap`, `AppImage`, `Npm`, `Pipx`, `Uv`, `Cargo`, `Brew`, `Nix`, `Manual`.
+How Housekeeper is built (crates, traits, the `Host`, and every design decision) is in
+[architecture](../architecture/README.md). That document is the only source for it; this section only records the
+product reasons behind two of its choices.
+
 - **Why not PackageKit only?** It covers apt/dnf/zypper/pacman through one D-Bus API with polkit. But it hides
   "manually installed vs dependency", has no AUR, its pacman backend is limited, and it can't follow Arch's
-  rules. Plan: native backends for the four main families, with **PackageKit as a fallback** for other distros.
-- Privileged helper: a small binary run through `pkexec` with a polkit policy that allows only fixed operations.
-- Distribution: AppImage (works everywhere), native packages built with the **openSUSE Build Service**
-  (deb + rpm for many distros) and an **AUR** PKGBUILD. Flatpak is a poor fit, because a package manager needs
-  `flatpak-spawn --host` for nearly everything.
+  rules. So each distribution family gets its own native source; PackageKit may later serve distributions that have
+  none (not decided).
+- **Why no Flatpak of Housekeeper itself?** A package manager inside the Flatpak sandbox needs `flatpak-spawn --host`
+  for nearly everything ([D16](../architecture/README.md#decisions)).
 
 ## Feasibility and hard parts
 - Listing and removal for every source above: straightforward.
