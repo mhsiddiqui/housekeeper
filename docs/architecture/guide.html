@@ -167,12 +167,13 @@ subclass inheriting (and overriding) a long list of methods. Two things go wrong
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo;                                   <span class="c">// id "dpkg", label, kind (system, universal…)</span>
     <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability;                 <span class="c">// cheap: is it on this machine?</span>
     <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt;; <span class="c">// everything it installed</span>
+    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt; { None }    <span class="c">// optional ability (section 7)</span>
 }</code></pre>
-<p>Twelve sources exist today. Each one is a single file that knows one format:</p>
+<p>Thirteen sources exist today. Each one is a single file that knows one format:</p>
 <table>
   <tr><th>Kind</th><th>Sources</th><th>How each reads the machine</th></tr>
   <tr><td>System (native)</td><td><code>dpkg</code>, <code>rpm</code>, <code>pacman</code></td><td><code>dpkg-query --showformat</code>, <code>rpm --queryformat</code>, pacman's database files</td></tr>
-  <tr><td>Universal</td><td><code>flatpak</code>, <code>snap</code></td><td><code>flatpak list --columns</code>, snapd's REST API on its socket</td></tr>
+  <tr><td>Universal</td><td><code>flatpak</code>, <code>homebrew</code>, <code>snap</code></td><td><code>flatpak list --columns</code>, Homebrew's <code>Cellar</code>/<code>Caskroom</code> and install receipts, snapd's REST API on its socket</td></tr>
   <tr><td>Portable</td><td><code>appimage</code></td><td>File magic bytes in the usual folders</td></tr>
   <tr><td>Language</td><td><code>npm</code>, <code>pipx</code>, <code>uv</code>, <code>pip</code>, <code>cargo</code></td><td>Their own metadata files (no interpreters started)</td></tr>
   <tr><td>Manual</td><td><code>manual</code></td><td><code>/opt</code>, <code>~/.local/bin</code>, symlink farms, known script installers</td></tr>
@@ -181,7 +182,7 @@ subclass inheriting (and overriding) a long list of methods. Two things go wrong
 <h3><code>Platform</code>: one operating system</h3>
 <pre><code><span class="k">pub trait</span> <span class="t">Platform</span>: Send + Sync {
     <span class="k">fn</span> system(&amp;self) -&gt; &amp;SystemInfo;            <span class="c">// "Ubuntu 26.04", family "debian", image_based…</span>
-    <span class="k">fn</span> sources(&amp;self) -&gt; &amp;[Box&lt;dyn Source&gt;];    <span class="c">// the parts that apply to this system</span>
+    <span class="k">fn</span> sources(&amp;self) -&gt; &amp;[Arc&lt;dyn Source&gt;];    <span class="c">// the parts that apply to this system (shared, see section 5)</span>
 }</code></pre>
 
 <h3><code>Host</code>: the machine, seen through one door</h3>
@@ -225,15 +226,15 @@ tests, or another computer over SSH later.</p>
 
   <!-- sources stack -->
   <rect class="box linux" x="330" y="160" width="250" height="250" rx="10"/>
-  <text class="title" x="455" y="186" text-anchor="middle">Vec&lt;Box&lt;dyn Source&gt;&gt;</text>
+  <text class="title" x="455" y="186" text-anchor="middle">Vec&lt;Arc&lt;dyn Source&gt;&gt;</text>
   <text class="small" x="350" y="214">① native: dpkg | rpm | pacman</text>
-  <text class="small" x="350" y="238">② flatpak</text>
-  <text class="small" x="350" y="262">③ snap</text>
-  <text class="small" x="350" y="286">④ appimage</text>
-  <text class="small" x="350" y="310">⑤ npm · pipx · uv · pip · cargo</text>
-  <text class="small" x="350" y="334">⑥ manual (given the native manager,</text>
-  <text class="small" x="370" y="352">to skip files it owns)</text>
-  <text class="small" x="350" y="384" style="fill: var(--accent)">← every item is just "a Source"</text>
+  <text class="small" x="350" y="238">② flatpak · homebrew · snap</text>
+  <text class="small" x="350" y="262">③ appimage</text>
+  <text class="small" x="350" y="286">④ npm · pipx · uv · pip · cargo</text>
+  <text class="small" x="350" y="310">⑤ manual (holds the native source,</text>
+  <text class="small" x="370" y="328">asks its owner_lookup())</text>
+  <text class="small" x="350" y="360" style="fill: var(--accent)">← created from the generated</text>
+  <text class="small" x="370" y="378" style="fill: var(--accent)">PROVIDERS list</text>
 
   <path class="has" d="M240 55 H328"/>
   <text class="label" x="250" y="46">has a</text>
@@ -249,36 +250,48 @@ tests, or another computer over SSH later.</p>
   <text class="label" x="252" y="300">read through</text>
 
   <rect class="box" x="620" y="160" width="260" height="250" rx="10" style="stroke: var(--accent)"/>
-  <text class="title" x="750" y="186" text-anchor="middle">Chosen by Distro.family</text>
-  <text class="small" x="640" y="216">debian → DpkgSource</text>
-  <text class="small" x="640" y="240">fedora, suse → RpmSource</text>
-  <text class="small" x="640" y="264">arch → PacmanSource</text>
-  <text class="small" x="640" y="288">unknown → first manager found</text>
-  <text class="small" x="640" y="330">Exactly one native source, even if</text>
-  <text class="small" x="640" y="350">another manager is installed</text>
+  <text class="title" x="750" y="186" text-anchor="middle">Declared by each native source</text>
+  <text class="small" x="640" y="216">dpkg: debian, ubuntu, mint…</text>
+  <text class="small" x="640" y="240">rpm: fedora, rhel… · opensuse…</text>
+  <text class="small" x="640" y="264">pacman: arch, manjaro…</text>
+  <text class="small" x="640" y="288">none match → first manager found</text>
+  <text class="small" x="640" y="330">Matched on ID, then ID_LIKE.</text>
+  <text class="small" x="640" y="350">Exactly one native source</text>
   <text class="small" x="640" y="370">(decision D2).</text>
 </svg>
 <figcaption>Diamond arrows mean "is made of". Nothing in the picture inherits from anything else.</figcaption>
 </figure>
-<p>This is the real assembly code in <code>crates/linux/src/lib.rs</code>, shortened:</p>
-<pre><code><span class="k">let</span> distro = Distro::detect(host);                 <span class="c">// reads /etc/os-release</span>
-<span class="k">let</span> native = native_manager(&amp;distro, host);        <span class="c">// Some(Dpkg) on Ubuntu</span>
-<span class="k">let mut</span> sources: Vec&lt;Box&lt;<span class="k">dyn</span> Source&gt;&gt; = Vec::new();
-<span class="k">if let</span> Some(native) = native {
-    sources.push(<span class="k">match</span> native {
-        NativeManager::Dpkg =&gt; Box::new(DpkgSource),
-        NativeManager::Rpm =&gt; Box::new(RpmSource::new(distro.image_based)),
-        NativeManager::Pacman =&gt; Box::new(PacmanSource),
-    });
-}
-sources.extend([
-    Box::new(FlatpakSource) <span class="k">as</span> Box&lt;<span class="k">dyn</span> Source&gt;, Box::new(SnapSource), Box::new(AppImageSource),
-    Box::new(NpmSource), Box::new(PipxSource), Box::new(UvToolSource), Box::new(PipUserSource),
-    Box::new(CargoSource), Box::new(ManualSource::new(native)),
-]);</code></pre>
-<p>Notice that Flatpak, Snap, npm and the rest are added on every distribution. Each one decides for itself, in
+<p>This is the real assembly code in <code>crates/linux/src/lib.rs</code>, shortened. It never names a source:</p>
+<pre><code><span class="k">let</span> distro = Distro::detect(host);                                    <span class="c">// reads /etc/os-release</span>
+<span class="k">let</span> (native, family) = native_provider(&amp;distro, host, PROVIDERS);    <span class="c">// DpkgSource, "debian" on Ubuntu</span>
+<span class="k">let</span> native = native.map(|p| p.create(&amp;Context { distro: &amp;distro, native: None }));
+<span class="k">let</span> context = Context { distro: &amp;distro, native: native.clone() };
+<span class="k">let mut</span> sources: Vec&lt;Arc&lt;<span class="k">dyn</span> Source&gt;&gt; = native.into_iter().collect();
+sources.extend(PROVIDERS.iter().filter(|p| p.native.is_none()).map(|p| p.create(&amp;context)));
+sources.sort_by_key(|s| (kind_order(s.info().kind), s.info().id));   <span class="c">// system first, manual last</span></code></pre>
+<p>Notice that Flatpak, Homebrew, npm and the rest are created on every distribution. Each one decides for itself, in
 <code>probe()</code>, whether it is present. A distribution only influences <strong>which native source</strong> is
-used.</p>
+used, and that native source is handed to the others through <code>Context</code> (it is shared, hence
+<code>Arc</code>).</p>
+
+<h3 id="new-provider">Adding a provider: one file</h3>
+<p><code>PROVIDERS</code> is generated. <code>crates/linux/build.rs</code> reads every file in
+<code>crates/linux/src/sources/</code>, finds its <code>impl LinuxSource for &lt;Type&gt;</code>, and lists it. So a new
+provider is a new file with two impls and nothing else:</p>
+<pre><code><span class="c">// crates/linux/src/sources/homebrew.rs</span>
+<span class="k">pub struct</span> <span class="t">HomebrewSource</span>;
+
+<span class="k">impl</span> LinuxSource <span class="k">for</span> HomebrewSource {                 <span class="c">// how it is created (and, for natives, which distros it serves)</span>
+    <span class="k">fn</span> create(_: &amp;Context&lt;'_&gt;) -&gt; Self { Self }
+}
+
+<span class="k">impl</span> Source <span class="k">for</span> HomebrewSource {                      <span class="c">// what it does</span>
+    <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"homebrew"</span>, <span class="s">"Homebrew"</span>, SourceKind::Universal) }
+    <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability { <span class="c">/* is there a brew? */</span> }
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; { <span class="c">/* Cellar, Caskroom */</span> }
+}</code></pre>
+<p>A file in that folder without exactly one <code>impl LinuxSource for</code> stops the build with a message naming
+the file, so a forgotten registration cannot slip through (decision D20).</p>
 
 <!-- ======================================================================= -->
 <h2 id="scan">6. What happens during a scan</h2>
@@ -305,14 +318,14 @@ used.</p>
 as an optional component:</p>
 <pre><code><span class="k">trait</span> <span class="t">Source</span> {
     <span class="c">// … info, probe, inventory as today …</span>
-    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// Phase 2: "who installed this file?"</span>
+    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// today: dpkg, rpm, pacman answer "who installed this file?"</span>
     <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// Phase 3/4: plan and run removal</span>
     <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// Phase 5: install a downloaded file</span>
     <span class="k">fn</span> updater(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Updater&gt;       { None }  <span class="c">// Phase 7</span>
 }</code></pre>
 <ul>
-  <li>The default is "I can't", so adding <code>remover()</code> does not break the eleven sources that don't
-  implement it yet.</li>
+  <li>The default is "I can't", so adding <code>remover()</code> does not break the sources that don't implement it
+  yet. <code>owner_lookup()</code> was added this way: only the three native sources implement it.</li>
   <li>The app asks "can this source remove things?" by checking for <code>Some</code>. The answer is honest
   instead of a fake method that throws.</li>
   <li>An AppImage source can offer <code>remover()</code> (delete the file and its menu entry) without offering
@@ -325,14 +338,14 @@ as an optional component:</p>
 
 <table>
   <tr><th>Case</th><th>Example</th><th>Work</th></tr>
-  <tr><td><strong>A. A relative of a known family</strong></td><td>Linux Mint, Pop!_OS, Rocky, Manjaro, CachyOS, a new Ubuntu flavour</td><td>Usually nothing: <code>ID_LIKE</code> in <code>/etc/os-release</code> already says "debian", "fedora" or "arch". At most, one ID added to a list.</td></tr>
-  <tr><td><strong>B. A new native package manager</strong></td><td>Alpine (apk), Void (xbps), Gentoo (portage), Solus (eopkg)</td><td>One new source file, one family, three small wiring edits (worked example below).</td></tr>
+  <tr><td><strong>A. A relative of a known family</strong></td><td>Linux Mint, Pop!_OS, Rocky, Manjaro, CachyOS, a new Ubuntu flavour</td><td>Usually nothing: <code>ID_LIKE</code> in <code>/etc/os-release</code> already says "debian", "fedora" or "arch". At most, one ID added to the native source's list.</td></tr>
+  <tr><td><strong>B. A new native package manager</strong></td><td>Alpine (apk), Void (xbps), Gentoo (portage), Solus (eopkg)</td><td>One new source file (worked example below). Nothing else changes.</td></tr>
   <tr><td><strong>C. A different model of the system</strong></td><td>NixOS, Guix</td><td>A new source (e.g. Nix profiles) and no "native" source: the system configuration is declarative, so it is listed, not removed.</td></tr>
 </table>
 
 <h3>Case A in practice</h3>
-<pre><code><span class="c">// crates/linux/src/distro.rs: the only change, if any</span>
-<span class="s">"debian"</span> | <span class="s">"ubuntu"</span> | <span class="s">"linuxmint"</span> | <span class="s">"pop"</span> | … | <span class="s">"my-new-flavour"</span> =&gt; Self::Debian,</code></pre>
+<pre><code><span class="c">// crates/linux/src/sources/dpkg.rs: the only change, if any</span>
+families: &amp;[Family { name: <span class="s">"debian"</span>, distro_ids: &amp;[<span class="s">"debian"</span>, <span class="s">"ubuntu"</span>, <span class="s">"linuxmint"</span>, …, <span class="s">"my-new-flavour"</span>] }],</code></pre>
 <p>Distributions that set <code>ID_LIKE=debian</code> (or <code>fedora</code>, <code>arch</code>, <code>suse</code>) are recognised
 with no change at all, because detection checks <code>ID</code> first and then each <code>ID_LIKE</code> entry.</p>
 
@@ -343,13 +356,17 @@ with no change at all, because detection checks <code>ID</code> first and then e
 <code>/etc/apk/world</code>. That is everything a source needs.</p>
 
 <ol class="steps">
-  <li><strong>Teach detection the family</strong> (<code>distro.rs</code>):
-<pre><code><span class="k">pub enum</span> Family { Debian, Fedora, Suse, Arch, <span class="t">Alpine</span>, Unknown }
-<span class="c">// in Family::from_id</span>
-<span class="s">"alpine"</span> | <span class="s">"postmarketos"</span> =&gt; Self::Alpine,</code></pre></li>
-
-  <li><strong>Write the source</strong>, a new file <code>sources/apk.rs</code> following <code>dpkg.rs</code>:
+  <li><strong>Write the source</strong>: a new file <code>sources/apk.rs</code> following <code>dpkg.rs</code>. It
+  declares which distributions it serves, reads the database, and answers "who owns this file?":
 <pre><code><span class="k">pub struct</span> <span class="t">ApkSource</span>;
+
+<span class="k">impl</span> LinuxSource <span class="k">for</span> ApkSource {
+    <span class="k">const</span> NATIVE: Option&lt;Native&gt; = Some(Native {
+        families: &amp;[Family { name: <span class="s">"alpine"</span>, distro_ids: &amp;[<span class="s">"alpine"</span>, <span class="s">"postmarketos"</span>] }],
+        program: <span class="s">"apk"</span>,
+    });
+    <span class="k">fn</span> create(_: &amp;Context&lt;'_&gt;) -&gt; Self { Self }
+}
 
 <span class="k">impl</span> Source <span class="k">for</span> ApkSource {
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"apk"</span>, <span class="s">"Alpine packages"</span>, SourceKind::System) }
@@ -364,16 +381,13 @@ with no change at all, because detection checks <code>ID</code> first and then e
         <span class="k">let</span> world = host.read_optional(<span class="s">"/etc/apk/world"</span>)?.unwrap_or_default();
         parse(&amp;db, &amp;world)   <span class="c">// P:/V:/T:/I: blocks; names in `world` → Explicit, others → Dependency</span>
     }
+
+    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt; { Some(self) }
+}
+
+<span class="k">impl</span> OwnerLookup <span class="k">for</span> ApkSource {
+    <span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;"</span>
 }</code></pre></li>
-
-  <li><strong>Tell the manual source how to ask apk "who owns this file?"</strong> (<code>owner.rs</code>):
-<pre><code><span class="k">pub enum</span> NativeManager { Dpkg, Rpm, Pacman, <span class="t">Apk</span> }
-<span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;"</span></code></pre></li>
-
-  <li><strong>Wire it in</strong> (<code>lib.rs</code>), three lines:
-<pre><code>Family::Alpine =&gt; Some(NativeManager::Apk),              <span class="c">// native_manager()</span>
-(<span class="s">"apk"</span>, NativeManager::Apk),                             <span class="c">// fallback probe list</span>
-NativeManager::Apk =&gt; Box::new(ApkSource),                <span class="c">// LinuxPlatform::detect</span></code></pre></li>
 
   <li><strong>Test it without an Alpine machine</strong>: a <code>Fixture</code> with a sample
   <code>/lib/apk/db/installed</code> and <code>/etc/apk/world</code>, and a <code>FakeRunner</code> answering the
@@ -385,7 +399,7 @@ NativeManager::Apk =&gt; Box::new(ApkSource),                <span class="c">// 
 </ol>
 
 <div class="callout">
-<strong>What did <em>not</em> change:</strong> core, the CLI, and the other eleven sources. Flatpak, npm, pipx, cargo,
+<strong>What did <em>not</em> change:</strong> core, the CLI, <code>lib.rs</code>, <code>distro.rs</code>, and every other source. Flatpak, npm, pipx, cargo,
 AppImage and manual detection work on Alpine the moment the apk source exists, because they never depended on the
 distribution in the first place.
 </div>
@@ -405,7 +419,7 @@ when it is implemented.</p>
 <h2 id="new-os">9. Supporting another operating system</h2>
 <p>The same shape, one level up. A new crate implements <code>Platform</code> and its own sources:</p>
 <pre><code><span class="c">// crates/macos/src/lib.rs (future)</span>
-<span class="k">pub struct</span> <span class="t">MacPlatform</span> { system: SystemInfo, sources: Vec&lt;Box&lt;<span class="k">dyn</span> Source&gt;&gt; }
+<span class="k">pub struct</span> <span class="t">MacPlatform</span> { system: SystemInfo, sources: Vec&lt;Arc&lt;<span class="k">dyn</span> Source&gt;&gt; }
 <span class="c">// sources: HomebrewSource, AppBundleSource (/Applications), MacAppStoreSource,
 // and the cross-platform ones (npm, pipx, uv, cargo) reused as-is from a shared crate.</span>
 
@@ -432,32 +446,17 @@ shared crate is the one refactor this step would need.</p>
 on the real system.</p>
 
 <!-- ======================================================================= -->
-<h2 id="limits">11. Honest limits and the next step</h2>
-<div class="callout warn">
-<p style="margin-top:0"><strong>Today, the native package manager appears in two places.</strong> Besides its
-<code>Source</code>, there is a closed <code>NativeManager</code> enum (<code>owner.rs</code>) that the manual source uses
-to ask "does a package own this file?". That is why step 3 and step 4 above touch <code>owner.rs</code> and three
-<code>match</code> arms in <code>lib.rs</code>.</p>
-<p style="margin-bottom:0"><strong>Planned fix (Phase 2, chunk 2.3):</strong> "who owns this file?" becomes the
-<code>OwnerLookup</code> capability from section 7. The native source offers it itself, and the manual source is given
-<code>Option&lt;&amp;dyn OwnerLookup&gt;</code> instead of the enum. The enum disappears, and adding a distribution
-shrinks to: <em>one new source file + one family entry</em>.</p>
+<h2 id="limits">11. Honest limits</h2>
+<div class="callout">
+<p style="margin-top:0"><strong>Resolved:</strong> the native package manager used to appear in four places (its source,
+a <code>Family</code> enum, a <code>NativeManager</code> enum, and three <code>match</code> arms). Now each native source
+declares its distributions and answers "who owns this file?" itself (<code>OwnerLookup</code>), and the build script
+registers every source, so adding a distribution or any other provider is one file.</p>
+<p style="margin-bottom:0">The price is a small build script (<code>crates/linux/build.rs</code>) that finds
+<code>impl LinuxSource for &lt;Type&gt;</code> in each file. Writing the impl any other way (through a macro, or with a
+path such as <code>impl crate::provider::LinuxSource for</code>) is not recognised; the build then stops with a clear
+message rather than silently skipping the source.</p>
 </div>
-<figure>
-<svg viewBox="0 0 900 190" width="100%" role="img" aria-label="Files touched to add a distribution, now and after Phase 2.3">
-  <text class="title" x="20" y="28">Files touched to add a distribution</text>
-  <text class="label" x="20" y="70">Today</text>
-  <rect x="130" y="52" width="150" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="205" y="72" text-anchor="middle">sources/apk.rs (new)</text>
-  <rect x="290" y="52" width="130" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="355" y="72" text-anchor="middle">distro.rs</text>
-  <rect x="430" y="52" width="130" height="30" rx="6" fill="none" stroke="var(--warn)" stroke-width="1.5"/><text class="small" x="495" y="72" text-anchor="middle">owner.rs</text>
-  <rect x="570" y="52" width="160" height="30" rx="6" fill="none" stroke="var(--warn)" stroke-width="1.5"/><text class="small" x="650" y="72" text-anchor="middle">lib.rs (3 match arms)</text>
-  <text class="label" x="20" y="130">After 2.3</text>
-  <rect x="130" y="112" width="150" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="205" y="132" text-anchor="middle">sources/apk.rs (new)</text>
-  <rect x="290" y="112" width="130" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="355" y="132" text-anchor="middle">distro.rs</text>
-  <rect x="430" y="112" width="160" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="510" y="132" text-anchor="middle">lib.rs (1 line)</text>
-  <text class="small" x="20" y="176">Red: edits caused by the NativeManager enum. Green: edits any new distribution needs.</text>
-</svg>
-</figure>
 <p>Other deliberate limits:</p>
 <ul>
   <li><strong>Sources are compiled in, not loaded as plugins.</strong> A new source means a new release. This keeps
@@ -476,12 +475,14 @@ shrinks to: <em>one new source file + one family entry</em>.</p>
   <tr><td><code>crates/core/src/host.rs</code>, <code>command.rs</code></td><td><code>Host</code> and <code>CommandRunner</code></td></tr>
   <tr><td><code>crates/core/src/inventory.rs</code></td><td><code>Housekeeper</code>: the parallel scan</td></tr>
   <tr><td><code>crates/core/src/testing.rs</code></td><td><code>Fixture</code> and <code>FakeRunner</code> for tests</td></tr>
-  <tr><td><code>crates/linux/src/distro.rs</code></td><td><code>os-release</code> parsing and families</td></tr>
-  <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks and assembles the sources</td></tr>
+  <tr><td><code>crates/linux/src/distro.rs</code></td><td><code>os-release</code> parsing (<code>ID</code>, <code>ID_LIKE</code>, image-based)</td></tr>
+  <tr><td><code>crates/linux/src/provider.rs</code></td><td><code>LinuxSource</code>, <code>Native</code>, <code>Family</code>, <code>Context</code>: the contract every Linux source implements</td></tr>
+  <tr><td><code>crates/linux/build.rs</code></td><td>Finds every source in <code>src/sources/</code> and generates the <code>PROVIDERS</code> list</td></tr>
+  <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and assembles all sources</td></tr>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
-  <tr><td><code>crates/linux/src/owner.rs</code></td><td>"Who owns this path?" for the native managers (to be replaced in 2.3)</td></tr>
+  <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line; picks the platform per OS</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D19)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D20)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

@@ -3,7 +3,7 @@
 *Every app, however it got here.*
 
 Housekeeper shows every app installed on a Linux machine, whatever installed it (apt/dnf/zypper/pacman, Flatpak, Snap,
-AppImage, npm, pipx, uv, cargo, or a script), and removes each one the way its own installer intended.
+Homebrew, AppImage, npm, pipx, uv, pip, cargo, or a script), and removes each one the way its own installer intended.
 
 It is a front door to the native tools, not a replacement for them.
 
