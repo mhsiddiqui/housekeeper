@@ -1,0 +1,77 @@
+#!/bin/sh
+# Installs the package that fits this distribution, checks housekeeper against the real package database,
+# then removes the package again. Run as root inside a distribution container:
+#
+#   scripts/test-package.sh <dist-dir>
+#
+# On image-based systems (/run/ostree-booted exists), packages are layered with rpm-ostree and need a reboot, so the
+# release tarball is checked instead.
+set -eu
+
+dist=${1:?usage: test-package.sh <dist-dir>}
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+one() { set -- $1; [ -e "$1" ] || fail "no file matching $1"; echo "$1"; }
+
+. /etc/os-release
+echo "== $PRETTY_NAME ($(uname -m))"
+
+installed=yes
+if [ -e /run/ostree-booted ]; then
+  native=rpm
+  installed=no
+  pkg=$(one "$dist/*.tar.gz")
+  tar -xzf "$pkg" -C /tmp
+  PATH="$(dirname "$(one "/tmp/housekeeper-*/housekeeper")"):$PATH"
+elif command -v apt-get >/dev/null; then
+  native=dpkg
+  pkg=$(one "$dist/*.deb")
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq "$pkg" >/dev/null
+  remove() { apt-get remove -y -qq housekeeper >/dev/null; }
+elif command -v zypper >/dev/null; then
+  native=rpm
+  pkg=$(one "$dist/*.rpm")
+  zypper --non-interactive install --allow-unsigned-rpm "$pkg"
+  remove() { zypper --non-interactive remove housekeeper; }
+elif command -v dnf >/dev/null; then
+  native=rpm
+  pkg=$(one "$dist/*.rpm")
+  dnf install -y "$pkg"
+  remove() { dnf remove -y housekeeper; }
+elif command -v pacman >/dev/null; then
+  native=pacman
+  pkg=$(one "$dist/*.pkg.tar.zst")
+  pacman -U --noconfirm "$pkg"
+  remove() { pacman -R --noconfirm housekeeper; }
+else
+  fail "no supported package manager"
+fi
+
+command -v housekeeper >/dev/null || fail "housekeeper is not on PATH after installing $pkg"
+housekeeper --version
+housekeeper sources
+
+# The native source works on this release's real database.
+housekeeper list --all --source "$native" --json > /tmp/native.json
+grep -q '"state": "ok"' /tmp/native.json || fail "$native source did not read the package database"
+count=$(housekeeper list --all --source "$native" | wc -l)
+[ "$count" -gt 50 ] || fail "only $count lines from $native"
+
+# No source fails, including ones this system lacks.
+housekeeper list --all --json > /tmp/all.json
+if grep -q '"state": "failed"' /tmp/all.json; then
+  grep -B3 -A3 '"state": "failed"' /tmp/all.json >&2
+  fail "a source failed"
+fi
+
+if [ "$installed" = yes ]; then
+  # Housekeeper sees itself, installed by the native package manager.
+  housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \
+    || fail "housekeeper does not list its own package"
+  remove
+  # Check the file itself: the shell may still remember where the command was.
+  [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"
+fi
+echo "OK: $(basename "$pkg") on $PRETTY_NAME"
