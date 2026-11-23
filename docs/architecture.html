@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Housekeeper · Architecture</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f2328; --muted: #5d6470; --line: #d9d6cf; --panel: #ffffff; --code: #f3f1ec;
+    --accent: #b86e00; --core: #2f6fb3; --linux: #2e8b57; --front: #8a4fb8; --future: #8a8f98; --warn: #b3412f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181b; --fg: #e8e6e1; --muted: #a2a6ad; --line: #34363b; --panel: #1f2125; --code: #26282d;
+      --accent: #f0a32b; --core: #6aa6e8; --linux: #5cc28a; --front: #b98be0; --future: #8d929a; --warn: #e8775f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 34px; margin: 0 0 4px; letter-spacing: -0.5px; }
+  h2 { font-size: 24px; margin: 56px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  h3 { font-size: 18px; margin: 28px 0 8px; }
+  p, li { color: var(--fg); }
+  .lead { font-size: 18px; color: var(--muted); margin: 0 0 24px; }
+  .muted { color: var(--muted); }
+  code { font: 14px/1.5 ui-monospace, "JetBrains Mono", "Fira Code", monospace; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: 13.5px; }
+  .k { color: var(--core); font-weight: 600; } .c { color: var(--muted); font-style: italic; } .t { color: var(--linux); } .s { color: var(--accent); }
+  nav.toc { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 20px; }
+  nav.toc ol { margin: 0; padding-left: 20px; columns: 2; column-gap: 32px; }
+  nav.toc a { color: var(--fg); text-decoration: none; } nav.toc a:hover { color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 16px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; }
+  .card p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; margin-right: 6px; }
+  .tag.core { color: var(--core); } .tag.linux { color: var(--linux); } .tag.front { color: var(--front); } .tag.future { color: var(--future); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .callout { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 16px 0; }
+  .callout.warn { border-color: var(--warn); }
+  .steps { counter-reset: step; list-style: none; padding: 0; }
+  .steps > li { counter-increment: step; position: relative; padding: 0 0 14px 44px; }
+  .steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--bg); font-weight: 700; display: grid; place-items: center; }
+  figure { margin: 18px 0; } figcaption { color: var(--muted); font-size: 14px; margin-top: 6px; }
+  svg text { font-family: system-ui, sans-serif; fill: var(--fg); }
+  svg .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  svg .core { stroke: var(--core); } svg .linux { stroke: var(--linux); } svg .front { stroke: var(--front); }
+  svg .future { stroke: var(--future); stroke-dasharray: 6 4; }
+  svg .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+  svg .has { stroke: var(--accent); stroke-width: 1.6; fill: none; marker-start: url(#diamond); marker-end: url(#arrow); }
+  svg .label { font-size: 13px; fill: var(--muted); }
+  svg .title { font-size: 15px; font-weight: 700; }
+  svg .small { font-size: 12.5px; fill: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Housekeeper architecture</h1>
+<p class="lead">How the code is put together, why it is built from small parts instead of a class hierarchy, and exactly
+what it takes to support a distribution (or an operating system) that Housekeeper does not support today.</p>
+
+<nav class="toc">
+<ol>
+  <li><a href="#goal">The goal</a></li>
+  <li><a href="#layers">Three layers</a></li>
+  <li><a href="#composition">Composition, not inheritance</a></li>
+  <li><a href="#parts">The parts</a></li>
+  <li><a href="#assembly">How the parts are assembled</a></li>
+  <li><a href="#scan">What happens during a scan</a></li>
+  <li><a href="#capabilities">Adding abilities later</a></li>
+  <li><a href="#new-distro">Supporting a new distribution</a></li>
+  <li><a href="#new-os">Supporting a new operating system</a></li>
+  <li><a href="#testing">Why this makes testing easy</a></li>
+  <li><a href="#limits">Honest limits and the next step</a></li>
+  <li><a href="#files">Where things live</a></li>
+</ol>
+</nav>
+
+<!-- ======================================================================= -->
+<h2 id="goal">1. The goal</h2>
+<p>Linux software arrives from many places: the distribution's package manager (apt, dnf, zypper, pacman…), app formats
+(Flatpak, Snap, AppImage), language tools (npm, pipx, uv, pip, cargo) and plain scripts. Distributions differ mostly in
+<em>one</em> of these, the native package manager. Everything else is the same everywhere.</p>
+<p>So the design keeps every "way software gets installed" as its own small, independent part, and lets each
+distribution be described as <strong>a list of parts</strong>. A new distribution is a new list, sometimes with one new
+part. Nothing that already works has to change.</p>
+
+<!-- ======================================================================= -->
+<h2 id="layers">2. Three layers</h2>
+<figure>
+<svg viewBox="0 0 900 330" width="100%" role="img" aria-label="Layer diagram">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+    <marker id="diamond" viewBox="0 0 12 12" refX="1" refY="6" markerWidth="10" markerHeight="10" orient="auto-start-reverse"><path d="M0,6 L6,0 L12,6 L6,12 z" fill="var(--accent)"/></marker>
+  </defs>
+  <!-- front ends -->
+  <rect class="box front" x="60" y="20" width="230" height="64" rx="10"/>
+  <text class="title" x="175" y="47" text-anchor="middle">housekeeper-cli</text>
+  <text class="small" x="175" y="68" text-anchor="middle">the `housekeeper` command</text>
+  <rect class="box future" x="335" y="20" width="230" height="64" rx="10"/>
+  <text class="title" x="450" y="47" text-anchor="middle">desktop app</text>
+  <text class="small" x="450" y="68" text-anchor="middle">Phase 6 (Tauri)</text>
+  <text class="label" x="700" y="56">Front ends: show things,</text>
+  <text class="label" x="700" y="74">pick the platform</text>
+  <!-- platforms -->
+  <rect class="box linux" x="60" y="128" width="230" height="64" rx="10"/>
+  <text class="title" x="175" y="155" text-anchor="middle">housekeeper-linux</text>
+  <text class="small" x="175" y="176" text-anchor="middle">LinuxPlatform + 12 sources</text>
+  <rect class="box future" x="335" y="128" width="230" height="64" rx="10"/>
+  <text class="title" x="450" y="155" text-anchor="middle">housekeeper-macos …</text>
+  <text class="small" x="450" y="176" text-anchor="middle">later, same contract</text>
+  <text class="label" x="700" y="164">Platforms: know one OS</text>
+  <!-- core -->
+  <rect class="box core" x="60" y="236" width="505" height="72" rx="10"/>
+  <text class="title" x="312" y="264" text-anchor="middle">housekeeper-core</text>
+  <text class="small" x="312" y="286" text-anchor="middle">model · Source & Platform traits · Host · CommandRunner · Housekeeper (scan)</text>
+  <text class="label" x="700" y="268">Core: knows no OS at all</text>
+  <!-- arrows -->
+  <path class="arrow" d="M175 84 V126"/>
+  <path class="arrow" d="M450 84 V126"/>
+  <path class="arrow" d="M230 84 C 300 110, 300 200, 260 234"/>
+  <path class="arrow" d="M175 192 V234"/>
+  <path class="arrow" d="M450 192 V234"/>
+</svg>
+<figcaption>Arrows point from a crate to what it depends on. Dashed boxes do not exist yet; they plug in without changing
+the solid ones.</figcaption>
+</figure>
+<div class="grid">
+  <div class="card"><h4><span class="tag core">core</span>Knows no operating system</h4><p>Defines what a package
+  is, what a source must be able to do, and services like "scan everything in parallel". It never mentions dpkg,
+  Flatpak or Linux.</p></div>
+  <div class="card"><h4><span class="tag linux">linux</span>Knows Linux</h4><p>One small type per way software
+  gets installed on Linux, plus <code>LinuxPlatform</code>, which detects the distribution and picks the right
+  ones.</p></div>
+  <div class="card"><h4><span class="tag front">front end</span>Knows people</h4><p>Turns a scan into a table, JSON
+  or (later) a window. It chooses which platform to use for the OS it was built for, and that is all.</p></div>
+</div>
+
+<!-- ======================================================================= -->
+<h2 id="composition">3. Composition, not inheritance</h2>
+<p>A class-hierarchy design would look like <code>PackageManager → AptManager → UbuntuManager</code>, with every
+subclass inheriting (and overriding) a long list of methods. Two things go wrong with that for Housekeeper:</p>
+<ul>
+  <li><strong>Distributions are mixtures, not specialisations.</strong> Ubuntu is "dpkg + Snap + Flatpak + npm + …".
+  Fedora is "rpm + Flatpak + npm + …". There is no sensible parent class; there is a set of parts.</li>
+  <li><strong>Abilities differ per part.</strong> Flatpak can remove an app; an AppImage has no uninstaller at all. A
+  base class would force every part to implement (or fake) every ability.</li>
+</ul>
+<p>Rust has no class inheritance anyway. Instead, Housekeeper uses three ideas:</p>
+<table>
+  <tr><th>Idea</th><th>In Housekeeper</th></tr>
+  <tr><td><strong>Program to an interface</strong> (a trait)</td><td>Code that scans only knows <code>dyn Source</code>, never <code>DpkgSource</code>.</td></tr>
+  <tr><td><strong>Has-a instead of is-a</strong></td><td>A platform <em>has</em> a list of sources; the app <em>has</em> a platform and a host; a host <em>has</em> a command runner.</td></tr>
+  <tr><td><strong>Small, separate interfaces</strong></td><td>"Can list packages" is one trait. "Can remove", "can install a file", "can update" will each be their own trait, offered only by the sources that can.</td></tr>
+</table>
+
+<!-- ======================================================================= -->
+<h2 id="parts">4. The parts</h2>
+
+<h3><code>Source</code>: one way software gets installed</h3>
+<pre><code><span class="k">pub trait</span> <span class="t">Source</span>: Send + Sync {
+    <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo;                                   <span class="c">// id "dpkg", label, kind (system, universal…)</span>
+    <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability;                 <span class="c">// cheap: is it on this machine?</span>
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt;; <span class="c">// everything it installed</span>
+}</code></pre>
+<p>Twelve sources exist today. Each one is a single file that knows one format:</p>
+<table>
+  <tr><th>Kind</th><th>Sources</th><th>How each reads the machine</th></tr>
+  <tr><td>System (native)</td><td><code>dpkg</code>, <code>rpm</code>, <code>pacman</code></td><td><code>dpkg-query --showformat</code>, <code>rpm --queryformat</code>, pacman's database files</td></tr>
+  <tr><td>Universal</td><td><code>flatpak</code>, <code>snap</code></td><td><code>flatpak list --columns</code>, snapd's REST API on its socket</td></tr>
+  <tr><td>Portable</td><td><code>appimage</code></td><td>File magic bytes in the usual folders</td></tr>
+  <tr><td>Language</td><td><code>npm</code>, <code>pipx</code>, <code>uv</code>, <code>pip</code>, <code>cargo</code></td><td>Their own metadata files (no interpreters started)</td></tr>
+  <tr><td>Manual</td><td><code>manual</code></td><td><code>/opt</code>, <code>~/.local/bin</code>, symlink farms, known script installers</td></tr>
+</table>
+
+<h3><code>Platform</code>: one operating system</h3>
+<pre><code><span class="k">pub trait</span> <span class="t">Platform</span>: Send + Sync {
+    <span class="k">fn</span> system(&amp;self) -&gt; &amp;SystemInfo;            <span class="c">// "Ubuntu 26.04", family "debian", image_based…</span>
+    <span class="k">fn</span> sources(&amp;self) -&gt; &amp;[Box&lt;dyn Source&gt;];    <span class="c">// the parts that apply to this system</span>
+}</code></pre>
+
+<h3><code>Host</code>: the machine, seen through one door</h3>
+<p>Sources never call <code>std::fs</code> or start programs directly. They ask the <code>Host</code>:</p>
+<pre><code>host.read_to_string(<span class="s">"/var/lib/dpkg/status"</span>)   <span class="c">// paths are "logical"; the host maps them under its root</span>
+host.home()                                  <span class="c">// the user's home</span>
+host.run_ok(&amp;Cmd::new(<span class="s">"rpm"</span>).arg(<span class="s">"-qa"</span>))       <span class="c">// goes to the CommandRunner it was given</span></code></pre>
+<p>The host is itself composed: a root directory, a home, environment variables, and a <code>CommandRunner</code>
+(argv only, never a shell, always a timeout). Swap the runner and the same sources run against recorded output in
+tests, or another computer over SSH later.</p>
+
+<h3><code>Housekeeper</code>: the composition root</h3>
+<pre><code><span class="k">let</span> host = Host::local();
+<span class="k">let</span> platform = LinuxPlatform::detect(&amp;host);          <span class="c">// picks the parts for this distro</span>
+<span class="k">let</span> housekeeper = Housekeeper::new(Box::new(platform), host);
+<span class="k">let</span> scan = housekeeper.scan(&amp;Selection::All);          <span class="c">// every source, in parallel</span></code></pre>
+
+<!-- ======================================================================= -->
+<h2 id="assembly">5. How the parts are assembled</h2>
+<figure>
+<svg viewBox="0 0 900 430" width="100%" role="img" aria-label="Object composition diagram">
+  <rect class="box core" x="20" y="20" width="220" height="70" rx="10"/>
+  <text class="title" x="130" y="50" text-anchor="middle">Housekeeper</text>
+  <text class="small" x="130" y="72" text-anchor="middle">scan() · probe()</text>
+
+  <rect class="box linux" x="330" y="20" width="250" height="70" rx="10"/>
+  <text class="title" x="455" y="50" text-anchor="middle">LinuxPlatform</text>
+  <text class="small" x="455" y="72" text-anchor="middle">: Platform</text>
+
+  <rect class="box core" x="20" y="200" width="220" height="70" rx="10"/>
+  <text class="title" x="130" y="230" text-anchor="middle">Host</text>
+  <text class="small" x="130" y="252" text-anchor="middle">root · home · env vars</text>
+
+  <rect class="box core" x="20" y="340" width="220" height="70" rx="10"/>
+  <text class="title" x="130" y="370" text-anchor="middle">CommandRunner</text>
+  <text class="small" x="130" y="392" text-anchor="middle">SystemRunner · FakeRunner · (SSH)</text>
+
+  <rect class="box linux" x="660" y="20" width="220" height="70" rx="10"/>
+  <text class="title" x="770" y="50" text-anchor="middle">Distro</text>
+  <text class="small" x="770" y="72" text-anchor="middle">os-release → family</text>
+
+  <!-- sources stack -->
+  <rect class="box linux" x="330" y="160" width="250" height="250" rx="10"/>
+  <text class="title" x="455" y="186" text-anchor="middle">Vec&lt;Box&lt;dyn Source&gt;&gt;</text>
+  <text class="small" x="350" y="214">① native: dpkg | rpm | pacman</text>
+  <text class="small" x="350" y="238">② flatpak</text>
+  <text class="small" x="350" y="262">③ snap</text>
+  <text class="small" x="350" y="286">④ appimage</text>
+  <text class="small" x="350" y="310">⑤ npm · pipx · uv · pip · cargo</text>
+  <text class="small" x="350" y="334">⑥ manual (given the native manager,</text>
+  <text class="small" x="370" y="352">to skip files it owns)</text>
+  <text class="small" x="350" y="384" style="fill: var(--accent)">← every item is just "a Source"</text>
+
+  <path class="has" d="M240 55 H328"/>
+  <text class="label" x="250" y="46">has a</text>
+  <path class="has" d="M130 90 V198"/>
+  <text class="label" x="138" y="150">has a</text>
+  <path class="has" d="M130 270 V338"/>
+  <text class="label" x="138" y="310">has a</text>
+  <path class="has" d="M580 55 H658"/>
+  <text class="label" x="592" y="46">has a</text>
+  <path class="has" d="M455 90 V158"/>
+  <text class="label" x="463" y="128">has many</text>
+  <path class="arrow" d="M330 290 C 280 290, 280 240, 242 236"/>
+  <text class="label" x="252" y="300">read through</text>
+
+  <rect class="box" x="620" y="160" width="260" height="250" rx="10" style="stroke: var(--accent)"/>
+  <text class="title" x="750" y="186" text-anchor="middle">Chosen by Distro.family</text>
+  <text class="small" x="640" y="216">debian → DpkgSource</text>
+  <text class="small" x="640" y="240">fedora, suse → RpmSource</text>
+  <text class="small" x="640" y="264">arch → PacmanSource</text>
+  <text class="small" x="640" y="288">unknown → first manager found</text>
+  <text class="small" x="640" y="330">Exactly one native source, even if</text>
+  <text class="small" x="640" y="350">another manager is installed</text>
+  <text class="small" x="640" y="370">(decision D2).</text>
+</svg>
+<figcaption>Diamond arrows mean "is made of". Nothing in the picture inherits from anything else.</figcaption>
+</figure>
+<p>This is the real assembly code in <code>crates/linux/src/lib.rs</code>, shortened:</p>
+<pre><code><span class="k">let</span> distro = Distro::detect(host);                 <span class="c">// reads /etc/os-release</span>
+<span class="k">let</span> native = native_manager(&amp;distro, host);        <span class="c">// Some(Dpkg) on Ubuntu</span>
+<span class="k">let mut</span> sources: Vec&lt;Box&lt;<span class="k">dyn</span> Source&gt;&gt; = Vec::new();
+<span class="k">if let</span> Some(native) = native {
+    sources.push(<span class="k">match</span> native {
+        NativeManager::Dpkg =&gt; Box::new(DpkgSource),
+        NativeManager::Rpm =&gt; Box::new(RpmSource::new(distro.image_based)),
+        NativeManager::Pacman =&gt; Box::new(PacmanSource),
+    });
+}
+sources.extend([
+    Box::new(FlatpakSource) <span class="k">as</span> Box&lt;<span class="k">dyn</span> Source&gt;, Box::new(SnapSource), Box::new(AppImageSource),
+    Box::new(NpmSource), Box::new(PipxSource), Box::new(UvToolSource), Box::new(PipUserSource),
+    Box::new(CargoSource), Box::new(ManualSource::new(native)),
+]);</code></pre>
+<p>Notice that Flatpak, Snap, npm and the rest are added on every distribution. Each one decides for itself, in
+<code>probe()</code>, whether it is present. A distribution only influences <strong>which native source</strong> is
+used.</p>
+
+<!-- ======================================================================= -->
+<h2 id="scan">6. What happens during a scan</h2>
+<figure>
+<svg viewBox="0 0 900 300" width="100%" role="img" aria-label="Scan sequence">
+  <rect class="box front" x="20" y="20" width="150" height="44" rx="8"/><text class="title" x="95" y="47" text-anchor="middle">CLI</text>
+  <rect class="box core" x="230" y="20" width="170" height="44" rx="8"/><text class="title" x="315" y="47" text-anchor="middle">Housekeeper</text>
+  <rect class="box linux" x="460" y="20" width="190" height="44" rx="8"/><text class="title" x="555" y="47" text-anchor="middle">each Source (thread)</text>
+  <rect class="box core" x="710" y="20" width="170" height="44" rx="8"/><text class="title" x="795" y="47" text-anchor="middle">Host</text>
+  <path d="M95 64 V285 M315 64 V285 M555 64 V285 M795 64 V285" stroke="var(--line)" stroke-dasharray="4 4"/>
+  <path class="arrow" d="M95 95 H313"/><text class="label" x="110" y="88">scan(All)</text>
+  <path class="arrow" d="M315 125 H553"/><text class="label" x="330" y="118">spawn one thread per source</text>
+  <path class="arrow" d="M555 155 H793"/><text class="label" x="570" y="148">probe: program/socket there?</text>
+  <path class="arrow" d="M555 190 H793"/><text class="label" x="570" y="183">inventory: read files / run argv</text>
+  <path class="arrow" d="M553 225 H317"/><text class="label" x="335" y="218">packages, or an error, or a panic</text>
+  <path class="arrow" d="M313 260 H97"/><text class="label" x="110" y="253">Scan: system, per-source status, sorted packages</text>
+</svg>
+<figcaption>A source that fails or even panics is reported as "failed" with a reason; the others still appear (decision D14).</figcaption>
+</figure>
+
+<!-- ======================================================================= -->
+<h2 id="capabilities">7. Adding abilities later without touching existing sources</h2>
+<p>Today sources can only read. Later phases add abilities as <strong>separate traits</strong> that a source offers
+as an optional component:</p>
+<pre><code><span class="k">trait</span> <span class="t">Source</span> {
+    <span class="c">// … info, probe, inventory as today …</span>
+    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// Phase 2: "who installed this file?"</span>
+    <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// Phase 3/4: plan and run removal</span>
+    <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// Phase 5: install a downloaded file</span>
+    <span class="k">fn</span> updater(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Updater&gt;       { None }  <span class="c">// Phase 7</span>
+}</code></pre>
+<ul>
+  <li>The default is "I can't", so adding <code>remover()</code> does not break the eleven sources that don't
+  implement it yet.</li>
+  <li>The app asks "can this source remove things?" by checking for <code>Some</code>. The answer is honest
+  instead of a fake method that throws.</li>
+  <li>An AppImage source can offer <code>remover()</code> (delete the file and its menu entry) without offering
+  <code>updater()</code>.</li>
+</ul>
+
+<!-- ======================================================================= -->
+<h2 id="new-distro">8. Supporting a distribution that isn't supported today</h2>
+<p>There are three cases. Most new distributions are the first or second.</p>
+
+<table>
+  <tr><th>Case</th><th>Example</th><th>Work</th></tr>
+  <tr><td><strong>A. A relative of a known family</strong></td><td>Linux Mint, Pop!_OS, Rocky, Manjaro, CachyOS, a new Ubuntu flavour</td><td>Usually nothing: <code>ID_LIKE</code> in <code>/etc/os-release</code> already says "debian", "fedora" or "arch". At most, one ID added to a list.</td></tr>
+  <tr><td><strong>B. A new native package manager</strong></td><td>Alpine (apk), Void (xbps), Gentoo (portage), Solus (eopkg)</td><td>One new source file, one family, three small wiring edits (worked example below).</td></tr>
+  <tr><td><strong>C. A different model of the system</strong></td><td>NixOS, Guix</td><td>A new source (e.g. Nix profiles) and no "native" source: the system configuration is declarative, so it is listed, not removed.</td></tr>
+</table>
+
+<h3>Case A in practice</h3>
+<pre><code><span class="c">// crates/linux/src/distro.rs: the only change, if any</span>
+<span class="s">"debian"</span> | <span class="s">"ubuntu"</span> | <span class="s">"linuxmint"</span> | <span class="s">"pop"</span> | … | <span class="s">"my-new-flavour"</span> =&gt; Self::Debian,</code></pre>
+<p>Distributions that set <code>ID_LIKE=debian</code> (or <code>fedora</code>, <code>arch</code>, <code>suse</code>) are recognised
+with no change at all, because detection checks <code>ID</code> first and then each <code>ID_LIKE</code> entry.</p>
+
+<h3>Case B worked example: adding Alpine Linux</h3>
+<p>Alpine uses <code>apk</code>. Its installed-package database is a plain text file,
+<code>/lib/apk/db/installed</code>: one block per package, with lines like <code>P:</code> (name), <code>V:</code> (version),
+<code>T:</code> (description) and <code>I:</code> (installed size). The packages the user asked for are listed in
+<code>/etc/apk/world</code>. That is everything a source needs.</p>
+
+<ol class="steps">
+  <li><strong>Teach detection the family</strong> (<code>distro.rs</code>):
+<pre><code><span class="k">pub enum</span> Family { Debian, Fedora, Suse, Arch, <span class="t">Alpine</span>, Unknown }
+<span class="c">// in Family::from_id</span>
+<span class="s">"alpine"</span> | <span class="s">"postmarketos"</span> =&gt; Self::Alpine,</code></pre></li>
+
+  <li><strong>Write the source</strong>, a new file <code>sources/apk.rs</code> following <code>dpkg.rs</code>:
+<pre><code><span class="k">pub struct</span> <span class="t">ApkSource</span>;
+
+<span class="k">impl</span> Source <span class="k">for</span> ApkSource {
+    <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"apk"</span>, <span class="s">"Alpine packages"</span>, SourceKind::System) }
+
+    <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability {
+        <span class="k">if</span> host.exists(<span class="s">"/lib/apk/db/installed"</span>) { Availability::Available { version: None } }
+        <span class="k">else</span> { Availability::unavailable(<span class="s">"no apk database"</span>) }
+    }
+
+    <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; {
+        <span class="k">let</span> db = host.read_to_string(<span class="s">"/lib/apk/db/installed"</span>)?;
+        <span class="k">let</span> world = host.read_optional(<span class="s">"/etc/apk/world"</span>)?.unwrap_or_default();
+        parse(&amp;db, &amp;world)   <span class="c">// P:/V:/T:/I: blocks; names in `world` → Explicit, others → Dependency</span>
+    }
+}</code></pre></li>
+
+  <li><strong>Tell the manual source how to ask apk "who owns this file?"</strong> (<code>owner.rs</code>):
+<pre><code><span class="k">pub enum</span> NativeManager { Dpkg, Rpm, Pacman, <span class="t">Apk</span> }
+<span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;"</span></code></pre></li>
+
+  <li><strong>Wire it in</strong> (<code>lib.rs</code>), three lines:
+<pre><code>Family::Alpine =&gt; Some(NativeManager::Apk),              <span class="c">// native_manager()</span>
+(<span class="s">"apk"</span>, NativeManager::Apk),                             <span class="c">// fallback probe list</span>
+NativeManager::Apk =&gt; Box::new(ApkSource),                <span class="c">// LinuxPlatform::detect</span></code></pre></li>
+
+  <li><strong>Test it without an Alpine machine</strong>: a <code>Fixture</code> with a sample
+  <code>/lib/apk/db/installed</code> and <code>/etc/apk/world</code>, and a <code>FakeRunner</code> answering the
+  <code>apk info --who-owns</code> call.</li>
+
+  <li><strong>Prove it on the real thing</strong>: add <code>alpine:latest</code> to the CI container matrix and
+  <code>apk</code> to the package formats (the packaging tool, nfpm, already builds <code>.apk</code> files). The
+  Housekeeper binary is statically linked against musl, Alpine's own C library, so the same binary runs there.</li>
+</ol>
+
+<div class="callout">
+<strong>What did <em>not</em> change:</strong> core, the CLI, and the other eleven sources. Flatpak, npm, pipx, cargo,
+AppImage and manual detection work on Alpine the moment the apk source exists, because they never depended on the
+distribution in the first place.
+</div>
+
+<h3>Where the data lives on other candidates</h3>
+<p class="muted">Starting points for future sources; each must be checked against the distribution's documentation
+when it is implemented.</p>
+<table>
+  <tr><th>Distribution</th><th>Installed packages</th><th>"Installed on purpose" list</th></tr>
+  <tr><td>Void Linux (xbps)</td><td><code>xbps-query -l</code>, or the package database under <code>/var/db/xbps/</code></td><td><code>xbps-query -m</code> (manual packages)</td></tr>
+  <tr><td>Gentoo (Portage)</td><td>One directory per package under <code>/var/db/pkg/&lt;category&gt;/</code></td><td><code>/var/lib/portage/world</code></td></tr>
+  <tr><td>Solus (eopkg)</td><td><code>eopkg list-installed</code></td><td>to be checked</td></tr>
+  <tr><td>NixOS / Nix</td><td><code>nix profile list --json</code> (user profiles)</td><td>everything in a profile was asked for; the system itself comes from configuration</td></tr>
+</table>
+
+<!-- ======================================================================= -->
+<h2 id="new-os">9. Supporting another operating system</h2>
+<p>The same shape, one level up. A new crate implements <code>Platform</code> and its own sources:</p>
+<pre><code><span class="c">// crates/macos/src/lib.rs (future)</span>
+<span class="k">pub struct</span> <span class="t">MacPlatform</span> { system: SystemInfo, sources: Vec&lt;Box&lt;<span class="k">dyn</span> Source&gt;&gt; }
+<span class="c">// sources: HomebrewSource, AppBundleSource (/Applications), MacAppStoreSource,
+// and the cross-platform ones (npm, pipx, uv, cargo) reused as-is from a shared crate.</span>
+
+<span class="c">// crates/cli/src/main.rs: the only front-end change</span>
+#[cfg(target_os = <span class="s">"macos"</span>)]
+<span class="k">fn</span> platform(host: &amp;Host) -&gt; Result&lt;Box&lt;<span class="k">dyn</span> Platform&gt;&gt; { Ok(Box::new(housekeeper_macos::MacPlatform::detect(host))) }</code></pre>
+<p>Core needs no changes: it already reports <code>SystemInfo.os</code> as a plain string and treats every source the
+same way. The language-tool sources (npm, pipx, uv, cargo) read their own metadata files, so moving them into a
+shared crate is the one refactor this step would need.</p>
+
+<!-- ======================================================================= -->
+<h2 id="testing">10. Why this makes testing easy</h2>
+<div class="grid">
+  <div class="card"><h4>Fake file system</h4><p><code>Fixture</code> creates a throwaway directory and a
+  <code>Host</code> rooted there. <code>/var/lib/pacman/local/…</code> written by a test is what the pacman source
+  reads.</p></div>
+  <div class="card"><h4>Recorded commands</h4><p><code>FakeRunner</code> answers exact command lines with
+  recorded output, and fails the test on any command it did not expect.</p></div>
+  <div class="card"><h4>Real distributions in CI</h4><p>Every pull request installs the package on Debian, Ubuntu,
+  Fedora, AlmaLinux, openSUSE, Arch (x86_64 and aarch64) and checks the Silverblue image, then reads each real package
+  database.</p></div>
+</div>
+<p>So a contributor can add a source for a distribution they don't run: unit tests use sample files, and CI runs it
+on the real system.</p>
+
+<!-- ======================================================================= -->
+<h2 id="limits">11. Honest limits and the next step</h2>
+<div class="callout warn">
+<p style="margin-top:0"><strong>Today, the native package manager appears in two places.</strong> Besides its
+<code>Source</code>, there is a closed <code>NativeManager</code> enum (<code>owner.rs</code>) that the manual source uses
+to ask "does a package own this file?". That is why step 3 and step 4 above touch <code>owner.rs</code> and three
+<code>match</code> arms in <code>lib.rs</code>.</p>
+<p style="margin-bottom:0"><strong>Planned fix (Phase 2, chunk 2.3):</strong> "who owns this file?" becomes the
+<code>OwnerLookup</code> capability from section 7. The native source offers it itself, and the manual source is given
+<code>Option&lt;&amp;dyn OwnerLookup&gt;</code> instead of the enum. The enum disappears, and adding a distribution
+shrinks to: <em>one new source file + one family entry</em>.</p>
+</div>
+<figure>
+<svg viewBox="0 0 900 190" width="100%" role="img" aria-label="Files touched to add a distribution, now and after Phase 2.3">
+  <text class="title" x="20" y="28">Files touched to add a distribution</text>
+  <text class="label" x="20" y="70">Today</text>
+  <rect x="130" y="52" width="150" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="205" y="72" text-anchor="middle">sources/apk.rs (new)</text>
+  <rect x="290" y="52" width="130" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="355" y="72" text-anchor="middle">distro.rs</text>
+  <rect x="430" y="52" width="130" height="30" rx="6" fill="none" stroke="var(--warn)" stroke-width="1.5"/><text class="small" x="495" y="72" text-anchor="middle">owner.rs</text>
+  <rect x="570" y="52" width="160" height="30" rx="6" fill="none" stroke="var(--warn)" stroke-width="1.5"/><text class="small" x="650" y="72" text-anchor="middle">lib.rs (3 match arms)</text>
+  <text class="label" x="20" y="130">After 2.3</text>
+  <rect x="130" y="112" width="150" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="205" y="132" text-anchor="middle">sources/apk.rs (new)</text>
+  <rect x="290" y="112" width="130" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="355" y="132" text-anchor="middle">distro.rs</text>
+  <rect x="430" y="112" width="160" height="30" rx="6" fill="none" stroke="var(--linux)" stroke-width="1.5"/><text class="small" x="510" y="132" text-anchor="middle">lib.rs (1 line)</text>
+  <text class="small" x="20" y="176">Red: edits caused by the NativeManager enum. Green: edits any new distribution needs.</text>
+</svg>
+</figure>
+<p>Other deliberate limits:</p>
+<ul>
+  <li><strong>Sources are compiled in, not loaded as plugins.</strong> A new source means a new release. This keeps
+  the privileged parts (Phase 4) auditable; uninstall <em>recipes</em> for script-installed tools are data files
+  instead, so those can be added without a release.</li>
+  <li><strong>One native source per system</strong> (decision D2). A stray <code>rpm</code> on Ubuntu is ignored on
+  purpose, so its empty database never shows up as a second "system".</li>
+</ul>
+
+<!-- ======================================================================= -->
+<h2 id="files">12. Where things live</h2>
+<table>
+  <tr><th>Path</th><th>What</th></tr>
+  <tr><td><code>crates/core/src/model.rs</code></td><td><code>Package</code>, <code>SourceInfo</code>, <code>SystemInfo</code>, kinds, reasons, scopes</td></tr>
+  <tr><td><code>crates/core/src/source.rs</code>, <code>platform.rs</code></td><td>The <code>Source</code> and <code>Platform</code> traits</td></tr>
+  <tr><td><code>crates/core/src/host.rs</code>, <code>command.rs</code></td><td><code>Host</code> and <code>CommandRunner</code></td></tr>
+  <tr><td><code>crates/core/src/inventory.rs</code></td><td><code>Housekeeper</code>: the parallel scan</td></tr>
+  <tr><td><code>crates/core/src/testing.rs</code></td><td><code>Fixture</code> and <code>FakeRunner</code> for tests</td></tr>
+  <tr><td><code>crates/linux/src/distro.rs</code></td><td><code>os-release</code> parsing and families</td></tr>
+  <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks and assembles the sources</td></tr>
+  <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
+  <tr><td><code>crates/linux/src/owner.rs</code></td><td>"Who owns this path?" for the native managers (to be replaced in 2.3)</td></tr>
+  <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line; picks the platform per OS</td></tr>
+  <tr><td><code>docs/ARCHITECTURE.md</code></td><td>The same architecture in short, plus every design decision (D1–D17)</td></tr>
+</table>
+
+</main>
+</body>
+</html>

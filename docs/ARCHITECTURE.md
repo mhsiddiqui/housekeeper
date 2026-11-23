@@ -1,5 +1,8 @@
 # Architecture
 
+An illustrated walkthrough of this document, including a step-by-step example of adding a distribution, is in
+[architecture.html](architecture.html) (open it in a browser).
+
 ## Layers
 
 ```mermaid

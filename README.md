@@ -38,6 +38,7 @@ Nothing is changed on the system: this version only reads. From a source checkou
 ## Documents
 - [Product spec](docs/SPEC.md): what Housekeeper does and why.
 - [Architecture](docs/ARCHITECTURE.md): how the code is organised and the design decisions.
+  [Illustrated guide](docs/architecture.html): composition, and how to add a distribution or operating system.
 - [Build plan](docs/PLAN.md): phases and chunks, with status.
 - [Changelog](CHANGELOG.md).
 - [Contributing](CONTRIBUTING.md): branch-per-task workflow and the checks CI runs.
