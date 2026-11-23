@@ -1,0 +1,20 @@
+[package]
+name = "housekeeper-linux"
+description = "Linux platform for Housekeeper: distribution detection and one source per way software gets installed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+housekeeper-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+housekeeper-core = { workspace = true, features = ["test-support"] }
+
+[lints]
+workspace = true
