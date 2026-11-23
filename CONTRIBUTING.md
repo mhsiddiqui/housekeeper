@@ -17,7 +17,8 @@ change can be tracked and reviewed on its own.
    - [CHANGELOG.md](CHANGELOG.md): an entry under **Unreleased** when users would notice.
    - [README.md](README.md): when usage or installation changes.
    - [docs/architecture/README.md](docs/architecture/README.md): when a design decision is made or changed.
-5. Push the branch and open a pull request against `main`. Merge once CI is green.
+5. Push the branch and open a pull request against `main`. Merging is blocked until the `ci-ok` check is green, which
+   requires every CI job to pass ([repository settings](docs/development/repository-settings.md)).
 
 AI coding agents follow the same rules, summarised in [AGENTS.md](AGENTS.md).
 

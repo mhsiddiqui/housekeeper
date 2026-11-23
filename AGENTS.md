@@ -21,8 +21,9 @@ way software gets installed), `crates/cli` (the `housekeeper` command).
    in the change record.
 2. Commit in small steps with Conventional Commit subjects (`feat(linux): …`, `fix(cli): …`, `docs: …`). Never commit to
    `main` directly, never force-push shared branches.
-3. Push the branch and open a pull request against `main` (or against the branch it is stacked on). Merge only when CI
-   is green.
+3. Push the branch and open a pull request against `main` (or against the branch it is stacked on). GitHub blocks the
+   merge until the `ci-ok` check is green, i.e. every CI job passed
+   ([repository settings](docs/development/repository-settings.md)). Never ask for the rule to be bypassed.
 
 ## Definition of done
 A branch is ready for review only when all of these hold:
