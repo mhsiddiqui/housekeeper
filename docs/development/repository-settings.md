@@ -8,6 +8,10 @@ Merging into `main` is blocked until CI is fully green. CI's last job, `ci-ok`
 dependency audit, both package builds and every distribution test. The ruleset requires that single check, so it never
 needs updating when distributions are added to or removed from the matrix.
 
+**Status:** active since 2026-11-23 (ruleset `main`, id 27909093). Checked through the API
+(`GET /repos/mhsiddiqui/housekeeper/rules/branches/main`): deletion, non-fast-forward, pull request and required
+status check `ci-ok` (GitHub Actions, strict) rules apply to `main`.
+
 ### Ruleset (Settings → Rules → Rulesets → New ruleset → New branch ruleset)
 | Field | Value |
 |---|---|
