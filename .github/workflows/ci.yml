@@ -65,3 +65,19 @@ jobs:
 
   packages:
     uses: ./.github/workflows/packages.yml
+
+  # The one check branch protection requires: green only when every job above (and every package/distro job inside
+  # `packages`) succeeded. Failed, cancelled or skipped jobs make it red, so the ruleset never needs the matrix names.
+  ci-ok:
+    if: always()
+    needs: [lint, test, msrv, docs, dependencies, packages]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || { echo "::error::a required job ended with: $result"; exit 1; }
+          done
