@@ -14,8 +14,8 @@ pass before merging; each chunk updates the docs it affects (this plan, README, 
 |---|---|
 | 0.1 ✅ | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
 | 0.2 ✅ | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
-| 0.3 🚧 | Full test pipeline: lint, tests, minimum Rust version (1.85), docs, dependency audit (`cargo deny`), packages installed and removed on every supported distribution for x86_64 and aarch64, Silverblue image |
-| 0.4 🚧 | Releases: publishing a GitHub release builds static `.deb`, `.rpm`, Arch package and tarball for x86_64 and aarch64, tests them, and attaches them with `SHA256SUMS` |
+| 0.3 ✅ | Full test pipeline: lint, tests, minimum Rust version (1.85), docs, dependency audit (`cargo deny`), packages installed and removed on every supported distribution for x86_64 and aarch64, Silverblue image (29 jobs) |
+| 0.4 🚧 | Releases: publishing a GitHub release builds static `.deb`, `.rpm`, Arch package and tarball for x86_64 and aarch64, tests them, and attaches them with `SHA256SUMS`. Build and tests run on every pull request; the upload step is confirmed by the first release (v0.1.0) |
 
 ## Phase 1: Inventory (read-only) ✅
 Goal: `housekeeper list` shows every installed app on Ubuntu/Debian, Fedora, openSUSE, Arch and Silverblue, from every
