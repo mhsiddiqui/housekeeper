@@ -1,8 +1,8 @@
 # Housekeeper: one place to see, install, and remove every app, on any distro
 
 Name: **Housekeeper** ("Every app, however it got here."). Target: every mainstream desktop Linux. The app detects the
-distro and adapts to it. It does not assume Ubuntu. Build plan: [PLAN.md](PLAN.md); design decisions:
-[ARCHITECTURE.md](ARCHITECTURE.md).
+distro and adapts to it. It does not assume Ubuntu. Build plan: [plan.md](../planning/plan.md); design decisions:
+[architecture](../architecture/README.md).
 
 ## Problem
 

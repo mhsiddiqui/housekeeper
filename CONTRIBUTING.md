@@ -1,7 +1,7 @@
 # Contributing
 
 ## One branch per task
-Every chunk in the [build plan](docs/PLAN.md) is done on its own branch and merged through a pull request, so each
+Every chunk in the [build plan](docs/planning/plan.md) is done on its own branch and merged through a pull request, so each
 change can be tracked and reviewed on its own.
 
 1. Start from an up-to-date `main`: `git switch main && git pull`.
@@ -10,12 +10,16 @@ change can be tracked and reviewed on its own.
    Types: `feat`, `fix`, `refactor`, `test`, `ci`, `docs`, `chore`.
 3. Commit in small steps with [Conventional Commits](https://www.conventionalcommits.org/) subjects
    (`feat(linux): …`, `ci: …`).
-4. Update the documentation the change affects, in the same branch:
-   - [docs/PLAN.md](docs/PLAN.md): chunk status.
-   - [CHANGELOG.md](CHANGELOG.md): an entry under **Unreleased**.
+4. Update the documentation the change affects, in the same branch (the full table is in
+   [docs/README.md](docs/README.md#which-document-to-update)):
+   - [docs/changes/](docs/changes/README.md): a new change record. **Every branch has one.**
+   - [docs/planning/plan.md](docs/planning/plan.md): chunk status.
+   - [CHANGELOG.md](CHANGELOG.md): an entry under **Unreleased** when users would notice.
    - [README.md](README.md): when usage or installation changes.
-   - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): when a design decision is made or changed.
+   - [docs/architecture/README.md](docs/architecture/README.md): when a design decision is made or changed.
 5. Push the branch and open a pull request against `main`. Merge once CI is green.
+
+AI coding agents follow the same rules, summarised in [AGENTS.md](AGENTS.md).
 
 ## Checks
 CI runs all of these on every pull request ([ci.yml](.github/workflows/ci.yml)). To run them locally:
@@ -40,7 +44,7 @@ docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" fedora:lat
 ```
 
 ## Code
-- Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first. New ways of installing software are new `Source`
+- Read [docs/architecture/README.md](docs/architecture/README.md) first. New ways of installing software are new `Source`
   implementations; nothing else needs to change.
 - Sources read the machine only through `Host` (logical paths, injected command runner), so every source is tested
   with fixture files and recorded command output.
