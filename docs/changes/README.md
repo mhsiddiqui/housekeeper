@@ -25,4 +25,5 @@ links back.
 | [0009](0009-appimage-and-manual-sources.md) | AppImage and manual-install sources | 1.6 | `main` |
 | [0010](0010-test-and-release-pipeline.md) | Full test pipeline and release packages | 0.3, 0.4 | #1 |
 | [0011](0011-architecture-guide.md) | Illustrated architecture guide | none | with 0012 |
-| [0012](0012-docs-section-and-agents.md) | Documentation section, change records and AGENTS.md | none | `docs/docs-section` |
+| [0012](0012-docs-section-and-agents.md) | Documentation section, change records and AGENTS.md | none | #2 |
+| [0013](0013-merge-gate.md) | Block merging until every CI job is green | 0.5 | `ci/required-checks` |
