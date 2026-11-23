@@ -6,19 +6,19 @@ tool usable. Later phases only add capabilities; they never require rewriting ea
 
 Status: ✅ done · 🚧 in progress · ⬜ not started. Every chunk is committed and pushed as soon as it is done.
 
-## Phase 0: Foundation ⬜
+## Phase 0: Foundation ✅
 | Chunk | Delivers |
 |---|---|
 | 0.1 | Cargo workspace (`core`, `linux`, `cli`), MIT licence, README, docs, mockup under `design/mockup/` |
 | 0.2 | CI: `cargo fmt --check`, `clippy -D warnings`, tests |
 
-## Phase 1: Inventory (read-only) ⬜
+## Phase 1: Inventory (read-only) 🚧
 Goal: `housekeeper list` shows every installed app on Ubuntu/Debian, Fedora, openSUSE, Arch and Silverblue, from every
 source, without root and without changing anything.
 
 | Chunk | Delivers |
 |---|---|
-| 1.1 | Core model (`Package`, `SourceInfo`), `Source` and `Platform` traits, `Host` (root prefix, home, env), `CommandRunner` with timeouts, parallel `Inventory` scan |
+| 1.1 ✅ | Core model (`Package`, `SourceInfo`), `Source` and `Platform` traits, `Host` (root prefix, home, env), `CommandRunner` with timeouts, parallel `Inventory` scan |
 | 1.2 | Linux platform: `/etc/os-release` parsing, distro family, image-based detection, native backend selection; dpkg source |
 | 1.3 | rpm source (incl. rpm-ostree layered packages), pacman source (local database files) |
 | 1.4 | Flatpak source (CLI columns), Snap source (snapd REST API over `/run/snapd.socket`) |
