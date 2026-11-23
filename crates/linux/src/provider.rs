@@ -26,11 +26,10 @@ pub struct Native {
     pub program: &'static str,
 }
 
-/// What a source can use while it is being created.
+/// What a source can use while it is being created. Sources that need other sources reach them while being read,
+/// through `housekeeper_core::ScanContext`, not here.
 pub struct Context<'a> {
     pub distro: &'a Distro,
-    /// The native package manager chosen for this system, if any. Created before every other source.
-    pub native: Option<Arc<dyn Source>>,
 }
 
 /// Implemented, next to [`Source`], by every Linux source.

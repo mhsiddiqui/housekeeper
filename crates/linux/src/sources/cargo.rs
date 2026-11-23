@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use housekeeper_core::{
     Availability, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    SourceKind, ScanContext,
 };
 use serde::Deserialize;
 
@@ -39,36 +39,38 @@ impl Source for CargoSource {
         }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let home = cargo_home(host);
-        let installs = if let Some(json) = host.read_optional(home.join(".crates2.json"))? {
-            parse_crates2(&json)?
-        } else if let Some(toml) = host.read_optional(home.join(".crates.toml"))? {
-            parse_crates_v1(&toml)?
-        } else {
-            return Ok(Vec::new());
-        };
-        let bin = home.join("bin");
-        let scope = if bin.starts_with(host.home()) {
-            Scope::User
-        } else {
-            Scope::System
-        };
-        installs
-            .into_iter()
-            .map(|(key, bins)| {
-                let (name, version, source) = split_key(&key)?;
-                let mut package = Package::new(ID, name, name, scope);
-                package.version = Some(version.to_string());
-                package.origin = Some(origin(source));
-                package.location = Some(bin.clone());
-                package.commands = bins;
-                package.kind = PackageKind::App;
-                package.reason = InstallReason::Explicit;
-                Ok(package)
-            })
-            .collect()
+    fn install_roots(&self, host: &Host) -> Vec<PathBuf> {
+        vec![cargo_home(host)]
     }
+
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = cargo_home(host);
+    let installs = if let Some(json) = host.read_optional(home.join(".crates2.json"))? {
+        parse_crates2(&json)?
+    } else if let Some(toml) = host.read_optional(home.join(".crates.toml"))? {
+        parse_crates_v1(&toml)?
+    } else {
+        return Ok(Vec::new());
+    };
+    let bin = home.join("bin");
+    let scope = if bin.starts_with(host.home()) {
+        Scope::User
+    } else {
+        Scope::System
+    };
+    installs
+        .into_iter()
+        .map(|(key, bins)| {
+            let (name, version, source) = split_key(&key)?;
+            let mut package = Package::new(ID, name, name, scope);
+            package.version = Some(version.to_string());
+            package.origin = Some(origin(source));
+            package.location = Some(bin.clone());
+            package.commands = bins;
+            package.kind = PackageKind::App;
+            package.reason = InstallReason::Explicit;
+            Ok(package)
+        })
+        .collect() }
 }
 
 /// `$CARGO_HOME`, defaulting to `~/.cargo`.
@@ -166,7 +168,7 @@ mod tests {
             "/home/user/.cargo/.crates.toml",
             "[v1]\n\"stale 0.1.0 (path+file:///x)\" = [\"stale\"]\n",
         );
-        let packages = CargoSource.inventory(&fixture.host(FakeRunner::new())).unwrap();
+        let packages = CargoSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["cargo-packager", "mytool", "rmux", "zellij"]);
 
@@ -191,7 +193,7 @@ mod tests {
         let fixture = Fixture::new();
         fixture.file("/opt/cargo/.crates.toml", CRATES_V1);
         let host = fixture.host_with_vars(FakeRunner::new(), &[("CARGO_HOME", "/opt/cargo")]);
-        let packages = CargoSource.inventory(&host).unwrap();
+        let packages = CargoSource.inventory(&host, &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["cargo-packager", "rmux"]);
         assert_eq!(find(&packages, "rmux").commands, ["rmux", "rmux-daemon"]);
@@ -208,7 +210,7 @@ mod tests {
         fixture.dir("/home/user/.cargo/bin");
         assert!(
             CargoSource
-                .inventory(&fixture.host(FakeRunner::new()))
+                .inventory(&fixture.host(FakeRunner::new()), &ScanContext::default())
                 .unwrap()
                 .is_empty()
         );
@@ -219,7 +221,7 @@ mod tests {
         let fixture = Fixture::new();
         fixture.file("/home/user/.cargo/.crates2.json", "{\"installs\": [");
         assert!(matches!(
-            CargoSource.inventory(&fixture.host(FakeRunner::new())),
+            CargoSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
         fixture.file(
@@ -227,7 +229,7 @@ mod tests {
             r#"{"installs":{"just-a-name":{"bins":[]}}}"#,
         );
         assert!(matches!(
-            CargoSource.inventory(&fixture.host(FakeRunner::new())),
+            CargoSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
     }

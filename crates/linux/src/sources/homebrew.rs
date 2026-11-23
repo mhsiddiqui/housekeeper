@@ -8,7 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use housekeeper_core::{
     Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    SourceKind, ScanContext,
 };
 use serde::Deserialize;
 
@@ -43,29 +43,27 @@ impl Source for HomebrewSource {
         }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let prefixes = prefixes(host);
-        let qualify = prefixes.len() > 1;
-        let mut packages = Vec::new();
-        for prefix in &prefixes {
-            let scope = if prefix.starts_with(host.home()) {
-                Scope::User
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let prefixes = prefixes(host);
+    let qualify = prefixes.len() > 1;
+    let mut packages = Vec::new();
+    for prefix in &prefixes {
+        let scope = if prefix.starts_with(host.home()) {
+            Scope::User
+        } else {
+            Scope::System
+        };
+        // Ids only need the prefix when two installations exist side by side.
+        let id = |kind: &str, name: &str| {
+            if qualify {
+                format!("{}:{kind}/{name}", prefix.display())
             } else {
-                Scope::System
-            };
-            // Ids only need the prefix when two installations exist side by side.
-            let id = |kind: &str, name: &str| {
-                if qualify {
-                    format!("{}:{kind}/{name}", prefix.display())
-                } else {
-                    format!("{kind}/{name}")
-                }
-            };
-            packages.extend(formulae(host, prefix, scope, &id)?);
-            packages.extend(casks(host, prefix, scope, &id)?);
-        }
-        Ok(packages)
+                format!("{kind}/{name}")
+            }
+        };
+        packages.extend(formulae(host, prefix, scope, &id)?);
+        packages.extend(casks(host, prefix, scope, &id)?);
     }
+    Ok(packages) }
 }
 
 /// Installed prefixes: `$HOMEBREW_PREFIX`, the default `/home/linuxbrew/.linuxbrew`, then `~/.linuxbrew`.
@@ -247,8 +245,7 @@ mod tests {
     }
 
     fn scan(fixture: &Fixture, vars: &[(&str, &str)]) -> Vec<Package> {
-        HomebrewSource
-            .inventory(&fixture.host_with_vars(FakeRunner::new(), vars))
+        HomebrewSource.inventory(&fixture.host_with_vars(FakeRunner::new(), vars), &ScanContext::default())
             .unwrap()
     }
 
@@ -367,6 +364,9 @@ mod tests {
         brew(&fixture, PREFIX);
         fixture.file(&format!("{PREFIX}/Cellar/bad/1.0/INSTALL_RECEIPT.json"), "{not json");
         let host = fixture.host(FakeRunner::new());
-        assert!(matches!(HomebrewSource.inventory(&host), Err(SourceError::Parse { .. })));
+        assert!(matches!(
+            HomebrewSource.inventory(&host, &ScanContext::default()),
+            Err(SourceError::Parse { .. })
+        ));
     }
 }

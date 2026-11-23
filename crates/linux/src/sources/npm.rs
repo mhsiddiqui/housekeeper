@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
     Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    SourceInfo, SourceKind, ScanContext,
 };
 use serde_json::Value;
 
@@ -35,17 +35,31 @@ impl Source for NpmSource {
         }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let mut packages = Vec::new();
-        for root in roots(host)? {
-            for dir in package_dirs(host, &root.dir)? {
-                if let Some(package) = read_package(host, &root, &dir)? {
-                    packages.push(package);
-                }
+    /// Every global `node_modules`, plus the nvm and fnm directories whose Node versions hold them.
+    fn install_roots(&self, host: &Host) -> Vec<PathBuf> {
+        let mut roots = vec![
+            PathBuf::from("/usr/lib/node_modules"),
+            PathBuf::from("/usr/local/lib/node_modules"),
+            host.home().join(".npm-global/lib/node_modules"),
+            host.dir_from_var("NVM_DIR", ".nvm"),
+            fnm_dir(host),
+            host.home().join(".fnm"),
+        ];
+        if let Some(prefix) = npm_prefix(host) {
+            roots.push(Path::new(prefix).join("lib/node_modules"));
+        }
+        roots
+    }
+
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let mut packages = Vec::new();
+    for root in roots(host)? {
+        for dir in package_dirs(host, &root.dir)? {
+            if let Some(package) = read_package(host, &root, &dir)? {
+                packages.push(package);
             }
         }
-        Ok(packages)
     }
+    Ok(packages) }
 }
 
 /// A global `node_modules` directory and the Node installation it belongs to.
@@ -73,7 +87,7 @@ fn roots(host: &Host) -> Result<Vec<Root>, SourceError> {
         Root::new("/usr/lib/node_modules", "system Node", "system"),
         Root::new("/usr/local/lib/node_modules", "system Node", "usr-local"),
     ];
-    if let Some(prefix) = host.var("NPM_CONFIG_PREFIX").filter(|p| p.starts_with('/')) {
+    if let Some(prefix) = npm_prefix(host) {
         roots.push(Root::new(
             Path::new(prefix).join("lib/node_modules"),
             format!("npm prefix {prefix}"),
@@ -95,11 +109,7 @@ fn roots(host: &Host) -> Result<Vec<Root>, SourceError> {
             format!("nvm-{version}"),
         ));
     }
-    let fnm = match host.var("FNM_DIR").filter(|dir| dir.starts_with('/')) {
-        Some(dir) => PathBuf::from(dir),
-        None => host.data_home().join("fnm"),
-    }
-    .join("node-versions");
+    let fnm = fnm_dir(host).join("node-versions");
     for version in version_dirs(host, &fnm)? {
         roots.push(Root::new(
             fnm.join(&version).join("installation/lib/node_modules"),
@@ -115,6 +125,19 @@ fn roots(host: &Host) -> Result<Vec<Root>, SourceError> {
         }
     }
     Ok(unique)
+}
+
+/// `$NPM_CONFIG_PREFIX` when set to an absolute path.
+fn npm_prefix(host: &Host) -> Option<&str> {
+    host.var("NPM_CONFIG_PREFIX").filter(|prefix| prefix.starts_with('/'))
+}
+
+/// `$FNM_DIR`, defaulting to `$XDG_DATA_HOME/fnm`.
+fn fnm_dir(host: &Host) -> PathBuf {
+    match host.var("FNM_DIR").filter(|dir| dir.starts_with('/')) {
+        Some(dir) => PathBuf::from(dir),
+        None => host.data_home().join("fnm"),
+    }
 }
 
 /// Names of the per-version directories of a Node version manager.
@@ -275,7 +298,7 @@ mod tests {
 
     #[test]
     fn lists_packages_per_node_version_with_unique_ids() {
-        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new())).unwrap();
+        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -308,7 +331,7 @@ mod tests {
 
     #[test]
     fn bin_field_becomes_commands_and_decides_kind() {
-        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new())).unwrap();
+        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
         let ts = find(&packages, "nvm-v22.18.0/typescript");
         assert_eq!(ts.commands, ["tsc", "tsserver"]);
         assert_eq!(ts.kind, PackageKind::App);
@@ -344,7 +367,7 @@ mod tests {
             FakeRunner::new(),
             &[("NPM_CONFIG_PREFIX", "/opt/npm"), ("NVM_DIR", "/srv/nvm")],
         );
-        let packages = NpmSource.inventory(&host).unwrap();
+        let packages = NpmSource.inventory(&host, &ScanContext::default()).unwrap();
         let yarn = find(&packages, "system/yarn");
         assert_eq!(yarn.scope, Scope::System);
         assert_eq!(yarn.origin.as_deref(), Some("system Node"));
@@ -367,7 +390,7 @@ mod tests {
         );
         let prefix = format!("{HOME}/.npm-global");
         let host = fixture.host_with_vars(FakeRunner::new(), &[("NPM_CONFIG_PREFIX", &prefix)]);
-        let packages = NpmSource.inventory(&host).unwrap();
+        let packages = NpmSource.inventory(&host, &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["prefix/nodemon"]);
     }
@@ -378,7 +401,7 @@ mod tests {
         fixture
             .file("/usr/local/lib/node_modules/@acme/tool/package.json", "{ not json")
             .dir("/usr/local/lib/node_modules/half-installed");
-        let packages = NpmSource.inventory(&fixture.host(FakeRunner::new())).unwrap();
+        let packages = NpmSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["usr-local/@acme/tool", "usr-local/half-installed"]);
         assert_eq!(packages[0].name, "@acme/tool");

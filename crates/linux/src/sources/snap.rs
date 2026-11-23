@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use housekeeper_core::{
     Availability, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    SourceKind, ScanContext,
 };
 use serde::Deserialize;
 
@@ -41,10 +41,12 @@ impl Source for SnapSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let snaps: Vec<Snap> = get(&host.real_path(SOCKET), "/v2/snaps")?;
-        Ok(snaps.into_iter().map(Snap::into_package).collect())
+    fn install_roots(&self, _host: &Host) -> Vec<PathBuf> {
+        vec![PathBuf::from("/snap")]
     }
+
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let snaps: Vec<Snap> = get(&host.real_path(SOCKET), "/v2/snaps")?;
+    Ok(snaps.into_iter().map(Snap::into_package).collect()) }
 }
 
 #[derive(Deserialize)]
@@ -265,7 +267,7 @@ mod tests {
     fn scan() -> Vec<Package> {
         let fixture = Fixture::new();
         let server = serve(&fixture, http(SNAPS));
-        let packages = SnapSource.inventory(&fixture.host(FakeRunner::new())).unwrap();
+        let packages = SnapSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
         assert!(server.join().unwrap().starts_with("GET /v2/snaps HTTP/1.0\r\n"));
         packages
     }
@@ -328,7 +330,7 @@ mod tests {
         let fixture = Fixture::new();
         let body = r#"{"type":"error","status-code":401,"status":"Unauthorized","result":{"message":"access denied"}}"#;
         let server = serve(&fixture, http(body).replace("200 OK", "401 Unauthorized"));
-        let err = SnapSource.inventory(&fixture.host(FakeRunner::new())).unwrap_err();
+        let err = SnapSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap_err();
         server.join().unwrap();
         assert!(err.to_string().contains("access denied"), "{err}");
     }

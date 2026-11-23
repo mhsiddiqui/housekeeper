@@ -1,6 +1,7 @@
 //! Scanning every source of a platform.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::host::Host;
 use crate::model::{Availability, Package, SourceInfo, SystemInfo};
 use crate::platform::Platform;
-use crate::source::Source;
+use crate::source::{ScanContext, Source};
 
 /// Version of the JSON document produced from a `Scan`. Bumped on incompatible changes.
 pub const SCAN_SCHEMA: u32 = 1;
@@ -18,9 +19,19 @@ pub const SCAN_SCHEMA: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum SourceStatus {
-    Ok { version: Option<String>, packages: usize },
-    Unavailable { reason: String },
-    Failed { error: String },
+    Ok {
+        version: Option<String>,
+        packages: usize,
+        /// Problems that did not stop the source; its list may be incomplete.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
+    Unavailable {
+        reason: String,
+    },
+    Failed {
+        error: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,9 +105,10 @@ impl Housekeeper {
             .collect();
 
         let results: Vec<(SourceReport, Vec<Package>)> = thread::scope(|scope| {
+            let all = self.platform.sources();
             let handles: Vec<_> = selected
                 .iter()
-                .map(|source| scope.spawn(|| scan_one(*source, &self.host)))
+                .map(|source| scope.spawn(|| scan_one(*source, &self.host, all)))
                 .collect();
             handles
                 .into_iter()
@@ -138,23 +150,28 @@ impl Housekeeper {
     }
 }
 
-fn scan_one(source: &dyn Source, host: &Host) -> (SourceReport, Vec<Package>) {
+/// `all` is every source of the platform, which the source may consult through its [`ScanContext`].
+fn scan_one(source: &dyn Source, host: &Host, all: &[Arc<dyn Source>]) -> (SourceReport, Vec<Package>) {
     let started = Instant::now();
     let info = source.info();
     let (status, packages) = match catch_unwind(AssertUnwindSafe(|| source.probe(host))) {
         Err(_) => (failed("internal error while probing this source"), Vec::new()),
         Ok(Availability::Unavailable { reason }) => (SourceStatus::Unavailable { reason }, Vec::new()),
-        Ok(Availability::Available { version }) => match catch_unwind(AssertUnwindSafe(|| source.inventory(host))) {
-            Err(_) => (failed("internal error while reading this source"), Vec::new()),
-            Ok(Err(error)) => (failed(error.to_string()), Vec::new()),
-            Ok(Ok(packages)) => (
-                SourceStatus::Ok {
-                    version,
-                    packages: packages.len(),
-                },
-                packages,
-            ),
-        },
+        Ok(Availability::Available { version }) => {
+            let context = ScanContext::new(all);
+            match catch_unwind(AssertUnwindSafe(|| source.inventory(host, &context))) {
+                Err(_) => (failed("internal error while reading this source"), Vec::new()),
+                Ok(Err(error)) => (failed(error.to_string()), Vec::new()),
+                Ok(Ok(packages)) => (
+                    SourceStatus::Ok {
+                        version,
+                        packages: packages.len(),
+                        warnings: context.into_warnings(),
+                    },
+                    packages,
+                ),
+            }
+        }
     };
     let report = SourceReport {
         info,
@@ -193,7 +210,7 @@ mod tests {
                 Availability::unavailable("not installed")
             }
         }
-        fn inventory(&self, _: &Host) -> Result<Vec<Package>, SourceError> {
+        fn inventory(&self, _: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
             (self.behaviour)()
         }
     }
@@ -261,7 +278,8 @@ mod tests {
             status("good"),
             &SourceStatus::Ok {
                 version: None,
-                packages: 2
+                packages: 2,
+                warnings: Vec::new(),
             }
         );
         assert!(matches!(status("broken"), SourceStatus::Failed { error } if error.contains("garbage")));
