@@ -1,0 +1,40 @@
+# One definition for the .deb, .rpm and Arch packages. Built by scripts/package.sh, which stages the binary at
+# target/package/housekeeper. ${VERSION} and ${ARCH} (amd64 | arm64) come from the environment.
+name: housekeeper
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+release: "1"
+section: admin
+priority: optional
+maintainer: Muhammad Hassan Siddiqi <mhassan.eeng@gmail.com>
+description: |-
+  Every installed app, however it got here.
+  Lists apps from the distribution's package manager, Flatpak, Snap, AppImage,
+  npm, pipx, uv, pip, cargo and manual installs.
+vendor: Housekeeper
+homepage: https://github.com/mhsiddiqui/housekeeper
+license: MIT
+
+contents:
+  - src: ./target/package/housekeeper
+    dst: /usr/bin/housekeeper
+    file_info:
+      mode: 0755
+  - src: ./LICENSE
+    dst: /usr/share/licenses/housekeeper/LICENSE
+    file_info:
+      mode: 0644
+  - src: ./README.md
+    dst: /usr/share/doc/housekeeper/README.md
+    file_info:
+      mode: 0644
+  # Debian policy wants the licence here; rpm and Arch use /usr/share/licenses.
+  - src: ./LICENSE
+    dst: /usr/share/doc/housekeeper/copyright
+    file_info:
+      mode: 0644
+
+archlinux:
+  packager: Muhammad Hassan Siddiqi <mhassan.eeng@gmail.com>
