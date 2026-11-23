@@ -1,6 +1,8 @@
 //! One module per way software gets installed on Linux.
 
 pub mod dpkg;
+pub mod flatpak;
+pub mod snap;
 
 /// First non-empty line of a program's output.
 pub(crate) fn version_line(output: &str) -> Option<String> {

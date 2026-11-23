@@ -1,0 +1,250 @@
+//! Flatpak apps and runtimes from every installation (system, user and custom), read through `flatpak list`.
+
+use std::path::Path;
+
+use housekeeper_core::text::parse_human_size;
+use housekeeper_core::{
+    Availability, Cmd, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
+    SourceKind,
+};
+
+use super::version_line;
+
+pub const ID: SourceId = SourceId::new("flatpak");
+
+/// One line per installed ref, tab-separated, in this column order.
+const COLUMNS: &str = "--columns=application,name,description,version,branch,arch,origin,installation,size,options";
+
+/// Where the default system installation keeps its refs.
+const SYSTEM_DIR: &str = "/var/lib/flatpak";
+
+pub struct FlatpakSource;
+
+impl Source for FlatpakSource {
+    fn info(&self) -> SourceInfo {
+        SourceInfo::new("flatpak", "Flatpak", SourceKind::Universal)
+    }
+
+    fn probe(&self, host: &Host) -> Availability {
+        if !host.has_program("flatpak") {
+            return Availability::unavailable("flatpak is not installed");
+        }
+        let version = host
+            .run_ok(&Cmd::new("flatpak").arg("--version"))
+            .ok()
+            .and_then(|out| version_line(&out))
+            .and_then(|line| line.split_whitespace().nth(1).map(str::to_string));
+        Availability::Available { version }
+    }
+
+    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("flatpak").args(["list", COLUMNS]))?;
+        let user_dir = host.data_home().join("flatpak");
+        parse_listing(&listing, &user_dir)
+    }
+}
+
+/// `user_dir` is the logical path of the per-user installation.
+fn parse_listing(listing: &str, user_dir: &Path) -> Result<Vec<Package>, SourceError> {
+    let mut packages = Vec::new();
+    for line in listing.lines().filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [
+            application,
+            name,
+            description,
+            version,
+            branch,
+            arch,
+            origin,
+            installation,
+            size,
+            options,
+        ] = fields[..]
+        else {
+            return Err(SourceError::parse(
+                "flatpak list output",
+                format!("expected 10 fields: {line:?}"),
+            ));
+        };
+        let runtime = options.split(',').any(|option| option == "runtime");
+        let ref_kind = if runtime { "runtime" } else { "app" };
+        let scope = if installation == "user" {
+            Scope::User
+        } else {
+            Scope::System
+        };
+        let id = format!("{installation}/{ref_kind}/{application}/{arch}/{branch}");
+
+        let mut package = Package::new(ID, id, application, scope);
+        package.title = non_empty(name);
+        package.summary = non_empty(description);
+        package.version = non_empty(version);
+        package.size_bytes = parse_human_size(size);
+        package.origin = non_empty(origin);
+        (package.kind, package.reason) = if runtime {
+            (PackageKind::Runtime, InstallReason::Dependency)
+        } else {
+            (PackageKind::App, InstallReason::Explicit)
+        };
+        let installation_dir = match installation {
+            "system" => Some(Path::new(SYSTEM_DIR)),
+            "user" => Some(user_dir),
+            // Custom installations live wherever their configuration in /etc/flatpak/installations.d says.
+            _ => None,
+        };
+        package.location = installation_dir.map(|dir| dir.join(ref_kind).join(application));
+        packages.push(package);
+    }
+    Ok(packages)
+}
+
+fn non_empty(field: &str) -> Option<String> {
+    Some(field.trim().to_string()).filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
+
+    // Sizes use a no-break space between number and unit, as flatpak prints them.
+    const LISTING: &str = "\
+org.godotengine.Godot\tGodot Engine\tEasily create 2D and 3D games\t4.7.2\tstable\tx86_64\tflathub\tsystem\t171.8\u{a0}MB\tsystem,current
+org.freedesktop.Platform.GL.default\tMesa\tMesa - The 3D Graphics Library\t26.2.7\t25.08\tx86_64\tflathub\tsystem\t462.0\u{a0}MB\tsystem,runtime
+org.freedesktop.Platform.GL.default\tMesa (Extra)\tMesa - The 3D Graphics Library\t26.2.7\t25.08-extra\tx86_64\tflathub\tsystem\t462.1\u{a0}MB\tsystem,runtime
+org.freedesktop.Platform.GL.nvidia-595-99-02\tnvidia-595-99-02\t\t\t1.4\tx86_64\tflathub\tsystem\t821.7\u{a0}MB\tsystem,runtime
+com.github.tchx84.Flatseal\tFlatseal\tManage Flatpak permissions\t2.3.0\tstable\tx86_64\tflathub\tuser\t1.2\u{a0}MB\tuser,current
+org.gnome.Platform\tGNOME Application Platform version 48\tShared libraries used by GNOME applications\t\t48\tx86_64\tflathub\tuser\t1.1\u{a0}GB\tuser,runtime
+org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\taarch64\tflathub\textra-disk\t270.3\u{a0}MB\textra-disk,current
+";
+
+    fn scan_with(vars: &[(&str, &str)]) -> Vec<Package> {
+        let fixture = Fixture::new();
+        let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), LISTING);
+        FlatpakSource.inventory(&fixture.host_with_vars(runner, vars)).unwrap()
+    }
+
+    fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
+        packages.iter().find(|p| p.id == id).unwrap()
+    }
+
+    #[test]
+    fn apps_are_explicit_and_runtimes_are_dependencies() {
+        let packages = scan_with(&[]);
+        assert_eq!(packages.len(), 7);
+        let godot = find(&packages, "system/app/org.godotengine.Godot/x86_64/stable");
+        assert_eq!(godot.name, "org.godotengine.Godot");
+        assert_eq!(godot.title.as_deref(), Some("Godot Engine"));
+        assert_eq!(godot.summary.as_deref(), Some("Easily create 2D and 3D games"));
+        assert_eq!(godot.version.as_deref(), Some("4.7.2"));
+        assert_eq!(godot.origin.as_deref(), Some("flathub"));
+        assert_eq!(godot.size_bytes, Some(171_800_000));
+        assert_eq!((godot.kind, godot.reason), (PackageKind::App, InstallReason::Explicit));
+        assert_eq!(godot.scope, Scope::System);
+        assert_eq!(
+            godot.location.as_deref(),
+            Some(Path::new("/var/lib/flatpak/app/org.godotengine.Godot"))
+        );
+
+        let mesa = find(
+            &packages,
+            "system/runtime/org.freedesktop.Platform.GL.default/x86_64/25.08",
+        );
+        assert_eq!(
+            (mesa.kind, mesa.reason),
+            (PackageKind::Runtime, InstallReason::Dependency)
+        );
+        assert_eq!(
+            mesa.location.as_deref(),
+            Some(Path::new(
+                "/var/lib/flatpak/runtime/org.freedesktop.Platform.GL.default"
+            ))
+        );
+    }
+
+    #[test]
+    fn branches_of_the_same_ref_stay_separate() {
+        let packages = scan_with(&[]);
+        let extra = find(
+            &packages,
+            "system/runtime/org.freedesktop.Platform.GL.default/x86_64/25.08-extra",
+        );
+        assert_eq!(extra.title.as_deref(), Some("Mesa (Extra)"));
+        assert_eq!(extra.size_bytes, Some(462_100_000));
+    }
+
+    #[test]
+    fn empty_columns_are_unknown() {
+        let packages = scan_with(&[]);
+        let nvidia = find(
+            &packages,
+            "system/runtime/org.freedesktop.Platform.GL.nvidia-595-99-02/x86_64/1.4",
+        );
+        assert_eq!(nvidia.version, None);
+        assert_eq!(nvidia.summary, None);
+        assert_eq!(nvidia.title.as_deref(), Some("nvidia-595-99-02"));
+    }
+
+    #[test]
+    fn user_installation_lives_in_the_data_home() {
+        let packages = scan_with(&[]);
+        let flatseal = find(&packages, "user/app/com.github.tchx84.Flatseal/x86_64/stable");
+        assert_eq!(flatseal.scope, Scope::User);
+        assert_eq!(
+            flatseal.location,
+            Some(Path::new(HOME).join(".local/share/flatpak/app/com.github.tchx84.Flatseal"))
+        );
+        let gnome = find(&packages, "user/runtime/org.gnome.Platform/x86_64/48");
+        assert_eq!((gnome.kind, gnome.scope), (PackageKind::Runtime, Scope::User));
+
+        let packages = scan_with(&[("XDG_DATA_HOME", "/data/user")]);
+        let flatseal = find(&packages, "user/app/com.github.tchx84.Flatseal/x86_64/stable");
+        assert_eq!(
+            flatseal.location.as_deref(),
+            Some(Path::new("/data/user/flatpak/app/com.github.tchx84.Flatseal"))
+        );
+    }
+
+    #[test]
+    fn custom_installations_are_system_wide_without_a_known_location() {
+        let packages = scan_with(&[]);
+        let firefox = find(&packages, "extra-disk/app/org.mozilla.firefox/aarch64/stable");
+        assert_eq!(firefox.scope, Scope::System);
+        assert_eq!(firefox.location, None);
+        assert_eq!(firefox.kind, PackageKind::App);
+    }
+
+    #[test]
+    fn no_installed_refs_is_an_empty_inventory() {
+        let fixture = Fixture::new();
+        let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), "");
+        assert!(FlatpakSource.inventory(&fixture.host(runner)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn malformed_output_is_an_error() {
+        let fixture = Fixture::new();
+        let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), "org.example.App\tExample\n");
+        assert!(matches!(
+            FlatpakSource.inventory(&fixture.host(runner)),
+            Err(SourceError::Parse { .. })
+        ));
+    }
+
+    #[test]
+    fn probe_reads_the_version() {
+        let fixture = Fixture::new();
+        let runner = FakeRunner::new().respond("flatpak --version", "Flatpak 1.16.1\n");
+        assert_eq!(
+            FlatpakSource.probe(&fixture.host(runner)),
+            Availability::Available {
+                version: Some("1.16.1".into())
+            }
+        );
+        assert!(matches!(
+            FlatpakSource.probe(&fixture.host(FakeRunner::new())),
+            Availability::Unavailable { .. }
+        ));
+    }
+}

@@ -6,7 +6,7 @@ pub mod sources;
 use housekeeper_core::{Host, Platform, Source, SystemInfo};
 
 use crate::distro::{Distro, Family};
-use crate::sources::dpkg::DpkgSource;
+use crate::sources::{dpkg::DpkgSource, flatpak::FlatpakSource, snap::SnapSource};
 
 /// A Linux system and the sources that apply to it.
 pub struct LinuxPlatform {
@@ -31,6 +31,8 @@ impl LinuxPlatform {
         if let Some(native) = native_source(&distro, host) {
             sources.push(native);
         }
+        sources.push(Box::new(FlatpakSource));
+        sources.push(Box::new(SnapSource));
         Self {
             distro,
             system,
