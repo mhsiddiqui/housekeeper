@@ -26,6 +26,7 @@ links back.
 | [0010](0010-test-and-release-pipeline.md) | Full test pipeline and release packages | 0.3, 0.4 | #1 |
 | [0011](0011-architecture-guide.md) | Illustrated architecture guide | none | with 0012 |
 | [0012](0012-docs-section-and-agents.md) | Documentation section, change records and AGENTS.md | none | #2 |
-| [0013](0013-merge-gate.md) | Block merging until every CI job is green | 0.5 | `ci/required-checks` |
-| [0014](0014-move-design-into-docs.md) | Move the design mockup into the docs section | none | `docs/move-design` |
-| [0015](0015-homebrew-and-one-file-providers.md) | Homebrew on Linux, and providers that are one file | 1.9, 2.3 (part) | `feat/homebrew-source` |
+| [0013](0013-merge-gate.md) | Block merging until every CI job is green | 0.5 | #3 |
+| [0014](0014-move-design-into-docs.md) | Move the design mockup into the docs section | none | #4 (into a branch), reaches `main` with 0016 |
+| [0015](0015-homebrew-and-one-file-providers.md) | Homebrew on Linux, and providers that are one file | 1.9, 2.3 (part) | #5 (into a branch), reaches `main` with 0016 |
+| [0016](0016-ci-for-main-only.md) | CI only for `main`, and bringing stacked work into `main` | 0.5 | `ci/main-only` |

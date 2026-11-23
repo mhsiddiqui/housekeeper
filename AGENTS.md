@@ -17,12 +17,12 @@ way software gets installed), `crates/cli` (the `housekeeper` command).
 
 ## Workflow
 1. Branch from an up-to-date `main`: `<type>/<short-description>` (`feat/desktop-entries`, `fix/snap-timeout`,
-   `docs/…`, `ci/…`). If the task depends on an unmerged pull request, branch from that pull request's branch and say so
-   in the change record.
+   `docs/…`, `ci/…`). Do not stack branches: if a task needs unmerged work, wait until that pull request is merged
+   into `main`, then branch from the new `main`.
 2. Commit in small steps with Conventional Commit subjects (`feat(linux): …`, `fix(cli): …`, `docs: …`). Never commit to
    `main` directly, never force-push shared branches.
-3. Push the branch and open a pull request against `main` (or against the branch it is stacked on). GitHub blocks the
-   merge until the `ci-ok` check is green, i.e. every CI job passed
+3. Push the branch and open a pull request **against `main`**, always. CI runs only for pull requests into `main` (and
+   pushes to it), and GitHub blocks the merge until the `ci-ok` check is green, i.e. every CI job passed
    ([repository settings](docs/development/repository-settings.md)). Never ask for the rule to be bypassed.
 
 ## Definition of done
