@@ -1,7 +1,7 @@
 # 0033: Launchers and commands tell apps from components
 
 - **Date:** 2026-11-24
-- **Branch / PR:** `feat/desktop-entries`
+- **Branch / PR:** `feat/desktop-entries`, #23
 - **Plan chunks:** 2.1 (desktop entries), done
 - **Commits:** 64567d6, 53092c7
 
