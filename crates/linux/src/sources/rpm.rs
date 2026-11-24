@@ -159,10 +159,16 @@ impl OwnerLookup for RpmSource {
         OwnerQuery {
             // Each owning package's name beside every file it owns: unlike plain `%{NAME}`, this says which argument
             // was owned even when an argument has several owners or none (missing files print nothing on stdout).
+            // rpm prints the whole file list once per argument, so many arguments would repeat big packages over and
+            // over (651 programs in a minimal Fedora: 129,000 lines); listing every package's files once is smaller.
             command: |paths| {
-                Cmd::new("rpm")
-                    .args(["-qf", "--queryformat", "[%{=NAME}\\t%{FILENAMES}\\n]"])
-                    .args(args(paths))
+                let cmd = Cmd::new("rpm");
+                if paths.len() > WHOLE_DATABASE_FROM {
+                    cmd.args(["-qa", "--queryformat", "[%{=NAME}\\t%{FILENAMES}\\n]"])
+                } else {
+                    cmd.args(["-qf", "--queryformat", "[%{=NAME}\\t%{FILENAMES}\\n]"])
+                        .args(args(paths))
+                }
             },
             // Unowned or missing paths make rpm exit non-zero; only a killed rpm is a failure.
             failed: |output| output.code.is_none(),
@@ -171,6 +177,10 @@ impl OwnerLookup for RpmSource {
         .run(host, paths)
     }
 }
+
+/// Above this many paths, owners are found in a listing of every installed file (`rpm -qa`), whose size does not grow
+/// with the number of paths.
+const WHOLE_DATABASE_FROM: usize = 64;
 
 /// `name<TAB>file` for every file of an owning package; "file … is not owned by any package" lines have no tab.
 fn owners(stdout: &str) -> Vec<(&str, &str)> {
@@ -548,6 +558,28 @@ file /opt/manual is not owned by any package
                 "/opt/google",
                 &["google-chrome-stable", "google-earth-pro-stable"]
             )]
+        );
+    }
+
+    #[test]
+    fn many_paths_are_looked_up_in_one_listing_of_every_file() {
+        use crate::owner::tests::{owned, sorted};
+        let stdout = "\
+bash\t/usr/bin/bash
+bash\t/usr/share/doc/bash
+coreutils\t/usr/bin/ls
+filesystem\t/usr/bin
+";
+        let runner = FakeRunner::new().respond("rpm -qa --queryformat [%{=NAME}\\t%{FILENAMES}\\n]", stdout);
+        let host = Fixture::new().host(runner);
+        let mut asked: Vec<PathBuf> = (0..WHOLE_DATABASE_FROM)
+            .map(|i| PathBuf::from(format!("/usr/local/bin/tool{i}")))
+            .collect();
+        asked.extend([PathBuf::from("/usr/bin/ls"), PathBuf::from("/usr/bin/bash")]);
+        let owners = RpmSource::new(false).owners(&host, &asked).unwrap();
+        assert_eq!(
+            sorted(owners),
+            [owned("/usr/bin/bash", &["bash"]), owned("/usr/bin/ls", &["coreutils"])]
         );
     }
 }

@@ -4,10 +4,14 @@
 
 pub mod command;
 pub mod host;
+mod identity;
 pub mod inventory;
 pub mod model;
+mod ownership;
 pub mod platform;
 pub mod source;
+#[cfg(test)]
+mod stub;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 pub mod text;
@@ -17,8 +21,8 @@ pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
 pub use model::{
-    Availability, InstallReason, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind, SystemInfo,
+    Availability, InstallReason, Launcher, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind, SystemInfo,
 };
-pub use platform::Platform;
+pub use platform::{Platform, path_dirs};
 pub use source::{OwnerLookup, ScanContext, Source, SourceError};
 pub use who::{Evidence, Found, Owner, Who};

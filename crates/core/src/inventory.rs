@@ -8,6 +8,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::host::Host;
+use crate::identity;
 use crate::model::{Availability, Package, SourceInfo, SystemInfo};
 use crate::platform::Platform;
 use crate::source::{ScanContext, Source};
@@ -49,6 +50,9 @@ pub struct Scan {
     pub sources: Vec<SourceReport>,
     /// Sorted by display name, then source.
     pub packages: Vec<Package>,
+    /// Problems outside any one source (an unreadable launcher folder); the scan is still complete otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Which sources to scan.
@@ -94,19 +98,34 @@ impl Housekeeper {
             .collect()
     }
 
-    /// Reads every selected source in parallel. A source that fails or panics is reported, not fatal.
+    /// Reads every selected source in parallel, then attaches each launcher of the application menu and each command
+    /// a package database lists to its package, and derives kinds, titles and icons from them. A source that fails
+    /// or panics is reported, not fatal.
     pub fn scan(&self, selection: &Selection<'_>) -> Scan {
         self.scan_with(selection, |_, _| {})
     }
 
     /// Like [`scan`](Self::scan), but hands each source's report and packages to `on_report` as soon as that source
-    /// finishes, so a caller can show progress per source. The returned `Scan` is the same as `scan` returns.
+    /// finishes, so a caller can show progress per source. The packages are as the source reported them; launchers,
+    /// commands found in package databases, and the kinds, titles and icons that follow from them are only in the
+    /// returned `Scan`, which is the same as `scan` returns.
     ///
     /// `on_report` runs once per selected source, on that source's scanning thread, so calls come concurrently from
     /// several threads in the order the sources finish. It sees every outcome: available, unavailable, failed, and a
     /// panicking source (reported as failed). If `on_report` itself panics, that source is treated like a panicking
     /// source: the scan reports it as failed with no packages, and the other sources are unaffected.
     pub fn scan_with(&self, selection: &Selection<'_>, on_report: impl Fn(&SourceReport, &[Package]) + Sync) -> Scan {
+        self.read(selection, true, on_report)
+    }
+
+    /// The scan, with launchers and commands attached when `identify` is set. Reading them, and asking the package
+    /// databases about their files, happens while the sources are being read.
+    pub(crate) fn read(
+        &self,
+        selection: &Selection<'_>,
+        identify: bool,
+        on_report: impl Fn(&SourceReport, &[Package]) + Sync,
+    ) -> Scan {
         let selected: Vec<&dyn Source> = self
             .platform
             .sources()
@@ -116,8 +135,11 @@ impl Housekeeper {
             .collect();
 
         let on_report = &on_report;
-        let results: Vec<(SourceReport, Vec<Package>)> = thread::scope(|scope| {
+        let (results, gathered) = thread::scope(|scope| {
             let all = self.platform.sources();
+            let selected = &selected;
+            let gathering =
+                identify.then(|| scope.spawn(move || identity::gather(&self.host, self.platform.as_ref(), selected)));
             let handles: Vec<_> = selected
                 .iter()
                 .map(|source| {
@@ -128,9 +150,9 @@ impl Housekeeper {
                     })
                 })
                 .collect();
-            handles
+            let results: Vec<(SourceReport, Vec<Package>)> = handles
                 .into_iter()
-                .zip(&selected)
+                .zip(selected)
                 .map(|(handle, source)| {
                     handle.join().unwrap_or_else(|_| {
                         let report = SourceReport {
@@ -143,7 +165,8 @@ impl Housekeeper {
                         (report, Vec::new())
                     })
                 })
-                .collect()
+                .collect();
+            (results, gathering.map(|handle| handle.join()))
         });
 
         let mut sources = Vec::with_capacity(results.len());
@@ -151,6 +174,12 @@ impl Housekeeper {
         for (report, found) in results {
             sources.push(report);
             packages.extend(found);
+        }
+        let mut warnings = Vec::new();
+        match gathered {
+            None => {}
+            Some(Ok(gathered)) => gathered.apply(&mut packages, &mut sources, &mut warnings),
+            Some(Err(_)) => warnings.push("internal error while reading launchers and commands".into()),
         }
         packages.sort_by(|a, b| {
             a.display_name()
@@ -164,6 +193,7 @@ impl Housekeeper {
             system: self.platform.system().clone(),
             sources,
             packages,
+            warnings,
         }
     }
 }

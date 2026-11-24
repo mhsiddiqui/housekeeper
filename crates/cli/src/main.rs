@@ -30,9 +30,9 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// List installed apps. By default only things someone installed on purpose are shown.
+    /// List installed apps. By default only things someone installed on purpose and launches are shown.
     List {
-        /// Also show dependencies, libraries, runtimes and system packages.
+        /// Also show dependencies, libraries, runtimes, components (fonts, data, plugins…) and system packages.
         #[arg(long)]
         all: bool,
         /// Only read these sources (repeatable), e.g. `--source flatpak --source snap`.
@@ -164,7 +164,7 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
         if filter.all {
             ""
         } else {
-            " (use --all to include dependencies, libraries and runtimes)"
+            " (use --all to include dependencies, libraries, runtimes and components)"
         }
     )?;
     for report in &scan.sources {
@@ -177,6 +177,9 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
             }
             SourceStatus::Unavailable { .. } => {}
         }
+    }
+    for warning in &scan.warnings {
+        writeln!(err, "warning: {warning}")?;
     }
     Ok(())
 }
