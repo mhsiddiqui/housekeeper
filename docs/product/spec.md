@@ -125,8 +125,7 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
   - **Columns** (default): app list, then details (location, update source, removal method, Home/Repo/Docs links),
     then a live web view of the project's site with how it was installed and how it will be removed.
   - **Table**, for sorting and selecting many items.
-- Sidebar: Discover; one group per computer (this one plus SSH hosts) with Installed (split by source) and Updates;
-  the Manage tools; and Categories.
+- Sidebar: Discover; this computer's Installed (split by source) and Updates; the Manage tools; and Categories.
 - **Duplicate detection** (the same app from two sources).
 - Details show **why we believe it's installed**: the ownership command used (`dpkg -S`, `rpm -qf`, `pacman -Qo`,
   `flatpak info`, manifest file, …).
@@ -251,10 +250,11 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 - Startup apps (`~/.config/autostart`) and background services (systemd user/system units): turn them on or off,
   and remove leftovers from uninstalled apps. Removing an app removes its startup entries.
 
-### 15. Other computers and command line
-- Manage other machines over SSH using the existing `~/.ssh/config` and keys. Nothing is installed on them.
-- A CLI with the same engine (`list --json`, `which`, `remove`, `update --all`, `--host <name>`) for scripts and
-  servers without a desktop.
+### 15. Command line
+- A CLI with the same engine (`list --json`, `which`, `remove`, `update --all`) for scripts and servers without a
+  desktop.
+- Housekeeper manages only the computer it runs on; other computers over SSH are not planned
+  ([decision D22](../architecture/README.md#decisions)).
 
 ### 16. Settings, first run, accessibility, translations
 - **First run:** explains what's scanned (read-only) and asks three opt-in questions: Trash, shell hook, and anonymous
@@ -265,7 +265,6 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
   - Safety: Trash, and a snapshot before changes when Snapper/Timeshift is present.
   - Privacy: shows exactly what's sent.
   - Theme (system/dark/light) and language.
-  - SSH machines.
 - **Keyboard:** `/` search, `j`/`k` move, Enter opens, Space selects, Delete removes, `?` lists shortcuts. Every
   control is reachable with Tab and labelled for screen readers.
 - **Translations:** text lives in translation files, translated by the community (e.g. Weblate); right-to-left
@@ -337,17 +336,16 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 
 ## Architecture
 
-- **Tauri 2** (Rust backend + web UI). The HTML mockup becomes the frontend.
-- `trait Source { detect(), list(), details(id), install(req), remove(id, opts), updates(), owner(path) }`.
-  Native backends: `Apt`, `Dnf`, `Zypper`, `Pacman` (+ `Aur` via paru/yay), `RpmOstree`.
-  Universal: `Flatpak`, `Snap`, `AppImage`, `Npm`, `Pipx`, `Uv`, `Cargo`, `Brew`, `Nix`, `Manual`.
+How Housekeeper is built (crates, traits, the `Host`, and every design decision) is in
+[architecture](../architecture/README.md). That document is the only source for it; this section only records the
+product reasons behind two of its choices.
+
 - **Why not PackageKit only?** It covers apt/dnf/zypper/pacman through one D-Bus API with polkit. But it hides
   "manually installed vs dependency", has no AUR, its pacman backend is limited, and it can't follow Arch's
-  rules. Plan: native backends for the four main families, with **PackageKit as a fallback** for other distros.
-- Privileged helper: a small binary run through `pkexec` with a polkit policy that allows only fixed operations.
-- Distribution: AppImage (works everywhere), native packages built with the **openSUSE Build Service**
-  (deb + rpm for many distros) and an **AUR** PKGBUILD. Flatpak is a poor fit, because a package manager needs
-  `flatpak-spawn --host` for nearly everything.
+  rules. So each distribution family gets its own native source; PackageKit may later serve distributions that have
+  none (not decided).
+- **Why no Flatpak of Housekeeper itself?** A package manager inside the Flatpak sandbox needs `flatpak-spawn --host`
+  for nearly everything ([D16](../architecture/README.md#decisions)).
 
 ## Feasibility and hard parts
 - Listing and removal for every source above: straightforward.
@@ -368,5 +366,5 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 3. Tracked terminal + shell hook + manifests.
 4. Updates + Cleanup + Repositories (with each distro's rules).
 5. Unified search, Who-owns, Export/migrate, Environment (variables, PATH, aliases).
-6. Storage plugins, Defaults & startup, other computers over SSH, CLI.
+6. Storage plugins, Defaults & startup, CLI.
 7. Image-based mode, Nix, PackageKit fallback for other distros.

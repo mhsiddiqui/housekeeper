@@ -1,7 +1,7 @@
 # 0024: Report each source's result as soon as it finishes
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `feat/scan-progress`
+- **Branch / PR:** `feat/scan-progress`, #14
 - **Plan chunks:** none (prepares 6.3, see [plan](../planning/plan.md))
 - **Commits:** ba8cc0f, 3cf5011
 

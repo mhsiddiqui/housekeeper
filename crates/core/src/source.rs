@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::command::RunError;
 use crate::host::Host;
@@ -19,11 +20,52 @@ pub trait Source: Send + Sync {
     fn probe(&self, host: &Host) -> Availability;
 
     /// Everything this source has installed. Only called when `probe` reported the source available.
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError>;
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError>;
 
     /// "Which of these files did you install?", for sources that track individual files (package managers).
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         None
+    }
+
+    /// Directories this source installs programs into (logical, absolute). A program on the PATH that resolves into
+    /// one of them is this source's, so a source that lists what nobody else installed (hand installs) leaves it out.
+    fn install_roots(&self, _host: &Host) -> Vec<PathBuf> {
+        Vec::new()
+    }
+}
+
+/// What a source sees while it is read: every source of the platform, and a place for problems that did not stop it.
+///
+/// Sources use each other only through this, at scan time; they never hold one another.
+#[derive(Default)]
+pub struct ScanContext<'a> {
+    sources: &'a [Arc<dyn Source>],
+    warnings: Mutex<Vec<String>>,
+}
+
+impl<'a> ScanContext<'a> {
+    /// `sources` are all the platform's sources, including ones this scan does not read.
+    pub fn new(sources: &'a [Arc<dyn Source>]) -> Self {
+        Self {
+            sources,
+            warnings: Mutex::default(),
+        }
+    }
+
+    pub fn sources(&self) -> impl Iterator<Item = &'a dyn Source> {
+        self.sources.iter().map(|source| source.as_ref())
+    }
+
+    /// Reports something the user should know about a result that is still shown (it may be incomplete).
+    pub fn warn(&self, message: impl Into<String>) {
+        self.warnings
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(message.into());
+    }
+
+    pub fn into_warnings(self) -> Vec<String> {
+        self.warnings.into_inner().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

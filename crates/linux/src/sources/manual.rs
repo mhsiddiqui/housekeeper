@@ -4,15 +4,14 @@
 use std::collections::{BTreeMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use housekeeper_core::{
     Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    SourceInfo, SourceKind, ScanContext,
 };
 
-use super::appimage::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{Context, LinuxSource};
+use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -135,23 +134,16 @@ const INSTALLERS: &[Installer] = &[
     },
 ];
 
-pub struct ManualSource {
-    native: Option<Arc<dyn Source>>,
-}
-
-impl ManualSource {
-    /// `native`'s owner lookup decides which `/opt` and `/usr/local/bin` entries belong to packages; `None` asks
-    /// nobody.
-    pub fn new(native: Option<Arc<dyn Source>>) -> Self {
-        Self { native }
-    }
-}
+/// What no other source accounts for. Package managers' owner lookups and every source's install roots, both reached
+/// through the [`ScanContext`], decide what is left out.
+pub struct ManualSource;
 
 impl LinuxSource for ManualSource {
-    fn create(context: &Context<'_>) -> Self {
-        Self::new(context.native.clone())
+    fn create(_: &Context<'_>) -> Self {
+        Self
     }
 }
+register!(ManualSource);
 
 impl Source for ManualSource {
     fn info(&self) -> SourceInfo {
@@ -162,113 +154,108 @@ impl Source for ManualSource {
         Availability::Available { version: None }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let home = host.home();
-        let bin_dirs: Vec<PathBuf> = std::iter::once(PathBuf::from(USR_LOCAL_BIN))
-            .chain(HOME_BIN_DIRS.iter().map(|dir| home.join(dir)))
-            .collect();
-        let opt_dirs = opt_dirs(host)?;
-        let mut executables: Vec<Entry> = Vec::new();
-        for dir in &bin_dirs {
-            executables.extend(
-                host.read_dir(dir)?
-                    .into_iter()
-                    .filter(|entry| entry.file_type == Some(FileType::File { executable: true })),
-            );
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = host.home();
+    let bin_dirs: Vec<PathBuf> = std::iter::once(PathBuf::from(USR_LOCAL_BIN))
+        .chain(HOME_BIN_DIRS.iter().map(|dir| home.join(dir)))
+        .collect();
+    let opt_dirs = opt_dirs(host)?;
+    let mut executables: Vec<Entry> = Vec::new();
+    for dir in &bin_dirs {
+        executables.extend(
+            host.read_dir(dir)?
+                .into_iter()
+                .filter(|entry| entry.file_type == Some(FileType::File { executable: true })),
+        );
+    }
+    
+    let asked: Vec<PathBuf> = opt_dirs
+        .iter()
+        .map(|(dir, _)| dir.clone())
+        .chain(
+            executables
+                .iter()
+                .filter(|entry| entry.path.starts_with(USR_LOCAL_BIN))
+                .map(|entry| entry.path.clone()),
+        )
+        .collect();
+    let owned = owned_paths(host, scan, &asked);
+    
+    let mut items: BTreeMap<String, Package> = BTreeMap::new();
+    let installers = detect_installers(host);
+    for (_, package) in &installers {
+        items.insert(package.id.clone(), package.clone());
+    }
+    for (dir, has_program) in opt_dirs.into_iter().filter(|(dir, _)| !owned.contains(dir)) {
+        let mut package = dir_package(host, &dir);
+        if has_program {
+            package.kind = PackageKind::App;
         }
-
-        let asked: Vec<PathBuf> = opt_dirs
-            .iter()
-            .map(|(dir, _)| dir.clone())
-            .chain(
-                executables
-                    .iter()
-                    .filter(|entry| entry.path.starts_with(USR_LOCAL_BIN))
-                    .map(|entry| entry.path.clone()),
-            )
-            .collect();
-        let owned = match self.native.as_ref().and_then(|native| native.owner_lookup()) {
-            Some(lookup) => lookup.owned_paths(host, &asked)?,
-            None => HashSet::new(),
-        };
-
-        let mut items: BTreeMap<String, Package> = BTreeMap::new();
-        let installers = detect_installers(host);
-        for (_, package) in &installers {
-            items.insert(package.id.clone(), package.clone());
-        }
-        for (dir, has_program) in opt_dirs.into_iter().filter(|(dir, _)| !owned.contains(dir)) {
-            let mut package = dir_package(host, &dir);
-            if has_program {
-                package.kind = PackageKind::App;
-            }
+        items.insert(package.id.clone(), package);
+    }
+    let executables: Vec<Entry> = executables
+        .into_iter()
+        .filter(|entry| !owned.contains(&entry.path) && !is_appimage(host, &entry.path))
+        .collect();
+    for entry in executables.iter().filter(|entry| !entry.is_symlink) {
+        if !is_pip_script(host, &entry.path) {
+            let package = file_package(host, &entry.path, &entry.name);
             items.insert(package.id.clone(), package);
         }
-        let executables: Vec<Entry> = executables
-            .into_iter()
-            .filter(|entry| !owned.contains(&entry.path) && !is_appimage(host, &entry.path))
-            .collect();
-        for entry in executables.iter().filter(|entry| !entry.is_symlink) {
-            if !is_pip_script(host, &entry.path) {
-                let package = file_package(host, &entry.path, &entry.name);
-                items.insert(package.id.clone(), package);
-            }
-        }
-
-        let managed = managed_roots(host);
-        for link in executables.iter().filter(|entry| entry.is_symlink) {
-            let target = resolve_symlinks(host, &link.path);
-            let command = link.name.clone();
-            if let Some((_, installer)) = installers.iter().find(|(root, _)| target.starts_with(root)) {
-                add_command(&mut items, &installer.id, command);
-                continue;
-            }
-            if managed.iter().any(|root| target.starts_with(root)) {
-                continue;
-            }
-            let target_id = target.to_string_lossy().into_owned();
-            if items.contains_key(&target_id) {
-                // An alias of a listed executable (`beads -> bd`).
-                add_command(&mut items, &target_id, command);
-                continue;
-            }
-            if target.parent().is_some_and(|dir| bin_dirs.iter().any(|bin| bin == dir)) {
-                // Points at an executable excluded above (native-owned, pip launcher).
-                continue;
-            }
-            if let Some(opt_dir) = opt_dir_of(&target) {
-                // Merges into the /opt item; native-owned or unreadable /opt directories stay out.
-                add_command(&mut items, &opt_dir.to_string_lossy(), command);
-                continue;
-            }
-            if is_system_path(&target) {
-                continue;
-            }
-            match install_root(home, &target) {
-                Some(root) => {
-                    let id = root.to_string_lossy().into_owned();
-                    items.entry(id.clone()).or_insert_with(|| dir_package(host, &root));
-                    add_command(&mut items, &id, command);
-                }
-                None => {
-                    let mut package =
-                        file_package(host, &target, &target.file_name().unwrap_or_default().to_string_lossy());
-                    package.commands = vec![command];
-                    items.entry(package.id.clone()).or_insert(package);
-                }
-            }
-        }
-
-        let mut packages: Vec<Package> = items.into_values().collect();
-        for package in &mut packages {
-            package.commands.sort();
-            package.commands.dedup();
-            if !package.commands.is_empty() {
-                package.kind = PackageKind::App;
-            }
-        }
-        Ok(packages)
     }
+    
+    let managed: Vec<PathBuf> = scan.sources().flat_map(|source| source.install_roots(host)).collect();
+    for link in executables.iter().filter(|entry| entry.is_symlink) {
+        let target = resolve_symlinks(host, &link.path);
+        let command = link.name.clone();
+        if let Some((_, installer)) = installers.iter().find(|(root, _)| target.starts_with(root)) {
+            add_command(&mut items, &installer.id, command);
+            continue;
+        }
+        if managed.iter().any(|root| target.starts_with(root)) {
+            continue;
+        }
+        let target_id = target.to_string_lossy().into_owned();
+        if items.contains_key(&target_id) {
+            // An alias of a listed executable (`beads -> bd`).
+            add_command(&mut items, &target_id, command);
+            continue;
+        }
+        if target.parent().is_some_and(|dir| bin_dirs.iter().any(|bin| bin == dir)) {
+            // Points at an executable excluded above (native-owned, pip launcher).
+            continue;
+        }
+        if let Some(opt_dir) = opt_dir_of(&target) {
+            // Merges into the /opt item; native-owned or unreadable /opt directories stay out.
+            add_command(&mut items, &opt_dir.to_string_lossy(), command);
+            continue;
+        }
+        if is_system_path(&target) {
+            continue;
+        }
+        match install_root(home, &target) {
+            Some(root) => {
+                let id = root.to_string_lossy().into_owned();
+                items.entry(id.clone()).or_insert_with(|| dir_package(host, &root));
+                add_command(&mut items, &id, command);
+            }
+            None => {
+                let mut package =
+                    file_package(host, &target, &target.file_name().unwrap_or_default().to_string_lossy());
+                package.commands = vec![command];
+                items.entry(package.id.clone()).or_insert(package);
+            }
+        }
+    }
+    
+    let mut packages: Vec<Package> = items.into_values().collect();
+    for package in &mut packages {
+        package.commands.sort();
+        package.commands.dedup();
+        if !package.commands.is_empty() {
+            package.kind = PackageKind::App;
+        }
+    }
+    Ok(packages) }
 }
 
 /// Directories in `/opt` the user can list, with whether they hold a program at the top or in `bin/`. Unlistable
@@ -319,30 +306,27 @@ fn detect_installers(host: &Host) -> Vec<(PathBuf, Package)> {
     found
 }
 
-/// Directories whose executables another source lists (pipx, uv, cargo, nvm, fnm, Snap, Flatpak).
-fn managed_roots(host: &Host) -> Vec<PathBuf> {
-    let home = host.home();
-    let data = host.data_home();
-    let mut roots = vec![
-        data.join("pipx"),
-        home.join(".local/pipx"),
-        data.join("uv/tools"),
-        host.dir_from_var("CARGO_HOME", ".cargo"),
-        host.dir_from_var("NVM_DIR", ".nvm"),
-        data.join("fnm"),
-        home.join(".fnm"),
-        PathBuf::from("/snap"),
-        PathBuf::from("/var/lib/flatpak/exports"),
-        data.join("flatpak/exports"),
-    ];
-    roots.extend(
-        ["PIPX_HOME", "UV_TOOL_DIR", "FNM_DIR"]
-            .into_iter()
-            .filter_map(|var| host.var(var))
-            .filter(|value| value.starts_with('/'))
-            .map(PathBuf::from),
-    );
-    roots
+/// The subset of `asked` that an installed package owns, from every source that can tell. A source that fails to
+/// answer gets a warning, and all of `asked` counts as owned: hiding a few hand installs beats listing system files.
+fn owned_paths(host: &Host, scan: &ScanContext<'_>, asked: &[PathBuf]) -> HashSet<PathBuf> {
+    let mut owned = HashSet::new();
+    for source in scan.sources() {
+        let Some(lookup) = source.owner_lookup() else {
+            continue;
+        };
+        match lookup.owned_paths(host, asked) {
+            Ok(paths) => owned.extend(paths),
+            Err(error) => {
+                scan.warn(format!(
+                    "could not ask {} which entries of {OPT} and {USR_LOCAL_BIN} it installed, so they are left \
+                     out: {error}",
+                    source.info().label
+                ));
+                owned.extend(asked.iter().cloned());
+            }
+        }
+    }
+    owned
 }
 
 /// A console-script launcher pip or uv wrote for an installed Python package.
@@ -424,9 +408,15 @@ fn file_package(host: &Host, path: &Path, name: &str) -> Package {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use housekeeper_core::Scope;
-    use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
+    use crate::sources::cargo::CargoSource;
     use crate::sources::dpkg::DpkgSource;
+    use crate::sources::npm::NpmSource;
+    use crate::sources::pipx::PipxSource;
+    use crate::sources::snap::SnapSource;
+    use crate::sources::uv::UvToolSource;
+    use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
+    use housekeeper_core::{Output, Scope};
+    use std::sync::Arc;
 
     const ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";
     const APPIMAGE: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00\x00\x00\x00";
@@ -463,8 +453,15 @@ if __name__ == \"__main__\":
         format!("{HOME}/{path}")
     }
 
-    fn scan(fixture: &Fixture, runner: FakeRunner, native: Option<Arc<dyn Source>>) -> Vec<Package> {
-        ManualSource::new(native).inventory(&fixture.host(runner)).unwrap()
+    /// The manual source's packages and warnings, with `others` as the platform's other sources.
+    fn scan_with(host: &Host, others: Vec<Arc<dyn Source>>) -> (Vec<Package>, Vec<String>) {
+        let context = ScanContext::new(&others);
+        let packages = ManualSource.inventory(host, &context).unwrap();
+        (packages, context.into_warnings())
+    }
+
+    fn scan(fixture: &Fixture, runner: FakeRunner, others: Vec<Arc<dyn Source>>) -> Vec<Package> {
+        scan_with(&fixture.host(runner), others).0
     }
 
     fn ids(packages: &[Package]) -> Vec<&str> {
@@ -492,7 +489,7 @@ if __name__ == \"__main__\":
         let runner = FakeRunner::new().respond_with(
             "dpkg-query --search /opt/brave.com /opt/linear-linux-0.2.1 /opt/sdk /opt/tool \
              /usr/local/bin/brave /usr/local/bin/mailhog /usr/local/bin/ngrok /usr/local/bin/tool",
-            housekeeper_core::Output {
+            Output {
                 code: Some(1),
                 stdout: "brave-browser: /opt/brave.com\nbrave-browser: /usr/local/bin/brave\n\
                          ngrok: /usr/local/bin/ngrok\n"
@@ -500,7 +497,7 @@ if __name__ == \"__main__\":
                 stderr: "dpkg-query: no path found matching pattern /opt/sdk\n".into(),
             },
         );
-        let packages = scan(&fixture, runner, Some(Arc::new(DpkgSource)));
+        let packages = scan(&fixture, runner, vec![Arc::new(DpkgSource)]);
         assert_eq!(
             ids(&packages),
             [
@@ -528,8 +525,24 @@ if __name__ == \"__main__\":
         let fixture = Fixture::new();
         fixture.dir("/opt/brave.com");
         fixture.executable("/usr/local/bin/ngrok", ELF);
-        let packages = scan(&fixture, FakeRunner::new(), None);
+        let packages = scan(&fixture, FakeRunner::new(), Vec::new());
         assert_eq!(ids(&packages), ["/opt/brave.com", "/usr/local/bin/ngrok"]);
+    }
+
+    #[test]
+    fn a_failed_owner_lookup_hides_what_it_could_not_check_and_warns() {
+        let fixture = Fixture::new();
+        fixture.dir("/opt/brave.com");
+        fixture.executable("/usr/local/bin/ngrok", ELF);
+        fixture.executable(&home(".local/bin/mine"), ELF);
+        let runner = FakeRunner::new().fail(
+            "dpkg-query --search /opt/brave.com /usr/local/bin/ngrok",
+            "did not finish within 60 s",
+        );
+        let (packages, warnings) = scan_with(&fixture.host(runner), vec![Arc::new(DpkgSource)]);
+        assert_eq!(ids(&packages), ["/home/user/.local/bin/mine"]);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("did not finish"), "{warnings:?}");
     }
 
     #[test]
@@ -556,7 +569,7 @@ if __name__ == \"__main__\":
         fixture.executable(&home("loose.sh"), "#!/bin/sh\n");
         fixture.symlink(&home("bin/loose"), &home("loose.sh"));
         fixture.symlink(&home(".local/bin/dangling"), &home("gone/bin/x"));
-        let packages = scan(&fixture, FakeRunner::new(), None);
+        let packages = scan(&fixture, FakeRunner::new(), Vec::new());
         assert_eq!(
             ids(&packages),
             [
@@ -585,12 +598,14 @@ if __name__ == \"__main__\":
         let pipx = home(".local/share/pipx/venvs/black/bin/black");
         let uv = home(".local/share/uv/tools/ruff/bin/ruff");
         let cargo = home(".cargo/bin/rg");
-        for target in [&pipx, &uv, &cargo] {
+        let npm = "/usr/local/lib/node_modules/typescript/bin/tsc";
+        for target in [&pipx, &uv, &cargo, npm] {
             fixture.executable(target, ELF);
         }
         fixture.symlink(&home(".local/bin/black"), &pipx);
         fixture.symlink(&home(".local/bin/ruff"), &uv);
         fixture.symlink(&home("bin/rg"), &cargo);
+        fixture.symlink("/usr/local/bin/tsc", npm);
         fixture.executable("/snap/bin/firefox", ELF);
         fixture.symlink(&home("bin/firefox"), "/snap/bin/firefox");
         fixture.executable(&home(".local/bin/coverage"), PIP_LAUNCHER);
@@ -602,8 +617,27 @@ if __name__ == \"__main__\":
             "#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n",
         );
         fixture.file(&home(".local/bin/notes.txt"), "not executable");
-        let packages = scan(&fixture, FakeRunner::new(), None);
+        let others: Vec<Arc<dyn Source>> = vec![
+            Arc::new(PipxSource),
+            Arc::new(UvToolSource),
+            Arc::new(CargoSource),
+            Arc::new(NpmSource),
+            Arc::new(SnapSource),
+        ];
+        let packages = scan(&fixture, FakeRunner::new(), others);
         assert_eq!(ids(&packages), ["/home/user/.local/bin/hand-written.py"]);
+
+        // The sources' install roots are what keeps them out.
+        let unclaimed = scan(&fixture, FakeRunner::new(), Vec::new());
+        for id in [
+            "/home/user/.local/share/pipx/venvs/black",
+            "/home/user/.local/share/uv/tools/ruff",
+            "/home/user/.cargo",
+            "/usr/local/lib/node_modules/typescript",
+            "/snap/bin/firefox",
+        ] {
+            assert!(ids(&unclaimed).contains(&id), "{id} missing from {:?}", ids(&unclaimed));
+        }
     }
 
     #[test]
@@ -622,7 +656,8 @@ if __name__ == \"__main__\":
         fixture.dir(&home(".nvm"));
         fixture.dir(&home(".bun"));
         let host = fixture.host_with_vars(FakeRunner::new(), &[("NVM_DIR", "/srv/node")]);
-        let packages = ManualSource::new(None).inventory(&host).unwrap();
+        // npm claims the nvm directory too; the nvm installer still gets the commands that are nvm's own.
+        let (packages, _) = scan_with(&host, vec![Arc::new(NpmSource)]);
         assert_eq!(
             ids(&packages),
             [
@@ -659,6 +694,6 @@ if __name__ == \"__main__\":
 
     #[test]
     fn nothing_installed_is_empty() {
-        assert!(scan(&Fixture::new(), FakeRunner::new(), None).is_empty());
+        assert!(scan(&Fixture::new(), FakeRunner::new(), Vec::new()).is_empty());
     }
 }

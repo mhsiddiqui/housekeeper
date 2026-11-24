@@ -9,6 +9,13 @@ the project uses [Semantic Versioning](https://semver.org/).
 - Licence: Housekeeper is now under the GNU General Public License v3.0 or later (`GPL-3.0-or-later`) instead of MIT,
   so every distributed version, modified or not, must stay open source.
 
+### Fixed
+- Global npm packages whose commands are linked into `/usr/local/bin` or `~/.local/bin` (system Node, or an npm
+  prefix such as `~/.local`) are no longer listed a second time as installed by hand.
+- When the package manager cannot say which entries of `/opt` and `/usr/local/bin` it installed (for example it
+  times out), the hand-installed list is still shown without them, with a warning, instead of failing. In
+  `list --json` such warnings appear as `warnings` in the source's status.
+
 ### Added
 - `housekeeper sources` and `housekeeper list` (`--all`, `--source`, `--search`, `--json` with schema version 1).
 - Read-only inventory from every source, scanned in parallel; a failing source is reported without hiding the rest:
