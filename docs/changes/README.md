@@ -43,4 +43,5 @@ links back.
 | [0027](0027-readme.md) | Complete the README for the first release | 0.4 | #17 |
 | [0028](0028-format-sources.md) | Format and check the source files cargo fmt never reached | none | #18 |
 | [0029](0029-ci-badge.md) | CI status badge in the README | none | #19 |
-| [0030](0030-release-0.1.0.md) | Prepare release 0.1.0 | 0.4 | `chore/release-0.1.0` |
+| [0030](0030-release-0.1.0.md) | Prepare release 0.1.0 | 0.4 | #20 |
+| [0031](0031-release-0.1.0-published.md) | Release 0.1.0 published and checked | 0.4 | `docs/release-0.1.0-done` |
