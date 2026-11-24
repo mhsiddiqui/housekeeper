@@ -19,4 +19,4 @@ pub use model::{
     Availability, InstallReason, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind, SystemInfo,
 };
 pub use platform::Platform;
-pub use source::{OwnerLookup, Source, SourceError};
+pub use source::{OwnerLookup, ScanContext, Source, SourceError};

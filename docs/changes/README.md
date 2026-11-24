@@ -33,6 +33,7 @@ links back.
 | [0017](0017-merge-gate-active.md) | Merge gate active on `main` | 0.5 | #7 |
 | [0018](0018-license-gpl3.md) | Licence changed to GPL-3.0-or-later | 0.1 | `chore/license-gpl3` |
 | [0019](0019-drop-remote-computers.md) | Drop managing other computers over SSH | 12 (scope) | #9 |
+| [0020](0020-manual-claims.md) | Manual source leaves out what other sources claim | 1.6, 2.3 | #13 |
 | [0021](0021-review-decisions.md) | Decisions for package tools, removal privileges and script-installer recipes | 3.1, 3.4, 4.1 | #10 |
 | [0022](0022-source-registration.md) | Register sources with `register!` instead of scanning their text | none | #12 |
 | [0025](0025-spec-architecture-link.md) | Spec points to the architecture instead of its own outdated design | none | #11 |

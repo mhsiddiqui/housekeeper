@@ -5,8 +5,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Source, SourceError, SourceId,
+    SourceInfo, SourceKind,
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
@@ -44,40 +44,38 @@ impl Source for AppImageSource {
         Availability::Available { version: None }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let home = host.home();
-        let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
-        for entry in host.read_dir(home.join("Applications"))? {
-            if entry.file_type == Some(FileType::Dir) {
-                dirs.push(entry.path);
-            }
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = host.home();
+    let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
+    for entry in host.read_dir(home.join("Applications"))? {
+        if entry.file_type == Some(FileType::Dir) {
+            dirs.push(entry.path);
         }
-        dirs.push(PathBuf::from("/opt"));
-        let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
-
-        let mut packages: Vec<Package> = Vec::new();
-        let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
-        for dir in &dirs {
-            for entry in host.read_dir(dir)? {
-                if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
-                    continue;
-                }
-                let target = resolve_symlinks(host, &entry.path);
-                let index = match by_target.get(&target) {
-                    Some(&index) => index,
-                    None => {
-                        packages.push(package(host, &target));
-                        by_target.insert(target, packages.len() - 1);
-                        packages.len() - 1
-                    }
-                };
-                if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
-                    packages[index].commands.push(entry.name);
-                }
-            }
-        }
-        Ok(packages)
     }
+    dirs.push(PathBuf::from("/opt"));
+    let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
+    
+    let mut packages: Vec<Package> = Vec::new();
+    let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
+    for dir in &dirs {
+        for entry in host.read_dir(dir)? {
+            if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
+                continue;
+            }
+            let target = resolve_symlinks(host, &entry.path);
+            let index = match by_target.get(&target) {
+                Some(&index) => index,
+                None => {
+                    packages.push(package(host, &target));
+                    by_target.insert(target, packages.len() - 1);
+                    packages.len() - 1
+                }
+            };
+            if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
+                packages[index].commands.push(entry.name);
+            }
+        }
+    }
+    Ok(packages) }
 }
 
 fn package(host: &Host, path: &Path) -> Package {
@@ -170,7 +168,7 @@ mod tests {
     const PLAIN_ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 
     fn scan(fixture: &Fixture) -> Vec<Package> {
-        AppImageSource.inventory(&fixture.host(FakeRunner::new())).unwrap()
+        AppImageSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap()
     }
 
     fn ids(packages: &[Package]) -> Vec<&str> {

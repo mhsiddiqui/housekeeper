@@ -1,11 +1,11 @@
 //! Flatpak apps and runtimes from every installation (system, user and custom), read through `flatpak list`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
     Availability, Cmd, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind,
+    SourceKind, ScanContext,
 };
 
 use super::version_line;
@@ -45,11 +45,17 @@ impl Source for FlatpakSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let listing = host.run_ok(&Cmd::new("flatpak").args(["list", COLUMNS]))?;
-        let user_dir = host.data_home().join("flatpak");
-        parse_listing(&listing, &user_dir)
+    /// Where the system and user installations export their launchers.
+    fn install_roots(&self, host: &Host) -> Vec<PathBuf> {
+        vec![
+            PathBuf::from("/var/lib/flatpak/exports"),
+            host.data_home().join("flatpak/exports"),
+        ]
     }
+
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let listing = host.run_ok(&Cmd::new("flatpak").args(["list", COLUMNS]))?;
+    let user_dir = host.data_home().join("flatpak");
+    parse_listing(&listing, &user_dir) }
 }
 
 /// `user_dir` is the logical path of the per-user installation.
@@ -130,7 +136,7 @@ org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\ta
     fn scan_with(vars: &[(&str, &str)]) -> Vec<Package> {
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), LISTING);
-        FlatpakSource.inventory(&fixture.host_with_vars(runner, vars)).unwrap()
+        FlatpakSource.inventory(&fixture.host_with_vars(runner, vars), &ScanContext::default()).unwrap()
     }
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
@@ -227,7 +233,12 @@ org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\ta
     fn no_installed_refs_is_an_empty_inventory() {
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), "");
-        assert!(FlatpakSource.inventory(&fixture.host(runner)).unwrap().is_empty());
+        assert!(
+            FlatpakSource
+                .inventory(&fixture.host(runner), &ScanContext::default())
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -235,7 +246,7 @@ org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\ta
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), "org.example.App\tExample\n");
         assert!(matches!(
-            FlatpakSource.inventory(&fixture.host(runner)),
+            FlatpakSource.inventory(&fixture.host(runner), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
     }

@@ -31,27 +31,15 @@ impl LinuxPlatform {
     }
 
     fn assemble(distro: Distro, host: &Host, providers: &[Provider]) -> Self {
-        let (native, family) = match native_provider(&distro, host, providers) {
-            Some((provider, family)) => {
-                let context = Context {
-                    distro: &distro,
-                    native: None,
-                };
-                (Some(provider.create(&context)), family)
-            }
-            None => (None, "unknown"),
-        };
-        let context = Context {
-            distro: &distro,
-            native: native.clone(),
-        };
-        let mut sources: Vec<Arc<dyn Source>> = native.into_iter().collect();
-        sources.extend(
-            providers
-                .iter()
-                .filter(|provider| provider.native.is_none())
-                .map(|provider| provider.create(&context)),
-        );
+        let native = native_provider(&distro, host, providers);
+        let family = native.map_or("unknown", |(_, family)| family);
+        let context = Context { distro: &distro };
+        let mut sources: Vec<Arc<dyn Source>> = native
+            .map(|(provider, _)| provider)
+            .into_iter()
+            .chain(providers.iter().filter(|provider| provider.native.is_none()))
+            .map(|provider| provider.create(&context))
+            .collect();
         sources.sort_by_key(|source| {
             let info = source.info();
             (kind_order(info.kind), info.id)
