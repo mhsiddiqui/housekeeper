@@ -3,6 +3,7 @@
 //! Sources live in `src/sources/`, one file each, and register themselves (see [`provider`]). This file only picks
 //! the native package manager for the running distribution and assembles everything; it never names a source.
 
+mod desktop;
 pub mod distro;
 mod files;
 mod owner;
@@ -10,9 +11,10 @@ pub mod provider;
 mod python;
 pub mod sources;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use housekeeper_core::{Host, Platform, Source, SourceKind, SystemInfo};
+use housekeeper_core::{Host, Launcher, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs};
 
 use crate::distro::Distro;
 use crate::provider::{Context, Provider};
@@ -74,7 +76,33 @@ impl Platform for LinuxPlatform {
     fn sources(&self) -> &[Arc<dyn Source>] {
         &self.sources
     }
+
+    fn launchers(&self, host: &Host, scan: &ScanContext<'_>) -> Vec<Launcher> {
+        desktop::launchers(host, &self.command_dirs(host), scan)
+    }
+
+    fn command_dirs(&self, host: &Host) -> Vec<PathBuf> {
+        let mut dirs = path_dirs(host);
+        for dir in STANDARD_COMMAND_DIRS.iter().map(PathBuf::from) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+        dirs
+    }
 }
+
+/// Program folders every distribution has; a session's `PATH` can lack some (Debian leaves out `sbin` for users).
+const STANDARD_COMMAND_DIRS: [&str; 8] = [
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/usr/local/games",
+    "/usr/games",
+];
 
 /// Exactly one native package manager (decision D2), with the family name it serves. The distribution's `ID`, then
 /// each `ID_LIKE` entry, is matched against every native source's families; on a distribution none claims, the first

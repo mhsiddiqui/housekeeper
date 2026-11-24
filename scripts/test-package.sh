@@ -35,8 +35,10 @@ elif command -v apt-get >/dev/null; then
 elif command -v zypper >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
-  zypper --non-interactive --no-refresh install --allow-unsigned-rpm "$pkg"
-  remove() { zypper --non-interactive --no-refresh remove housekeeper; }
+  # --no-remote: zypper would otherwise build its online repositories' caches first (fetching their keys), and a
+  # flaky mirror fails the install with exit code 106 although the local package needs nothing from them.
+  zypper --non-interactive --no-remote install --allow-unsigned-rpm "$pkg"
+  remove() { zypper --non-interactive --no-remote remove housekeeper; }
 elif command -v dnf >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
@@ -72,6 +74,11 @@ if [ "$installed" = yes ]; then
   # Housekeeper sees itself, installed by the native package manager.
   housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \
     || fail "housekeeper does not list its own package"
+  # Its command, found through the batched ownership query, makes it an app the default list shows.
+  housekeeper list --source "$native" --search housekeeper | grep -q '^housekeeper ' \
+    || fail "the default list leaves out housekeeper, though its package puts a command on the PATH"
+  grep -q '"kind": "component"' /tmp/native.json \
+    || fail "no $native package was told apart as a component (no command, no launcher)"
   # `who` traces the command to its package through the real ownership query (dpkg-query, rpm -qf, pacman -Qo).
   housekeeper who housekeeper > /tmp/who.txt || { cat /tmp/who.txt >&2; fail "housekeeper who found no owner for itself"; }
   grep -q 'lists /usr/bin/housekeeper as a file of housekeeper$' /tmp/who.txt \

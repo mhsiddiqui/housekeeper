@@ -62,7 +62,7 @@ impl SourceInfo {
     }
 }
 
-/// What an installed item is, as far as its source can tell.
+/// What an installed item is, as far as its source and its launchers tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PackageKind {
@@ -72,6 +72,9 @@ pub enum PackageKind {
     Runtime,
     /// Library or development files.
     Library,
+    /// Nothing a person launches: data, fonts, themes, firmware, documentation, plugins, metapackages. Told from
+    /// packages whose files are known: none of them is a command or a launcher shown in menus.
+    Component,
     /// The source cannot tell.
     Unknown,
 }
@@ -110,7 +113,7 @@ pub struct Package {
     pub id: String,
     /// What people call it (`libc6`, `org.godotengine.Godot`, `typescript`).
     pub name: String,
-    /// Display name when the source has one (`Godot Engine`).
+    /// Display name: the source's, or else the name of the package's main launcher (`Godot Engine`).
     pub title: Option<String>,
     pub version: Option<String>,
     pub summary: Option<String>,
@@ -126,8 +129,32 @@ pub struct Package {
     pub location: Option<PathBuf>,
     /// Commands the item puts on the PATH.
     pub commands: Vec<String>,
+    /// Menu entries that start it, sorted by id.
+    pub launchers: Vec<Launcher>,
+    /// Icon of its main launcher: a name in the icon theme (`firefox`) or an absolute path.
+    pub icon: Option<String>,
     /// Removing it could break the system.
     pub protected: bool,
+}
+
+/// An entry in the system's application menu (a desktop entry on Linux).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Launcher {
+    /// Unique among launchers: the desktop file ID on Linux (`firefox_firefox.desktop`).
+    pub id: String,
+    /// What the menu shows.
+    pub name: String,
+    /// A name in the icon theme (`firefox`) or an absolute path.
+    pub icon: Option<String>,
+    /// The file that defines it (logical path).
+    pub path: PathBuf,
+    /// Files with the same id that `path` takes precedence over (a user's copy hides the system's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadows: Vec<PathBuf>,
+    /// The program it starts, when that could be found.
+    pub program: Option<PathBuf>,
+    /// Not shown in menus: handlers for links and file types, settings panels, entries a user removed.
+    pub hidden: bool,
 }
 
 impl Package {
@@ -147,6 +174,8 @@ impl Package {
             origin: None,
             location: None,
             commands: Vec::new(),
+            launchers: Vec::new(),
+            icon: None,
             protected: false,
         }
     }

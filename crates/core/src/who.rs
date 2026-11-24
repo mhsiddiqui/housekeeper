@@ -1,17 +1,15 @@
 //! "Who installed this?": which source, and which package in it, a command or a file belongs to.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::host::{FileType, MAX_LINKS, normalize};
-use crate::inventory::{Housekeeper, Scan, Selection, SourceStatus};
-use crate::model::{Package, SourceId, SourceInfo};
+use crate::host::{FileType, normalize};
+use crate::inventory::{Housekeeper, Selection, SourceStatus};
+use crate::model::{Package, SourceInfo};
+use crate::ownership::{Ownership, all_paths, chain};
 use crate::source::Source;
-
-/// One package database's answer: the packages that own each path it was asked about.
-type Listed<'a> = (&'a dyn Source, HashMap<PathBuf, Vec<String>>);
 
 /// The answer to "who installed this?".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,30 +68,33 @@ impl Housekeeper {
         if paths.is_empty() {
             return who;
         }
-        let scan = self.scan(&Selection::All);
+        let scan = self.read(&Selection::All, false, |_, _| {});
         for report in &scan.sources {
             if let SourceStatus::Failed { error } = &report.status {
                 who.warnings
                     .push(format!("could not read {}: {error}", report.info.label));
             }
         }
-        let roots: Vec<(&dyn Source, PathBuf)> = self
-            .platform
-            .sources()
-            .iter()
-            .flat_map(|source| {
-                let source = source.as_ref();
-                source
-                    .install_roots(&self.host)
-                    .into_iter()
-                    .map(move |root| (source, root))
-            })
-            .collect();
-        for path in paths {
-            let links = self.links(&path);
-            let hops: Vec<PathBuf> = std::iter::once(path.clone()).chain(links.iter().cloned()).collect();
-            let owner = self.owner(&hops, &scan, &roots, &mut who.warnings);
-            who.found.push(Found { path, links, owner });
+        let chains: Vec<Vec<PathBuf>> = paths.iter().map(|path| chain(&self.host, path)).collect();
+        let sources = self.platform.sources();
+        let asked: Vec<&dyn Source> = sources.iter().map(|source| source.as_ref()).collect();
+        let mut failures = Vec::new();
+        let ownership = Ownership::ask(&self.host, sources, &asked, &all_paths(&chains), &mut failures);
+        for (info, error) in failures {
+            who.warnings
+                .push(format!("could not ask {} who owns {query}: {error}", info.label));
+        }
+        for hops in chains {
+            let owner = ownership.owner(&hops, &scan.packages);
+            let mut hops = hops.into_iter();
+            let Some(path) = hops.next() else {
+                continue;
+            };
+            who.found.push(Found {
+                path,
+                links: hops.collect(),
+                owner,
+            });
         }
         who
     }
@@ -123,279 +124,13 @@ impl Housekeeper {
         }
         found
     }
-
-    /// The symlinks from `path` to its real file, then the real file's canonical path if a linked directory on the
-    /// way makes it differ.
-    fn links(&self, path: &Path) -> Vec<PathBuf> {
-        let mut links = Vec::new();
-        let mut current = path.to_path_buf();
-        while links.len() < MAX_LINKS {
-            let Some(target) = self.host.link_target(&current) else {
-                break;
-            };
-            links.push(target.clone());
-            current = target;
-        }
-        let real = self.host.canonical(path);
-        if real != current {
-            links.push(real);
-        }
-        links
-    }
-
-    fn owner(
-        &self,
-        hops: &[PathBuf],
-        scan: &Scan,
-        roots: &[(&dyn Source, PathBuf)],
-        warnings: &mut Vec<String>,
-    ) -> Option<Owner> {
-        let mut listed: Vec<Listed<'_>> = Vec::new();
-        for source in self.platform.sources() {
-            let Some(lookup) = source.owner_lookup() else {
-                continue;
-            };
-            match lookup.owners(&self.host, hops) {
-                Ok(owners) => listed.push((source.as_ref(), owners)),
-                Err(error) => warnings.push(format!(
-                    "could not ask {} who owns {}: {error}",
-                    source.info().label,
-                    hops[0].display()
-                )),
-            }
-        }
-        // The command as typed and every file name on the way: `rg`, or `tsc` for a link to `…/bin/tsc`.
-        let names: Vec<&str> = hops
-            .iter()
-            .filter_map(|hop| hop.file_name().and_then(|name| name.to_str()))
-            .collect();
-        for (index, hop) in hops.iter().enumerate() {
-            if let Some(owner) = listed_owner(hop, &listed, scan) {
-                return Some(owner);
-            }
-            // An install location further down the chain can be more specific: a link inside `~/.nvm` (the nvm
-            // install) that leads into `node_modules/<package>` belongs to that npm package.
-            let install = hops[index..]
-                .iter()
-                .filter_map(|later| self.install_owner(later, scan, &names))
-                .reduce(|best, other| {
-                    if location_depth(&other) > location_depth(&best) {
-                        other
-                    } else {
-                        best
-                    }
-                });
-            if let Some(owner) = install.or_else(|| folder_owner(hop, roots, scan, &names)) {
-                return Some(owner);
-            }
-        }
-        None
-    }
-
-    /// The package whose install location contains `hop` most closely. Packages sharing that location (everything
-    /// `cargo install` puts in `~/.cargo/bin`) are told apart by their commands.
-    fn install_owner(&self, hop: &Path, scan: &Scan, names: &[&str]) -> Option<Owner> {
-        let inside: Vec<&Package> = scan
-            .packages
-            .iter()
-            .filter(|package| {
-                package
-                    .location
-                    .as_ref()
-                    .is_some_and(|location| hop.starts_with(location))
-            })
-            .collect();
-        let deepest = inside.iter().filter_map(|package| depth(package)).max()?;
-        let closest: Vec<&Package> = inside
-            .into_iter()
-            .filter(|package| depth(package) == Some(deepest))
-            .collect();
-        let by_command: Vec<&Package> = closest
-            .iter()
-            .copied()
-            .filter(|package| has_command(package, names))
-            .collect();
-        let package = match (by_command.as_slice(), closest.as_slice()) {
-            ([one], _) | ([], [one]) => Some(*one),
-            _ => None,
-        };
-        let first = closest.first()?;
-        if package.is_none() && closest.iter().any(|other| other.source != first.source) {
-            return None;
-        }
-        Some(Owner {
-            source: self.source_info(&first.source)?,
-            package: package.cloned(),
-            evidence: Evidence::InsideInstall {
-                path: hop.to_path_buf(),
-                location: first.location.clone()?,
-            },
-        })
-    }
-
-    fn source_info(&self, id: &SourceId) -> Option<SourceInfo> {
-        self.platform
-            .sources()
-            .iter()
-            .map(|source| source.info())
-            .find(|info| &info.id == id)
-    }
-}
-
-/// A package database that lists `hop` as a file. The package is named only when it is the one owner; a directory
-/// several packages share (`/usr/local/bin`) names the source alone.
-fn listed_owner(hop: &Path, listed: &[Listed<'_>], scan: &Scan) -> Option<Owner> {
-    listed.iter().find_map(|(source, owners)| {
-        let names = owners.get(hop)?;
-        let info = source.info();
-        let package = match names.as_slice() {
-            [name] => scan
-                .packages
-                .iter()
-                .find(|package| package.source == info.id && (*name == package.id || *name == package.name))
-                .cloned(),
-            _ => None,
-        };
-        Some(Owner {
-            source: info,
-            package,
-            evidence: Evidence::ListedFile {
-                path: hop.to_path_buf(),
-                packages: names.clone(),
-            },
-        })
-    })
-}
-
-/// The source whose install folder contains `hop` (the deepest folder wins), with its package of that command name.
-fn folder_owner(hop: &Path, roots: &[(&dyn Source, PathBuf)], scan: &Scan, names: &[&str]) -> Option<Owner> {
-    let (source, folder) = roots
-        .iter()
-        .filter(|(_, root)| hop.starts_with(root))
-        .max_by_key(|(_, root)| root.components().count())?;
-    let info = source.info();
-    let package = scan
-        .packages
-        .iter()
-        .find(|package| {
-            package.source == info.id
-                && (has_command(package, names)
-                    || names.iter().any(|name| *name == package.name || *name == package.id))
-        })
-        .cloned();
-    Some(Owner {
-        source: info,
-        package,
-        evidence: Evidence::InsideFolder {
-            path: hop.to_path_buf(),
-            folder: folder.clone(),
-        },
-    })
-}
-
-fn depth(package: &Package) -> Option<usize> {
-    package.location.as_ref().map(|location| location.components().count())
-}
-
-fn has_command(package: &Package, names: &[&str]) -> bool {
-    package.commands.iter().any(|command| names.contains(&command.as_str()))
-}
-
-fn location_depth(owner: &Owner) -> usize {
-    match &owner.evidence {
-        Evidence::InsideInstall { location, .. } => location.components().count(),
-        Evidence::ListedFile { .. } | Evidence::InsideFolder { .. } => 0,
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::Host;
-    use crate::model::{Availability, Scope, SourceKind, SystemInfo};
-    use crate::platform::Platform;
-    use crate::source::{OwnerLookup, ScanContext, SourceError};
-    use crate::testing::{FakeRunner, Fixture, HOME};
-    use std::sync::Arc;
-
-    #[derive(Default)]
-    struct Stub {
-        id: &'static str,
-        packages: Vec<Package>,
-        roots: Vec<&'static str>,
-        /// `(path, package)` pairs its package database lists.
-        files: Vec<(&'static str, &'static str)>,
-        broken: bool,
-    }
-
-    impl Source for Stub {
-        fn info(&self) -> SourceInfo {
-            SourceInfo::new(self.id, self.id, SourceKind::System)
-        }
-        fn probe(&self, _: &Host) -> Availability {
-            Availability::Available { version: None }
-        }
-        fn inventory(&self, _: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
-            if self.broken {
-                return Err(SourceError::parse("database", "garbage"));
-            }
-            Ok(self.packages.clone())
-        }
-        fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
-            (!self.files.is_empty()).then_some(self as &dyn OwnerLookup)
-        }
-        fn install_roots(&self, _: &Host) -> Vec<PathBuf> {
-            self.roots.iter().map(PathBuf::from).collect()
-        }
-    }
-
-    impl OwnerLookup for Stub {
-        fn owners(&self, _: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError> {
-            let mut owners: HashMap<PathBuf, Vec<String>> = HashMap::new();
-            for (path, package) in &self.files {
-                if paths.iter().any(|asked| asked == Path::new(path)) {
-                    owners.entry(PathBuf::from(path)).or_default().push(package.to_string());
-                }
-            }
-            Ok(owners)
-        }
-    }
-
-    struct TestPlatform {
-        system: SystemInfo,
-        sources: Vec<Arc<dyn Source>>,
-    }
-
-    impl Platform for TestPlatform {
-        fn system(&self) -> &SystemInfo {
-            &self.system
-        }
-        fn sources(&self) -> &[Arc<dyn Source>] {
-            &self.sources
-        }
-    }
-
-    fn housekeeper(fixture: &Fixture, path: &str, sources: Vec<Stub>) -> Housekeeper {
-        let system = SystemInfo {
-            os: "linux".into(),
-            name: "Test".into(),
-            id: "test".into(),
-            version: None,
-            family: "test".into(),
-            image_based: false,
-            arch: "x86_64".into(),
-        };
-        let sources = sources.into_iter().map(|s| Arc::new(s) as Arc<dyn Source>).collect();
-        let host = fixture.host_with_vars(FakeRunner::new(), &[("PATH", path)]);
-        Housekeeper::new(Box::new(TestPlatform { system, sources }), host)
-    }
-
-    fn package(source: &'static str, name: &str, location: Option<&str>, commands: &[&str]) -> Package {
-        let mut package = Package::new(SourceId::new(source), name, name, Scope::User);
-        package.location = location.map(PathBuf::from);
-        package.commands = commands.iter().map(|c| c.to_string()).collect();
-        package
-    }
+    use crate::stub::{Stub, housekeeper, package};
+    use crate::testing::{Fixture, HOME};
 
     fn home(path: &str) -> String {
         format!("{HOME}/{path}")

@@ -10,6 +10,19 @@ the project uses [Semantic Versioning](https://semver.org/).
   symlinks, with the evidence (the package manager lists it, it is inside a package's install folder, or inside a
   folder a source installs into) and the other copies hidden behind it on the `PATH`. `--json` for scripts; exits 0
   when an owner is found, 1 when nothing accounts for the file, 2 when there is no such command or file.
+- Menu entries (desktop entries) are attached to the packages that installed them, whatever the source: packages
+  get their launchers, a title and an icon from them (`Visual Studio Code` for the `code` package). In `--json`:
+  `launchers` and `icon` on each package, `warnings` for problems reading the menu.
+- Packages from dpkg, rpm and pacman now list the commands they put on the `PATH`.
+
+### Changed
+- `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
+  (fonts, firmware, themes, data, plugins) are a new kind, `component`, shown with `--all`. On an Ubuntu desktop the
+  default list went from 525 to 210 entries.
+
+### Fixed
+- `housekeeper who` named the wrong snap for a snap command when a later file on its symlink chain had another
+  snap's name (`/snap/bin/pinta` → … → `/usr/lib/snapd/snapd` could be credited to the snapd snap).
 
 ## 0.1.0 (2026-11-24)
 

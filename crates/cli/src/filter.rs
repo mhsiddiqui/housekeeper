@@ -27,7 +27,10 @@ impl Filter {
 /// Installed on purpose and something a person uses directly.
 fn is_users_choice(package: &Package) -> bool {
     matches!(package.reason, InstallReason::Explicit | InstallReason::Unknown)
-        && !matches!(package.kind, PackageKind::Library | PackageKind::Runtime)
+        && !matches!(
+            package.kind,
+            PackageKind::Library | PackageKind::Runtime | PackageKind::Component
+        )
 }
 
 #[cfg(test)]
@@ -43,7 +46,7 @@ mod tests {
     }
 
     #[test]
-    fn default_view_hides_dependencies_libraries_runtimes_and_os_packages() {
+    fn default_view_hides_dependencies_libraries_runtimes_components_and_os_packages() {
         let filter = Filter {
             all: false,
             search: None,
@@ -55,6 +58,11 @@ mod tests {
             "gnome-platform",
             InstallReason::Explicit,
             PackageKind::Runtime
+        )));
+        assert!(!filter.keeps(&package(
+            "fonts-noto-core",
+            InstallReason::Explicit,
+            PackageKind::Component
         )));
         assert!(!filter.keeps(&package("libbar", InstallReason::Dependency, PackageKind::Unknown)));
         assert!(!filter.keeps(&package("bash", InstallReason::System, PackageKind::Unknown)));
