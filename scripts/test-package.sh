@@ -35,8 +35,10 @@ elif command -v apt-get >/dev/null; then
 elif command -v zypper >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
-  zypper --non-interactive --no-refresh install --allow-unsigned-rpm "$pkg"
-  remove() { zypper --non-interactive --no-refresh remove housekeeper; }
+  # --no-remote: zypper would otherwise build its online repositories' caches first (fetching their keys), and a
+  # flaky mirror fails the install with exit code 106 although the local package needs nothing from them.
+  zypper --non-interactive --no-remote install --allow-unsigned-rpm "$pkg"
+  remove() { zypper --non-interactive --no-remote remove housekeeper; }
 elif command -v dnf >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
