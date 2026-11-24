@@ -8,7 +8,7 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("pipx");
 
@@ -19,6 +19,7 @@ impl LinuxSource for PipxSource {
         Self
     }
 }
+register!(PipxSource);
 
 impl Source for PipxSource {
     fn info(&self) -> SourceInfo {

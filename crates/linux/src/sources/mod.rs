@@ -1,7 +1,9 @@
 //! One file per way software gets installed on Linux.
 //!
-//! Every file here is a source and is registered automatically by `build.rs`: it must contain exactly one
-//! `impl LinuxSource for <Type>` (see [`crate::provider`]). Shared helpers that are not sources live outside this folder.
+//! Every file here is a source and is registered automatically by `build.rs`, which declares it as a module and lists
+//! its `PROVIDER`. Each file must call `register!(<Type>);` for its `impl LinuxSource for <Type>` (see
+//! [`crate::provider`]). Sources never import from each other: shared code lives outside this folder, except
+//! `version_line` below.
 
 include!(concat!(env!("OUT_DIR"), "/sources.rs"));
 

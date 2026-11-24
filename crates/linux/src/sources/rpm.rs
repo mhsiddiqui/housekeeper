@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native};
+use crate::provider::{register, Context, Family, LinuxSource, Native};
 
 pub const ID: SourceId = SourceId::new("rpm");
 
@@ -94,6 +94,7 @@ impl LinuxSource for RpmSource {
         Self::new(context.distro.image_based)
     }
 }
+register!(RpmSource);
 
 impl RpmSource {
     pub fn new(image_based: bool) -> Self {

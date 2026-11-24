@@ -9,7 +9,7 @@ use housekeeper_core::{
 };
 
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native};
+use crate::provider::{register, Context, Family, LinuxSource, Native};
 
 pub const ID: SourceId = SourceId::new("pacman");
 
@@ -69,6 +69,7 @@ impl LinuxSource for PacmanSource {
         Self
     }
 }
+register!(PacmanSource);
 
 impl Source for PacmanSource {
     fn info(&self) -> SourceInfo {

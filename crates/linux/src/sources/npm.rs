@@ -8,7 +8,7 @@ use housekeeper_core::{
 };
 use serde_json::Value;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("npm");
 
@@ -22,6 +22,7 @@ impl LinuxSource for NpmSource {
         Self
     }
 }
+register!(NpmSource);
 
 impl Source for NpmSource {
     fn info(&self) -> SourceInfo {

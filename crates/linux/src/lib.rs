@@ -4,8 +4,10 @@
 //! the native package manager for the running distribution and assembles everything; it never names a source.
 
 pub mod distro;
+mod files;
 mod owner;
 pub mod provider;
+mod python;
 pub mod sources;
 
 use std::sync::Arc;

@@ -1,7 +1,7 @@
 # 0020: Manual source leaves out what other sources claim
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `fix/manual-claims`
+- **Branch / PR:** `fix/manual-claims`, #13
 - **Plan chunks:** 1.6 (manual source), 2.3 (owner lookup)
 - **Commits:** eefb002, 08962c4
 

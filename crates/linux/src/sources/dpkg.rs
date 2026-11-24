@@ -10,7 +10,7 @@ use housekeeper_core::{
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native};
+use crate::provider::{register, Context, Family, LinuxSource, Native};
 
 pub const ID: SourceId = SourceId::new("dpkg");
 
@@ -50,6 +50,7 @@ impl LinuxSource for DpkgSource {
         Self
     }
 }
+register!(DpkgSource);
 
 impl Source for DpkgSource {
     fn info(&self) -> SourceInfo {

@@ -12,7 +12,7 @@ use housekeeper_core::{
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("homebrew");
 
@@ -29,6 +29,7 @@ impl LinuxSource for HomebrewSource {
         Self
     }
 }
+register!(HomebrewSource);
 
 impl Source for HomebrewSource {
     fn info(&self) -> SourceInfo {

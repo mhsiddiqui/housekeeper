@@ -10,8 +10,8 @@ use housekeeper_core::{
     SourceInfo, SourceKind, ScanContext,
 };
 
-use super::appimage::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{Context, LinuxSource};
+use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -143,6 +143,7 @@ impl LinuxSource for ManualSource {
         Self
     }
 }
+register!(ManualSource);
 
 impl Source for ManualSource {
     fn info(&self) -> SourceInfo {
