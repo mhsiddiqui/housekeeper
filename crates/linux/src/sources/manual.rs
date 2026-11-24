@@ -6,12 +6,12 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -154,108 +154,110 @@ impl Source for ManualSource {
         Availability::Available { version: None }
     }
 
-    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = host.home();
-    let bin_dirs: Vec<PathBuf> = std::iter::once(PathBuf::from(USR_LOCAL_BIN))
-        .chain(HOME_BIN_DIRS.iter().map(|dir| home.join(dir)))
-        .collect();
-    let opt_dirs = opt_dirs(host)?;
-    let mut executables: Vec<Entry> = Vec::new();
-    for dir in &bin_dirs {
-        executables.extend(
-            host.read_dir(dir)?
-                .into_iter()
-                .filter(|entry| entry.file_type == Some(FileType::File { executable: true })),
-        );
-    }
-    
-    let asked: Vec<PathBuf> = opt_dirs
-        .iter()
-        .map(|(dir, _)| dir.clone())
-        .chain(
-            executables
-                .iter()
-                .filter(|entry| entry.path.starts_with(USR_LOCAL_BIN))
-                .map(|entry| entry.path.clone()),
-        )
-        .collect();
-    let owned = owned_paths(host, scan, &asked);
-    
-    let mut items: BTreeMap<String, Package> = BTreeMap::new();
-    let installers = detect_installers(host);
-    for (_, package) in &installers {
-        items.insert(package.id.clone(), package.clone());
-    }
-    for (dir, has_program) in opt_dirs.into_iter().filter(|(dir, _)| !owned.contains(dir)) {
-        let mut package = dir_package(host, &dir);
-        if has_program {
-            package.kind = PackageKind::App;
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let home = host.home();
+        let bin_dirs: Vec<PathBuf> = std::iter::once(PathBuf::from(USR_LOCAL_BIN))
+            .chain(HOME_BIN_DIRS.iter().map(|dir| home.join(dir)))
+            .collect();
+        let opt_dirs = opt_dirs(host)?;
+        let mut executables: Vec<Entry> = Vec::new();
+        for dir in &bin_dirs {
+            executables.extend(
+                host.read_dir(dir)?
+                    .into_iter()
+                    .filter(|entry| entry.file_type == Some(FileType::File { executable: true })),
+            );
         }
-        items.insert(package.id.clone(), package);
-    }
-    let executables: Vec<Entry> = executables
-        .into_iter()
-        .filter(|entry| !owned.contains(&entry.path) && !is_appimage(host, &entry.path))
-        .collect();
-    for entry in executables.iter().filter(|entry| !entry.is_symlink) {
-        if !is_pip_script(host, &entry.path) {
-            let package = file_package(host, &entry.path, &entry.name);
+
+        let asked: Vec<PathBuf> = opt_dirs
+            .iter()
+            .map(|(dir, _)| dir.clone())
+            .chain(
+                executables
+                    .iter()
+                    .filter(|entry| entry.path.starts_with(USR_LOCAL_BIN))
+                    .map(|entry| entry.path.clone()),
+            )
+            .collect();
+        let owned = owned_paths(host, scan, &asked);
+
+        let mut items: BTreeMap<String, Package> = BTreeMap::new();
+        let installers = detect_installers(host);
+        for (_, package) in &installers {
+            items.insert(package.id.clone(), package.clone());
+        }
+        for (dir, has_program) in opt_dirs.into_iter().filter(|(dir, _)| !owned.contains(dir)) {
+            let mut package = dir_package(host, &dir);
+            if has_program {
+                package.kind = PackageKind::App;
+            }
             items.insert(package.id.clone(), package);
         }
-    }
-    
-    let managed: Vec<PathBuf> = scan.sources().flat_map(|source| source.install_roots(host)).collect();
-    for link in executables.iter().filter(|entry| entry.is_symlink) {
-        let target = resolve_symlinks(host, &link.path);
-        let command = link.name.clone();
-        if let Some((_, installer)) = installers.iter().find(|(root, _)| target.starts_with(root)) {
-            add_command(&mut items, &installer.id, command);
-            continue;
-        }
-        if managed.iter().any(|root| target.starts_with(root)) {
-            continue;
-        }
-        let target_id = target.to_string_lossy().into_owned();
-        if items.contains_key(&target_id) {
-            // An alias of a listed executable (`beads -> bd`).
-            add_command(&mut items, &target_id, command);
-            continue;
-        }
-        if target.parent().is_some_and(|dir| bin_dirs.iter().any(|bin| bin == dir)) {
-            // Points at an executable excluded above (native-owned, pip launcher).
-            continue;
-        }
-        if let Some(opt_dir) = opt_dir_of(&target) {
-            // Merges into the /opt item; native-owned or unreadable /opt directories stay out.
-            add_command(&mut items, &opt_dir.to_string_lossy(), command);
-            continue;
-        }
-        if is_system_path(&target) {
-            continue;
-        }
-        match install_root(home, &target) {
-            Some(root) => {
-                let id = root.to_string_lossy().into_owned();
-                items.entry(id.clone()).or_insert_with(|| dir_package(host, &root));
-                add_command(&mut items, &id, command);
-            }
-            None => {
-                let mut package =
-                    file_package(host, &target, &target.file_name().unwrap_or_default().to_string_lossy());
-                package.commands = vec![command];
-                items.entry(package.id.clone()).or_insert(package);
+        let executables: Vec<Entry> = executables
+            .into_iter()
+            .filter(|entry| !owned.contains(&entry.path) && !is_appimage(host, &entry.path))
+            .collect();
+        for entry in executables.iter().filter(|entry| !entry.is_symlink) {
+            if !is_pip_script(host, &entry.path) {
+                let package = file_package(host, &entry.path, &entry.name);
+                items.insert(package.id.clone(), package);
             }
         }
-    }
-    
-    let mut packages: Vec<Package> = items.into_values().collect();
-    for package in &mut packages {
-        package.commands.sort();
-        package.commands.dedup();
-        if !package.commands.is_empty() {
-            package.kind = PackageKind::App;
+
+        let managed: Vec<PathBuf> = scan.sources().flat_map(|source| source.install_roots(host)).collect();
+        for link in executables.iter().filter(|entry| entry.is_symlink) {
+            let target = resolve_symlinks(host, &link.path);
+            let command = link.name.clone();
+            if let Some((_, installer)) = installers.iter().find(|(root, _)| target.starts_with(root)) {
+                add_command(&mut items, &installer.id, command);
+                continue;
+            }
+            if managed.iter().any(|root| target.starts_with(root)) {
+                continue;
+            }
+            let target_id = target.to_string_lossy().into_owned();
+            if items.contains_key(&target_id) {
+                // An alias of a listed executable (`beads -> bd`).
+                add_command(&mut items, &target_id, command);
+                continue;
+            }
+            if target.parent().is_some_and(|dir| bin_dirs.iter().any(|bin| bin == dir)) {
+                // Points at an executable excluded above (native-owned, pip launcher).
+                continue;
+            }
+            if let Some(opt_dir) = opt_dir_of(&target) {
+                // Merges into the /opt item; native-owned or unreadable /opt directories stay out.
+                add_command(&mut items, &opt_dir.to_string_lossy(), command);
+                continue;
+            }
+            if is_system_path(&target) {
+                continue;
+            }
+            match install_root(home, &target) {
+                Some(root) => {
+                    let id = root.to_string_lossy().into_owned();
+                    items.entry(id.clone()).or_insert_with(|| dir_package(host, &root));
+                    add_command(&mut items, &id, command);
+                }
+                None => {
+                    let mut package =
+                        file_package(host, &target, &target.file_name().unwrap_or_default().to_string_lossy());
+                    package.commands = vec![command];
+                    items.entry(package.id.clone()).or_insert(package);
+                }
+            }
         }
+
+        let mut packages: Vec<Package> = items.into_values().collect();
+        for package in &mut packages {
+            package.commands.sort();
+            package.commands.dedup();
+            if !package.commands.is_empty() {
+                package.kind = PackageKind::App;
+            }
+        }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 /// Directories in `/opt` the user can list, with whether they hold a program at the top or in `bin/`. Unlistable

@@ -4,12 +4,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{register, Context, Family, LinuxSource, Native};
+use crate::provider::{Context, Family, LinuxSource, Native, register};
 
 pub const ID: SourceId = SourceId::new("pacman");
 
@@ -87,33 +87,35 @@ impl Source for PacmanSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let local = db_path(host.read_optional(PACMAN_CONF)?.as_deref()).join("local");
-    // Exits 1 when there are no foreign packages; either way, origins are optional.
-    let foreign: HashSet<String> = host
-        .run_ok(&Cmd::new("pacman").arg("-Qmq"))
-        .map(|out| {
-            out.lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut packages = Vec::new();
-    for entry in host.read_dir(&local)? {
-        // `ALPM_DB_VERSION` is a plain file next to the package directories.
-        if !host.is_dir(&entry.path) {
-            continue;
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let local = db_path(host.read_optional(PACMAN_CONF)?.as_deref()).join("local");
+        // Exits 1 when there are no foreign packages; either way, origins are optional.
+        let foreign: HashSet<String> = host
+            .run_ok(&Cmd::new("pacman").arg("-Qmq"))
+            .map(|out| {
+                out.lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut packages = Vec::new();
+        for entry in host.read_dir(&local)? {
+            // `ALPM_DB_VERSION` is a plain file next to the package directories.
+            if !host.is_dir(&entry.path) {
+                continue;
+            }
+            let desc_path = entry.path.join("desc");
+            let desc = host
+                .read_optional(&desc_path)?
+                .ok_or_else(|| SourceError::parse("pacman database", format!("{} is missing", desc_path.display())))?;
+            packages.push(parse_desc(&desc, &foreign).map_err(|detail| {
+                SourceError::parse(format!("pacman database entry {}", desc_path.display()), detail)
+            })?);
         }
-        let desc_path = entry.path.join("desc");
-        let desc = host
-            .read_optional(&desc_path)?
-            .ok_or_else(|| SourceError::parse("pacman database", format!("{} is missing", desc_path.display())))?;
-        packages.push(parse_desc(&desc, &foreign).map_err(|detail| {
-            SourceError::parse(format!("pacman database entry {}", desc_path.display()), detail)
-        })?);
+        Ok(packages)
     }
-    Ok(packages) }
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
@@ -331,7 +333,9 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
 
     fn scan(fixture: &Fixture) -> Vec<Package> {
         let runner = FakeRunner::new().respond("pacman -Qmq", "yay\n");
-        PacmanSource.inventory(&fixture.host(runner), &ScanContext::default()).unwrap()
+        PacmanSource
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap()
     }
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
@@ -377,7 +381,9 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
                 ..Output::default()
             },
         );
-        let packages = PacmanSource.inventory(&fixture.host(runner), &ScanContext::default()).unwrap();
+        let packages = PacmanSource
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap();
         assert_eq!(packages.len(), 4);
         assert!(packages.iter().all(|p| p.origin.is_none()));
     }
@@ -459,8 +465,14 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
         );
         let host = Fixture::new().host(runner);
         let owned = PacmanSource
-            .owned_paths(&host, &paths(&["/opt/visual-studio-code", "/usr/local/bin/tool", "/opt/manual"]))
+            .owned_paths(
+                &host,
+                &paths(&["/opt/visual-studio-code", "/usr/local/bin/tool", "/opt/manual"]),
+            )
             .unwrap();
-        assert_eq!(sorted(owned), paths(&["/opt/visual-studio-code", "/usr/local/bin/tool"]));
+        assert_eq!(
+            sorted(owned),
+            paths(&["/opt/visual-studio-code", "/usr/local/bin/tool"])
+        );
     }
 }

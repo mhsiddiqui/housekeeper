@@ -34,6 +34,7 @@ CI runs all of these on every pull request into `main` ([ci.yml](.github/workflo
 
 ```sh
 cargo fmt --all --check
+rustfmt --check crates/linux/src/sources/*.rs   # cargo fmt cannot see these (declared by build.rs)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps

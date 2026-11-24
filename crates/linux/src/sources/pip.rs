@@ -3,11 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 use crate::python::{site_packages, split_dist_info};
 
 pub const ID: SourceId = SourceId::new("pip");
@@ -33,18 +33,20 @@ impl Source for PipUserSource {
         }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let mut packages = Vec::new();
-    for (python, dir) in site_packages(host, &user_base(host))? {
-        for entry in host.read_dir(&dir)? {
-            if entry.file_type != Some(FileType::Dir) {
-                continue;
-            }
-            if let Some((name, version)) = split_dist_info(&entry.name) {
-                packages.push(read_dist_info(host, &python, &entry.path, name, version)?);
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let mut packages = Vec::new();
+        for (python, dir) in site_packages(host, &user_base(host))? {
+            for entry in host.read_dir(&dir)? {
+                if entry.file_type != Some(FileType::Dir) {
+                    continue;
+                }
+                if let Some((name, version)) = split_dist_info(&entry.name) {
+                    packages.push(read_dist_info(host, &python, &entry.path, name, version)?);
+                }
             }
         }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 /// `$PYTHONUSERBASE`, defaulting to `~/.local`.
@@ -191,7 +193,9 @@ cov = pytest_cov.plugin
 
     #[test]
     fn lists_dist_info_per_python_version() {
-        let packages = PipUserSource.inventory(&fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = PipUserSource
+            .inventory(&fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["python3.11/coverage", "python3.11/MarkupSafe", "python3.12/Mako"]);
         let coverage = find(&packages, "python3.11/coverage");
@@ -215,7 +219,9 @@ cov = pytest_cov.plugin
 
     #[test]
     fn requested_marker_decides_the_reason() {
-        let packages = PipUserSource.inventory(&fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = PipUserSource
+            .inventory(&fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         assert_eq!(find(&packages, "python3.11/coverage").reason, InstallReason::Explicit);
         assert_eq!(
             find(&packages, "python3.11/MarkupSafe").reason,
@@ -225,7 +231,9 @@ cov = pytest_cov.plugin
 
     #[test]
     fn console_scripts_are_commands() {
-        let packages = PipUserSource.inventory(&fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = PipUserSource
+            .inventory(&fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let coverage = find(&packages, "python3.11/coverage");
         assert_eq!(coverage.commands, ["coverage", "coverage-3.11"]);
         assert_eq!(coverage.kind, PackageKind::App);

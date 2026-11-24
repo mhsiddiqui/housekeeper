@@ -3,12 +3,12 @@
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde_json::Value;
 
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("npm");
 
@@ -52,15 +52,17 @@ impl Source for NpmSource {
         roots
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let mut packages = Vec::new();
-    for root in roots(host)? {
-        for dir in package_dirs(host, &root.dir)? {
-            if let Some(package) = read_package(host, &root, &dir)? {
-                packages.push(package);
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let mut packages = Vec::new();
+        for root in roots(host)? {
+            for dir in package_dirs(host, &root.dir)? {
+                if let Some(package) = read_package(host, &root, &dir)? {
+                    packages.push(package);
+                }
             }
         }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 /// A global `node_modules` directory and the Node installation it belongs to.
@@ -299,7 +301,9 @@ mod tests {
 
     #[test]
     fn lists_packages_per_node_version_with_unique_ids() {
-        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = NpmSource
+            .inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -332,7 +336,9 @@ mod tests {
 
     #[test]
     fn bin_field_becomes_commands_and_decides_kind() {
-        let packages = NpmSource.inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = NpmSource
+            .inventory(&nvm_fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ts = find(&packages, "nvm-v22.18.0/typescript");
         assert_eq!(ts.commands, ["tsc", "tsserver"]);
         assert_eq!(ts.kind, PackageKind::App);
@@ -402,7 +408,9 @@ mod tests {
         fixture
             .file("/usr/local/lib/node_modules/@acme/tool/package.json", "{ not json")
             .dir("/usr/local/lib/node_modules/half-installed");
-        let packages = NpmSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = NpmSource
+            .inventory(&fixture.host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["usr-local/@acme/tool", "usr-local/half-installed"]);
         assert_eq!(packages[0].name, "@acme/tool");

@@ -4,13 +4,13 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{register, Context, Family, LinuxSource, Native};
+use crate::provider::{Context, Family, LinuxSource, Native, register};
 
 pub const ID: SourceId = SourceId::new("dpkg");
 
@@ -70,12 +70,14 @@ impl Source for DpkgSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let listing = host.run_ok(&Cmd::new("dpkg-query").args(["--show", FORMAT]))?;
-    let auto = host
-        .read_optional(APT_EXTENDED_STATES)?
-        .map(|text| auto_installed(&text))
-        .unwrap_or_default();
-    parse_listing(&listing, &auto) }
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("dpkg-query").args(["--show", FORMAT]))?;
+        let auto = host
+            .read_optional(APT_EXTENDED_STATES)?
+            .map(|text| auto_installed(&text))
+            .unwrap_or_default();
+        parse_listing(&listing, &auto)
+    }
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
@@ -217,7 +219,9 @@ Auto-Installed: 0
         let fixture = Fixture::new();
         fixture.file(APT_EXTENDED_STATES, EXTENDED_STATES);
         let runner = FakeRunner::new().respond(&format!("dpkg-query --show {FORMAT}"), LISTING);
-        DpkgSource.inventory(&fixture.host(runner), &ScanContext::default()).unwrap()
+        DpkgSource
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap()
     }
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
@@ -264,7 +268,9 @@ Auto-Installed: 0
     fn works_without_apt() {
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("dpkg-query --show {FORMAT}"), LISTING);
-        let packages = DpkgSource.inventory(&fixture.host(runner), &ScanContext::default()).unwrap();
+        let packages = DpkgSource
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap();
         assert_eq!(find(&packages, "libc6:i386").reason, InstallReason::Explicit);
     }
 
@@ -309,7 +315,10 @@ Auto-Installed: 0
             );
             let host = Fixture::new().host(runner);
             let owned = DpkgSource
-                .owned_paths(&host, &paths(&["/opt/brave.com", "/opt/linear", "/usr/local/bin/ngrok"]))
+                .owned_paths(
+                    &host,
+                    &paths(&["/opt/brave.com", "/opt/linear", "/usr/local/bin/ngrok"]),
+                )
                 .unwrap();
             assert_eq!(sorted(owned), paths(&["/opt/brave.com", "/usr/local/bin/ngrok"]));
         }

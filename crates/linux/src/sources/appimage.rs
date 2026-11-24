@@ -10,7 +10,7 @@ use housekeeper_core::{
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("appimage");
 
@@ -44,38 +44,40 @@ impl Source for AppImageSource {
         Availability::Available { version: None }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = host.home();
-    let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
-    for entry in host.read_dir(home.join("Applications"))? {
-        if entry.file_type == Some(FileType::Dir) {
-            dirs.push(entry.path);
-        }
-    }
-    dirs.push(PathBuf::from("/opt"));
-    let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
-    
-    let mut packages: Vec<Package> = Vec::new();
-    let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
-    for dir in &dirs {
-        for entry in host.read_dir(dir)? {
-            if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
-                continue;
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let home = host.home();
+        let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
+        for entry in host.read_dir(home.join("Applications"))? {
+            if entry.file_type == Some(FileType::Dir) {
+                dirs.push(entry.path);
             }
-            let target = resolve_symlinks(host, &entry.path);
-            let index = match by_target.get(&target) {
-                Some(&index) => index,
-                None => {
-                    packages.push(package(host, &target));
-                    by_target.insert(target, packages.len() - 1);
-                    packages.len() - 1
+        }
+        dirs.push(PathBuf::from("/opt"));
+        let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
+
+        let mut packages: Vec<Package> = Vec::new();
+        let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
+        for dir in &dirs {
+            for entry in host.read_dir(dir)? {
+                if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
+                    continue;
                 }
-            };
-            if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
-                packages[index].commands.push(entry.name);
+                let target = resolve_symlinks(host, &entry.path);
+                let index = match by_target.get(&target) {
+                    Some(&index) => index,
+                    None => {
+                        packages.push(package(host, &target));
+                        by_target.insert(target, packages.len() - 1);
+                        packages.len() - 1
+                    }
+                };
+                if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
+                    packages[index].commands.push(entry.name);
+                }
             }
         }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 fn package(host: &Host, path: &Path) -> Package {
@@ -158,8 +160,8 @@ fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
     use housekeeper_core::Scope;
+    use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
 
     /// Start of an ELF header with the AppImage type 2 marker.
     const TYPE2: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00\x00\x00\x00";
@@ -168,7 +170,9 @@ mod tests {
     const PLAIN_ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 
     fn scan(fixture: &Fixture) -> Vec<Package> {
-        AppImageSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap()
+        AppImageSource
+            .inventory(&fixture.host(FakeRunner::new()), &ScanContext::default())
+            .unwrap()
     }
 
     fn ids(packages: &[Package]) -> Vec<&str> {

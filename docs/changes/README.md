@@ -40,4 +40,5 @@ links back.
 | [0024](0024-scan-progress.md) | Report each source's result as soon as it finishes | none (prepares 6.3) | #14 |
 | [0025](0025-spec-architecture-link.md) | Spec points to the architecture instead of its own outdated design | none | #11 |
 | [0026](0026-architecture-diagram.md) | Redraw the architecture diagrams in the guide | none | #16 |
-| [0027](0027-readme.md) | Complete the README for the first release | 0.4 | `docs/readme` |
+| [0027](0027-readme.md) | Complete the README for the first release | 0.4 | #17 |
+| [0028](0028-format-sources.md) | Format and check the source files cargo fmt never reached | none | #18 |

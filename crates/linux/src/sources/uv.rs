@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::key_values;
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 use crate::python::{normalize_name, site_packages, split_dist_info};
 
 pub const ID: SourceId = SourceId::new("uv");
@@ -40,13 +40,15 @@ impl Source for UvToolSource {
         vec![tools_dir(host)]
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let mut packages = Vec::new();
-    for entry in host.read_dir(tools_dir(host))? {
-        if entry.file_type == Some(FileType::Dir) && !entry.name.starts_with('.') {
-            packages.push(read_tool(host, &entry.name, &entry.path)?);
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let mut packages = Vec::new();
+        for entry in host.read_dir(tools_dir(host))? {
+            if entry.file_type == Some(FileType::Dir) && !entry.name.starts_with('.') {
+                packages.push(read_tool(host, &entry.name, &entry.path)?);
+            }
         }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 /// `$UV_TOOL_DIR`, defaulting to `$XDG_DATA_HOME/uv/tools`.
@@ -207,7 +209,9 @@ implementation = CPython\nuv = 0.11.9\nversion_info = 3.13.13\ninclude-system-si
 
     #[test]
     fn reads_receipts_and_venv_versions() {
-        let packages = UvToolSource.inventory(&fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = UvToolSource
+            .inventory(&fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["graphifyy", "ruamel-yaml-cmd"]);
 
@@ -227,7 +231,9 @@ implementation = CPython\nuv = 0.11.9\nversion_info = 3.13.13\ninclude-system-si
 
     #[test]
     fn main_requirement_is_matched_by_normalized_name() {
-        let packages = UvToolSource.inventory(&fixture().host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = UvToolSource
+            .inventory(&fixture().host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ruamel = &packages[1];
         assert_eq!(ruamel.name, "Ruamel.Yaml.Cmd");
         assert_eq!(ruamel.version.as_deref(), Some("0.6.5"));

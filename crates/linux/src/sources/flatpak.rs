@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind, ScanContext,
+    Availability, Cmd, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError, SourceId,
+    SourceInfo, SourceKind,
 };
 
 use super::version_line;
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("flatpak");
 
@@ -53,9 +53,11 @@ impl Source for FlatpakSource {
         ]
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let listing = host.run_ok(&Cmd::new("flatpak").args(["list", COLUMNS]))?;
-    let user_dir = host.data_home().join("flatpak");
-    parse_listing(&listing, &user_dir) }
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("flatpak").args(["list", COLUMNS]))?;
+        let user_dir = host.data_home().join("flatpak");
+        parse_listing(&listing, &user_dir)
+    }
 }
 
 /// `user_dir` is the logical path of the per-user installation.
@@ -136,7 +138,9 @@ org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\ta
     fn scan_with(vars: &[(&str, &str)]) -> Vec<Package> {
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("flatpak list {COLUMNS}"), LISTING);
-        FlatpakSource.inventory(&fixture.host_with_vars(runner, vars), &ScanContext::default()).unwrap()
+        FlatpakSource
+            .inventory(&fixture.host_with_vars(runner, vars), &ScanContext::default())
+            .unwrap()
     }
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
