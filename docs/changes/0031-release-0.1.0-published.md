@@ -3,6 +3,7 @@
 - **Date:** 2026-11-24
 - **Branch / PR:** `docs/release-0.1.0-done`
 - **Plan chunks:** 0.4 (releases), which closes Phase 0
+- **Commits:** 7d8c3a4
 
 ## What changed
 - [Plan](../planning/plan.md): chunk 0.4 and Phase 0 marked ✅, with a link to the release.
