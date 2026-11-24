@@ -208,16 +208,28 @@ impl Host {
 }
 
 fn file_type_of(meta: &fs::Metadata) -> FileType {
-    use std::os::unix::fs::PermissionsExt;
     if meta.is_dir() {
         FileType::Dir
     } else if meta.is_file() {
         FileType::File {
-            executable: meta.permissions().mode() & 0o111 != 0,
+            executable: is_executable(meta),
         }
     } else {
         FileType::Other
     }
+}
+
+/// Whether a file may be run: any of the Unix execute bits is set.
+#[cfg(unix)]
+pub(crate) fn is_executable(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.is_file() && meta.permissions().mode() & 0o111 != 0
+}
+
+/// Whether a file may be run. Systems without execute bits have nothing finer to check, so every file counts.
+#[cfg(not(unix))]
+pub(crate) fn is_executable(meta: &fs::Metadata) -> bool {
+    meta.is_file()
 }
 
 /// Resolves `.` and `..` without touching the file system.

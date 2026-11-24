@@ -186,9 +186,9 @@ pub struct SystemInfo {
     /// Distribution or edition ID, e.g. `ubuntu`, `fedora`.
     pub id: String,
     pub version: Option<String>,
-    /// Family that decides the native package manager, e.g. `debian`, `fedora`, `suse`, `arch`.
+    /// Group of systems that share a native package manager, e.g. `debian`, `fedora`, `suse`, `arch` on Linux.
     pub family: String,
-    /// Read-only system image with layered packages (Fedora Silverblue and friends).
+    /// The system is a read-only image that apps are layered on (Fedora Silverblue on Linux, for example).
     pub image_based: bool,
     pub arch: String,
 }

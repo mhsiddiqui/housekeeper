@@ -36,5 +36,6 @@ links back.
 | [0020](0020-manual-claims.md) | Manual source leaves out what other sources claim | 1.6, 2.3 | #13 |
 | [0021](0021-review-decisions.md) | Decisions for package tools, removal privileges and script-installer recipes | 3.1, 3.4, 4.1 | #10 |
 | [0022](0022-source-registration.md) | Register sources with `register!` instead of scanning their text | none | #12 |
+| [0023](0023-platform-crate.md) | Core builds on any OS; `housekeeper-platform` picks the platform | none | #15 |
 | [0024](0024-scan-progress.md) | Report each source's result as soon as it finishes | none (prepares 6.3) | #14 |
 | [0025](0025-spec-architecture-link.md) | Spec points to the architecture instead of its own outdated design | none | #11 |

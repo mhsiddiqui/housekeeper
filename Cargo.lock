@@ -168,7 +168,7 @@ dependencies = [
  "anyhow",
  "clap",
  "housekeeper-core",
- "housekeeper-linux",
+ "housekeeper-platform",
  "serde",
  "serde_json",
 ]
@@ -190,6 +190,15 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "housekeeper-platform"
+version = "0.1.0"
+dependencies = [
+ "housekeeper-core",
+ "housekeeper-linux",
+ "thiserror",
 ]
 
 [[package]]

@@ -7,24 +7,29 @@ An illustrated walkthrough of this document, including a step-by-step example of
 
 ```mermaid
 flowchart TD
-    cli[housekeeper-cli<br/>binary: housekeeper] --> core
-    app[desktop app, Phase 6] --> core
-    cli --> linux
-    app --> linux
+    cli[housekeeper-cli<br/>binary: housekeeper] --> platform
+    app[desktop app, Phase 6] --> platform
+    cli --> core
+    app --> core
+    platform[housekeeper-platform<br/>detect: picks the OS crate] --> linux
+    platform -.-> future
     linux[housekeeper-linux<br/>LinuxPlatform + sources] --> core
     future[housekeeper-macos / -windows<br/>later] -.-> core
     core[housekeeper-core<br/>model, traits, Host, Inventory]
 ```
 
-- **`housekeeper-core`** knows nothing about any operating system. It defines the model (`Package`, `SourceInfo`),
-  the extension points (traits), the `Host` that sources read the machine through, and services such as
-  `Inventory`.
+- **`housekeeper-core`** knows nothing about any operating system and builds on any of them. It defines the model
+  (`Package`, `SourceInfo`), the extension points (traits), the `Host` that sources read the machine through, and
+  services such as `Inventory`.
 - **`housekeeper-linux`** implements a `Platform` for Linux and one `Source` per way software gets installed.
-- **Front ends** (`housekeeper-cli`, later the Tauri app) pick the platform for the OS they were built for and talk
-  only to core services.
+- **`housekeeper-platform`** is the one place that knows which OS crate to use: `detect(&host)` returns the
+  `Platform` for the OS it was built for, or `Unsupported`. Only it depends on the OS crates (D27).
+- **Front ends** (`housekeeper-cli`, later the Tauri app) call `housekeeper_platform::detect` and then talk only to
+  core services.
 
-Adding an operating system means adding one crate that implements `Platform` and its sources. Nothing in core or in
-the Linux crate changes.
+Adding an operating system means adding one crate that implements `Platform` and its sources, and registering it in
+`housekeeper-platform` (its `detect` and a target-specific dependency). Nothing in core, in the Linux crate or in the
+front ends changes.
 
 ## Composition, not inheritance
 
@@ -139,3 +144,4 @@ Each challenge raised during design review, and the decision taken.
 | D24 | Reading packages and changing them are different jobs: rpm is read on Fedora, openSUSE and Silverblue, but changed through dnf, zypper or rpm-ostree (and dpkg through apt, pacman's AUR through paru or yay) | The native source reads the package database (dpkg, rpm, pacman) and stays one per system (D2). Changing packages (simulate, remove, install, update, hold) belongs to a **package tool**: one file per tool (apt, dnf, zypper, rpm-ostree, transactional-update, pacman, an AUR helper) in its own folder of `crates/linux/src/`, registered like sources (D20), declaring the families or `os-release` IDs it serves and when it applies (image-based or not). `LinuxPlatform` picks the tool the same way it picks the native source, and the native source's `remover()` and later abilities come from that tool. A database file therefore never branches on distribution, and a distribution that shares a database but not a tool (Mageia, PCLinuxOS) is one new tool file. Settled before Phase 3.1. |
 | D25 | Who carries out a removal | Every step of a removal plan says who runs it: the user, or the root helper (D4). Items in the user's own scope (npm under nvm or fnm, pipx, uv, cargo, `pip --user`, `~/.local`, user Flatpaks, Homebrew) are removed as the user. Tools that authorise system changes themselves (snapd, Flatpak's system helper) also run as the user and ask through polkit on their own. The root helper only takes what needs root and has no such tool: operations of the native package tool (D24), and recipe actions on system paths under D8's allowed roots (such as `/opt`). It checks each package name against the package database itself (`dpkg-query`, `rpm -q`, pacman's database) and never runs a scan: as root, the home directory and environment are root's, so user-scope sources would read the wrong places, and the helper would carry code it does not need. |
 | D26 | A script-installed tool is described in two places (detection in Rust, removal in a recipe) | One TOML recipe per tool (D8) holds both: how to detect it (install roots, the environment variables that move them, a marker file) and how to remove it. The manual source reads its list of script installers from the recipes, which are compiled into the binary so it stays one file. The Rust `INSTALLERS` table in `manual.rs` moves into recipes when the recipe format lands (Phase 3.4). Adding a script-installed tool is then one reviewed TOML file and no Rust. |
+| D27 | Core must build on any OS, and every front end must pick the platform the same way | Core keeps Unix-only code (execute bits in `host.rs` and `command.rs`) behind `cfg(unix)`; elsewhere any file counts as executable. A small crate, `housekeeper-platform`, exposes `detect(&host) -> Result<Box<dyn Platform>, Unsupported>` and is the only crate that depends on an OS crate, each as a target-specific dependency. Front ends call it and depend on core otherwise. The alternative, each front end keeping its own `cfg(target_os)` functions, was rejected: the desktop app would have to copy them and could drift from the CLI. |
