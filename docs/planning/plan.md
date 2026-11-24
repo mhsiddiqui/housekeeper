@@ -38,7 +38,7 @@ source, without root and without changing anything.
 ## Phase 2: Identity and ownership 🚧
 | Chunk | Delivers |
 |---|---|
-| 2.1 | Desktop entries: map `.desktop` files to packages; app vs library/runtime/system; display names, icons |
+| 2.1 ✅ | Desktop entries: map `.desktop` files to packages; app vs library/runtime/system; display names, icons. Commands found in the native package database too; packages with neither are components, hidden by default (change 0033) |
 | 2.2 | Group one app installed from several sources (AppStream ID, desktop ID, name) without merging the installs |
 | 2.3 ✅ | Ownership: `OwnerLookup` names the owning packages on native sources (dpkg, rpm, pacman); `housekeeper who <command or path>` follows symlinks and names the source, package and evidence (change 0032) |
 | 2.4 | `housekeeper show <id>`: details, files, launchers, dependants |

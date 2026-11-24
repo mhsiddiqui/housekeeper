@@ -292,7 +292,13 @@ native source's <code>owner_lookup()</code> owns and programs that resolve into 
 <pre><code><span class="k">pub trait</span> <span class="t">Platform</span>: Send + Sync {
     <span class="k">fn</span> system(&amp;self) -&gt; &amp;SystemInfo;            <span class="c">// "Ubuntu 26.04", family "debian", image_based…</span>
     <span class="k">fn</span> sources(&amp;self) -&gt; &amp;[Arc&lt;dyn Source&gt;];    <span class="c">// the parts that apply to this system (shared, see section 5)</span>
+    <span class="k">fn</span> launchers(&amp;self, host, scan) -&gt; Vec&lt;Launcher&gt;; <span class="c">// the application menu (desktop entries on Linux); default: none</span>
+    <span class="k">fn</span> command_dirs(&amp;self, host) -&gt; Vec&lt;PathBuf&gt;;     <span class="c">// where commands live; default: the PATH</span>
 }</code></pre>
+<p>After the sources are read, the scan attaches every launcher, and every command a package database lists, to its
+package with the same evidence <code>housekeeper who</code> uses (decision D28). That is how a <code>.deb</code> with a
+menu entry becomes an app with a title and an icon, and a package with neither a command nor a launcher (fonts,
+firmware, data) becomes a component the default list hides.</p>
 
 <h3><code>Host</code>: the machine, seen through one door</h3>
 <p>Sources never call <code>std::fs</code> or start programs directly. They ask the <code>Host</code>:</p>
@@ -544,7 +550,8 @@ when it is implemented.</p>
 <pre><code><span class="c">// crates/macos/src/lib.rs (future)</span>
 <span class="k">pub struct</span> <span class="t">MacPlatform</span> { system: SystemInfo, sources: Vec&lt;Arc&lt;<span class="k">dyn</span> Source&gt;&gt; }
 <span class="c">// sources: HomebrewSource, AppBundleSource (/Applications), MacAppStoreSource,
-// and the cross-platform ones (npm, pipx, uv, cargo) reused as-is from a shared crate.</span>
+// and the cross-platform ones (npm, pipx, uv, cargo) reused as-is from a shared crate.
+// launchers(): the app bundles Launchpad shows; command_dirs(): the PATH (the default).</span>
 
 <span class="c">// crates/platform/src/lib.rs: the one place that registers it</span>
 #[cfg(target_os = <span class="s">"macos"</span>)]
@@ -612,7 +619,7 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D27)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D28)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

@@ -65,8 +65,8 @@ install -Dm755 housekeeper-*-x86_64-linux/housekeeper ~/.local/bin/housekeeper
 ## Use
 ```sh
 housekeeper sources                            # which sources exist on this machine
-housekeeper list                               # apps someone installed on purpose
-housekeeper list --all                         # plus dependencies, libraries, runtimes and system packages
+housekeeper list                               # apps and commands someone installed on purpose
+housekeeper list --all                         # plus dependencies, libraries, runtimes, components and system packages
 housekeeper list --source flatpak --source snap  # only these sources (repeatable)
 housekeeper list --search godot                # name, title or summary contains this text
 housekeeper list --json                        # the whole scan as JSON
@@ -95,15 +95,23 @@ Installed by hand or script  manual    available
 `housekeeper list` prints a table on standard output and a summary on standard error:
 
 ```text
-NAME          VERSION  SOURCE   SIZE
-Godot Engine  4.7.2    flatpak  171.8 MB
+NAME                VERSION             SOURCE   SIZE
+Godot Engine        4.7.2               flatpak  171.8 MB
+Visual Studio Code  1.141.0-1791276758  dpkg     1.1 GB
 
-1 shown of 10 found (use --all to include dependencies, libraries and runtimes).
+2 shown of 10 found (use --all to include dependencies, libraries, runtimes and components).
 ```
 
-By default the list keeps what someone chose to install and hides what came along with it (dependencies, libraries,
-Flatpak runtimes, snap bases). `--all` shows everything. The IDs in the `sources` table are the values `--source`
-accepts.
+By default the list keeps what someone chose to install and a person uses: something with an entry in the
+application menu or a command on the `PATH`. It hides what came along with it (dependencies, libraries, Flatpak
+runtimes, snap bases) and components: packages of the distribution's package manager with neither a menu entry nor a
+command, such as fonts, firmware, themes and data. Names come from the menu entry when the source has none
+(`Visual Studio Code` for the `code` package). `--all` shows everything. The IDs in the `sources` table are the values
+`--source` accepts.
+
+Menu entries are the desktop entries in `applications/` under `$XDG_DATA_HOME` and `$XDG_DATA_DIRS`, the folders
+your desktop's menu reads, so an entry a terminal session cannot see (Flatpak and Snap add their folders to
+`XDG_DATA_DIRS` at login) is missing from the list too.
 
 ### Who installed this?
 `housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source
@@ -126,9 +134,11 @@ by hand or by a script, outside the folders Housekeeper reads), and 2 when there
 
 ### JSON output
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
-`state` `ok`, `unavailable` or `failed`, and any warnings) and every package (`packages`: source, id, name, title,
-version, summary, kind, install reason, scope, size, install time, origin, location, commands). The `schema` field is
-`1`; it changes when a field is removed or changes meaning. Filters apply to `packages` only.
+`state` `ok`, `unavailable` or `failed`, and any warnings), every package (`packages`: source, id, name, title,
+version, summary, kind (`app`, `runtime`, `library`, `component` or `unknown`), install reason, scope, size, install
+time, origin, location, commands, launchers with their id, name, icon, file and program, and icon) and problems that
+belong to no one source (`warnings`, left out when empty). The `schema` field is `1`; it changes when a field is
+removed or changes meaning. Filters apply to `packages` only.
 
 ### When a source is missing or fails
 - **not available** in `housekeeper sources` means the tool is not on this machine (or, for Snap, snapd is not
