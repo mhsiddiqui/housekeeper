@@ -1,7 +1,7 @@
 # 0021: Decisions for package tools, removal privileges and script-installer recipes
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `docs/review-decisions`
+- **Branch / PR:** `docs/review-decisions`, #10
 - **Plan chunks:** 3.1, 3.4, 4.1 (scope only; nothing is built yet)
 - **Commits:** bfc3231
 

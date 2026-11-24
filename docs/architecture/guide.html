@@ -192,7 +192,7 @@ host.home()                                  <span class="c">// the user's home<
 host.run_ok(&amp;Cmd::new(<span class="s">"rpm"</span>).arg(<span class="s">"-qa"</span>))       <span class="c">// goes to the CommandRunner it was given</span></code></pre>
 <p>The host is itself composed: a root directory, a home, environment variables, and a <code>CommandRunner</code>
 (argv only, never a shell, always a timeout). Swap the runner and the same sources run against recorded output in
-tests, or another computer over SSH later.</p>
+tests.</p>
 
 <h3><code>Housekeeper</code>: the composition root</h3>
 <pre><code><span class="k">let</span> host = Host::local();
@@ -218,7 +218,7 @@ tests, or another computer over SSH later.</p>
 
   <rect class="box core" x="20" y="340" width="220" height="70" rx="10"/>
   <text class="title" x="130" y="370" text-anchor="middle">CommandRunner</text>
-  <text class="small" x="130" y="392" text-anchor="middle">SystemRunner · FakeRunner · (SSH)</text>
+  <text class="small" x="130" y="392" text-anchor="middle">SystemRunner · FakeRunner</text>
 
   <rect class="box linux" x="660" y="20" width="220" height="70" rx="10"/>
   <text class="title" x="770" y="50" text-anchor="middle">Distro</text>

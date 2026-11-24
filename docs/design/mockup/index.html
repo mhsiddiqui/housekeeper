@@ -604,7 +604,7 @@
       <!-- ================= SETTINGS ================= -->
       <section class="view" id="view-settings">
         <h1>Settings</h1>
-        <p class="sub">Sources, safety, privacy, appearance and other computers.</p>
+        <p class="sub">Sources, safety, privacy and appearance.</p>
         <div id="setBody"></div>
       </section>
 
@@ -989,7 +989,7 @@ const repoApps = (r) => apps.filter((a) => r.src ? a.source === r.src : r.match 
 /* =====================================================================
    Navigation
    ===================================================================== */
-const state = { view: "discover", filter: "all", q: "", showSystem: false, sort: "name", selected: null, sel: new Set(), cursor: -1, remote: null, layout: "split", cat: null, splitSel: null, previewUrl: null };
+const state = { view: "discover", filter: "all", q: "", showSystem: false, sort: "name", selected: null, sel: new Set(), cursor: -1, layout: "split", cat: null, splitSel: null, previewUrl: null };
 function go(view) {
   state.view = view;
   renderSidebar();
@@ -1010,27 +1010,20 @@ document.addEventListener("click", (e) => {
    Sidebar
    ===================================================================== */
 function visibleApps() { return apps.filter((a) => (state.showSystem || a.kind !== "system") && !settings.disabled.has(a.source)); }
-const MACHINE_COUNTS = { "build-box": { installed: 214, updates: 3 }, "media-pc": { installed: 187, updates: 12 } };
 function navBtn(view, iconName, label, extra = "", active = state.view === view) {
   return `<button class="nav-item ${active ? "active" : ""}" data-view="${view}">${ICON(iconName)}<span class="lbl">${esc(label)}</span>${extra}</button>`;
 }
 function renderSidebar() {
   const vis = visibleApps();
   const upd = apps.filter((a) => a.update && !a.held).length;
-  const cur = state.remote || "local";
-  MACHINE_COUNTS[cur] = { installed: vis.length, updates: upd };
   const cl = cleanup.filter((c) => !c.done).reduce((s, c) => s + (c.id === "dup" ? dupSize() : c.size), 0);
   const active = tasks.filter((t) => ["queued", "waiting", "running"].includes(t.status)).length;
   let html = navBtn("discover", "compass", "Discover", "", state.view === "discover" && !state.cat)
     + navBtn("install", "download", "Install from file");
-  [["local", "This computer", "monitor"], ...Object.keys(MACHINES).map((k) => [k, k, "globe"])].forEach(([k, label, ico]) => {
-    const isCur = k === cur;
-    const c = MACHINE_COUNTS[k] || { installed: "–", updates: 0 };
-    html += `<div class="nav-title">${ICON(ico)}${esc(label)} <span style="font-weight:400">· ${k === "local" ? esc(isCur ? P.short : "Ubuntu") : "SSH"}</span></div>`;
-    html += `<button class="nav-item ${isCur && state.view === "library" && state.filter === "all" ? "active" : ""}" data-view="library" data-machine="${k}">${ICON("box")}<span class="lbl">Installed</span><span class="count" ${isCur ? 'id="navLibCount"' : ""}>${c.installed}</span></button>`;
-    if (isCur) html += activeSources().map((s) => `<button class="nav-item nav-sub ${state.view === "library" && state.filter === s ? "active" : ""}" data-srcnav="${s}"><span class="dot" style="background:${SOURCES[s].color}"></span><span class="lbl">${esc(SOURCES[s].label)}</span><span class="count">${vis.filter((a) => a.source === s).length}</span></button>`).join("");
-    html += `<button class="nav-item ${isCur && state.view === "updates" ? "active" : ""}" data-view="updates" data-machine="${k}">${ICON("clock")}<span class="lbl">Updates</span>${isCur ? `<span class="badge" id="navUpdCount" style="${c.updates ? "" : "display:none"}">${c.updates}</span>` : c.updates ? `<span class="count">${c.updates}</span>` : ""}</button>`;
-  });
+  html += `<div class="nav-title">${ICON("monitor")}This computer <span style="font-weight:400">· ${esc(P.short)}</span></div>`;
+  html += navBtn("library", "box", "Installed", `<span class="count" id="navLibCount">${vis.length}</span>`, state.view === "library" && state.filter === "all");
+  html += activeSources().map((s) => `<button class="nav-item nav-sub ${state.view === "library" && state.filter === s ? "active" : ""}" data-srcnav="${s}"><span class="dot" style="background:${SOURCES[s].color}"></span><span class="lbl">${esc(SOURCES[s].label)}</span><span class="count">${vis.filter((a) => a.source === s).length}</span></button>`).join("");
+  html += navBtn("updates", "clock", "Updates", `<span class="badge" id="navUpdCount" style="${upd ? "" : "display:none"}">${upd}</span>`);
   html += `<div class="nav-title">Manage</div>`
     + navBtn("cleanup", "sparkle", "Cleanup", `<span class="count" id="navCleanSize">${cl ? fmt(cl) : ""}</span>`)
     + navBtn("storage", "pie", "Storage")
@@ -1047,7 +1040,7 @@ function renderSidebar() {
   vis.forEach((a) => (bySrc[a.source] = (bySrc[a.source] || 0) + a.size));
   const total = Object.values(bySrc).reduce((s, v) => s + v, 0);
   $("#sysInfo").innerHTML = `
-    <div style="color:var(--fg);font-weight:600">${esc(P.name)}${state.remote ? ` <span class="dim" style="font-weight:400">· ${esc(state.remote)}</span>` : ""}</div>
+    <div style="color:var(--fg);font-weight:600">${esc(P.name)}</div>
     <div class="mono" style="white-space:pre;margin:3px 0 6px">/etc/os-release\n${esc(P.osr)}</div>
     <div>Native: <b>${esc(P.pm)}</b>${P.aur ? " + AUR (paru)" : ""}${P.immutable ? " · image-based" : ""}</div>
     <div>Snap: ${P.snap ? "yes" : "not installed"} · Flatpak: yes</div>
@@ -1059,7 +1052,7 @@ function renderSidebar() {
    Library
    ===================================================================== */
 function renderSysNote() {
-  let html = state.remote ? `<div class="callout info"><b>Connected to ${esc(state.remote)} over SSH.</b> You're seeing that computer's software. Commands run there with your SSH key, and admin actions ask for its password.</div>` : "";
+  let html = "";
   if (P.immutable) html += `<div class="callout info"><b>Image-based system.</b> The OS is read-only. Apps are installed as Flatpaks, and system packages are <i>layered</i> with rpm-ostree (applies after a reboot). For CLI tools, toolbox or distrobox is usually better than layering.</div>`;
   else if (P.aur) html += `<div class="callout info"><b>Arch Linux.</b> Repo packages always update together (<span class="mono">pacman -Syu</span>), never one by one. AUR packages are user-submitted, so Linux Manager shows each PKGBUILD for review before building.</div>`;
   $("#sysNote").innerHTML = html;
@@ -1731,7 +1724,7 @@ $("#catalogResults").addEventListener("click", (e) => {
    Tracked terminal (simulated)
    ===================================================================== */
 const out = $("#termOut");
-const promptHtml = () => `<span class="prompt">${state.remote ? `${MACHINES[state.remote].user}@${state.remote}` : `muhammad-hassan@${P.host}`}</span>:<span class="path">~</span>$ `;
+const promptHtml = () => `<span class="prompt">muhammad-hassan@${P.host}</span>:<span class="path">~</span>$ `;
 const termHist = []; let histIdx = 0; let busy = false;
 function tprint(html) { out.insertAdjacentHTML("beforeend", html + "\n"); out.scrollTop = out.scrollHeight; }
 function lm(msg) { tprint(`<span class="t-lm">◆ linux-manager: ${msg}</span>`); }
@@ -2512,14 +2505,10 @@ $("#view-env").addEventListener("click", (e) => {
 /* =====================================================================
    Safer removal, version holds, updates for downloaded apps, release
    notes, unused apps, bulk actions, Activity queue, Storage, Defaults &
-   startup, Settings, other computers, first-run setup, shortcuts
+   startup, Settings, first-run setup, shortcuts
    ===================================================================== */
 const settings = { theme: "dark", lang: "en", telemetry: false, trash: true, snapshot: false, disabled: new Set(), scanDirs: ["~/Applications", "~/Downloads", "/opt", "~/.local/bin"] };
 function activeSources() { return sourcesFor(P).filter((k) => !settings.disabled.has(k)); }
-const MACHINES = {
-  "build-box": { profile: "fedora", user: "muhammad", label: "build-box · Fedora 43", addr: "192.168.1.20" },
-  "media-pc": { profile: "arch", user: "muhammad", label: "media-pc · Arch Linux", addr: "media-pc.local" },
-};
 
 /* ---------- last used (desktop usage data + program file access time) ---------- */
 const LAST_USED_DAYS = {
@@ -2952,12 +2941,8 @@ function renderSettings() {
       <div style="display:flex;gap:6px;margin-top:8px"><input class="input mono" id="scanNew" placeholder="~/Apps"><button class="btn small" data-scan-add>Add</button></div>
     </div>
     <div>
-      <div class="card"><h3>Other computers (SSH)</h3>
-        <p class="muted" style="font-size:13px;margin:0 0 6px">Found in ~/.ssh/config. Uses your existing SSH keys; nothing is installed on the other computer.</p>
-        ${Object.entries(MACHINES).map(([k, m]) => `<div class="kbd-row"><span>${esc(m.label)} <span class="dim mono">${esc(m.addr)}</span></span><button class="btn small" data-connect="${k}">${state.remote === k ? "Connected ✓" : "Connect"}</button></div>`).join("")}
-      </div>
-      <div class="card" style="margin-top:14px"><h3>Command line</h3>
-        <div class="cmd" style="font-size:11.5px">lm list --json\nlm which claude\nlm remove code --purge\nlm update --all\nlm --host build-box list</div>
+      <div class="card"><h3>Command line</h3>
+        <div class="cmd" style="font-size:11.5px">lm list --json\nlm which claude\nlm remove code --purge\nlm update --all</div>
         <p class="dim" style="font-size:12px;margin:6px 0 0">Same engine as the app, for scripts and servers without a desktop. (Name not final.)</p>
       </div>
       <div class="card" style="margin-top:14px"><h3>Help</h3><div class="chk-row"><button class="btn small" id="setKeys">Keyboard shortcuts</button><button class="btn small" id="setSetup">Run first-time setup again</button></div></div>
@@ -2978,21 +2963,8 @@ $("#setBody").addEventListener("click", (e) => {
   if (t.dataset.plugin) { const p = PLUGINS.find((x) => x.id === t.dataset.plugin); p.on = !p.on; toast(p.on ? `${p.name} plugin installed` : `${p.name} plugin removed`, p.on ? "Its items appear after the next scan" : ""); renderSettings(); }
   else if (t.dataset.scanRm !== undefined) { settings.scanDirs.splice(+t.dataset.scanRm, 1); renderSettings(); }
   else if (t.hasAttribute("data-scan-add")) { const v = $("#scanNew").value.trim(); if (v) { settings.scanDirs.push(v); renderSettings(); } }
-  else if (t.dataset.connect) switchMachine(t.dataset.connect);
   else if (t.id === "setKeys") showShortcuts();
   else if (t.id === "setSetup") showSetup();
-});
-function switchMachine(m) {
-  if ((state.remote || "local") === m) return;
-  state.remote = m === "local" ? null : m;
-  const pid = m === "local" ? "ubuntu" : MACHINES[m].profile;
-  $("#distroSel").value = pid;
-  setDistro(pid);
-  toast(m === "local" ? "Back on this computer" : `Connected to ${m}`, m === "local" ? P.name : `${MACHINES[m].label} over SSH (${MACHINES[m].addr})`, "ok");
-}
-document.addEventListener("click", (e) => {
-  const m = e.target.closest("[data-machine]");
-  if (m) switchMachine(m.dataset.machine);
 });
 
 /* ---------- first-run setup & shortcuts ---------- */
@@ -3226,7 +3198,6 @@ const DISCOVER_APPS = [
 ];
 const BLOG = [
   { title: "Remove anything the way it was installed", text: "Every removal now shows its uninstall method and a dry run first.", date: "Nov 20, 2026", icon: "trash", bg: "linear-gradient(135deg,#7a2e3b,#2b1d33)", body: "Linux Manager now picks the uninstall method the software's installer provides: the tool's own uninstaller, the package manager that installed it, or a recipe written from the tool's docs. Before anything runs, a dry run shows what will be removed and what becomes unneeded." },
-  { title: "Manage your other Linux computers", text: "See and update the software on machines you already reach over SSH.", date: "Nov 6, 2026", icon: "globe", bg: "linear-gradient(135deg,#1e5a6b,#18263a)", body: "Linux Manager reads your ~/.ssh/config and uses your existing keys. Nothing is installed on the other computer: it runs the same package-manager commands there that you would run yourself." },
   { title: "Install a downloaded file on any distro", text: ".deb, .rpm, AppImage and PKGBUILD, each handled the right way.", date: "Oct 28, 2026", icon: "file", bg: "linear-gradient(135deg,#4b3a8c,#1d1f3a)", body: "Drop a file on the Install screen. Linux Manager checks it matches your distro, explains what it will do, and refuses formats that would break your system (for example a .deb on Fedora), offering the right alternative instead." },
 ];
 const RECS = [
@@ -3467,7 +3438,7 @@ function setDistro(pid) {
   renderInstallChrome(); renderTermChrome(); renderCatalog($("#catalogSearch").value);
   closeDrawer(); renderAll();
 }
-$("#distroSel").addEventListener("change", (e) => { state.remote = null; setDistro(e.target.value); toast(`Previewing ${P.name}`, `Native backend: ${P.pm}${P.aur ? " + AUR" : ""}${P.snap ? " · Snap" : ""} · Flatpak`); });
+$("#distroSel").addEventListener("change", (e) => { setDistro(e.target.value); toast(`Previewing ${P.name}`, `Native backend: ${P.pm}${P.aur ? " + AUR" : ""}${P.snap ? " · Snap" : ""} · Flatpak`); });
 function renderAll() { renderSidebar(); renderSysNote(); renderStats(); renderChips(); renderLibrary(); renderUpdates(); renderCleanup(); renderRepos(); renderEnv(); renderStorage(); renderDefaults(); renderActivity(); renderSettings(); renderHistory(); renderDiscover(); }
 setDistro("ubuntu");
 applyTheme();
