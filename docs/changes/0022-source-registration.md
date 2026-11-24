@@ -1,7 +1,7 @@
 # 0022: Register sources with `register!` instead of scanning their text
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `refactor/source-registration`
+- **Branch / PR:** `refactor/source-registration`, #12
 - **Plan chunks:** none (architecture review finding; no chunk status change)
 - **Commits:** f6aee17, f20811f, a4c22f0
 
