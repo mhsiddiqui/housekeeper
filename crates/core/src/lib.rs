@@ -11,6 +11,7 @@ pub mod source;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 pub mod text;
+pub mod who;
 
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use host::{Entry, FileType, Host};
@@ -20,3 +21,4 @@ pub use model::{
 };
 pub use platform::Platform;
 pub use source::{OwnerLookup, ScanContext, Source, SourceError};
+pub use who::{Evidence, Found, Owner, Who};

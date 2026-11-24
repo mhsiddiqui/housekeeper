@@ -72,6 +72,10 @@ if [ "$installed" = yes ]; then
   # Housekeeper sees itself, installed by the native package manager.
   housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \
     || fail "housekeeper does not list its own package"
+  # `who` traces the command to its package through the real ownership query (dpkg-query, rpm -qf, pacman -Qo).
+  housekeeper who housekeeper > /tmp/who.txt || { cat /tmp/who.txt >&2; fail "housekeeper who found no owner for itself"; }
+  grep -q 'lists /usr/bin/housekeeper as a file of housekeeper$' /tmp/who.txt \
+    || { cat /tmp/who.txt >&2; fail "housekeeper who did not name its own package"; }
   remove
   # Check the file itself: the shell may still remember where the command was.
   [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"

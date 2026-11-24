@@ -2,8 +2,10 @@
 
 mod filter;
 mod table;
+mod who;
 
 use std::io::{self, Write};
+use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
@@ -43,15 +45,25 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Tell which source and package a command or file comes from. Exits 0 when an owner is found, 1 when the file
+    /// exists but nothing owns it, 2 when there is no such command or file.
+    Who {
+        /// A command on the PATH (`git`) or a path to a file (`/usr/bin/git`, `./tool`).
+        #[arg(value_name = "COMMAND_OR_PATH")]
+        query: String,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let host = Host::local();
     let housekeeper = Housekeeper::new(housekeeper_platform::detect(&host)?, host);
     let mut out = io::stdout().lock();
     let result = match cli.command {
-        Command::Sources { json } => sources(&housekeeper, json, &mut out),
+        Command::Sources { json } => sources(&housekeeper, json, &mut out).map(|()| ExitCode::SUCCESS),
         Command::List {
             all,
             sources,
@@ -59,12 +71,13 @@ fn main() -> Result<()> {
             json,
         } => {
             let filter = Filter { all, search };
-            list(&housekeeper, &sources, &filter, json, &mut out)
+            list(&housekeeper, &sources, &filter, json, &mut out).map(|()| ExitCode::SUCCESS)
         }
+        Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
     };
     match result {
         // The reader went away (`housekeeper list | head`): not an error.
-        Err(error) if is_broken_pipe(&error) => Ok(()),
+        Err(error) if is_broken_pipe(&error) => Ok(ExitCode::SUCCESS),
         other => other,
     }
 }
@@ -166,4 +179,32 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
         }
     }
     Ok(())
+}
+
+fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    // Relative paths (`./tool`, `bin/tool`) are relative to where the command runs; core wants absolute ones.
+    let query = if query.contains('/') && !query.starts_with('/') {
+        std::env::current_dir()?.join(query).to_string_lossy().into_owned()
+    } else {
+        query.to_string()
+    };
+    let answer = housekeeper.who(&query);
+    if json {
+        serde_json::to_writer_pretty(&mut *out, &answer)?;
+        writeln!(out)?;
+    } else {
+        who::render(&answer, out)?;
+    }
+    let mut err = io::stderr().lock();
+    for warning in &answer.warnings {
+        writeln!(err, "warning: {warning}")?;
+    }
+    Ok(match answer.found.first() {
+        None => {
+            writeln!(err, "housekeeper: no command or file named `{query}`")?;
+            ExitCode::from(2)
+        }
+        Some(found) if found.owner.is_none() => ExitCode::from(1),
+        Some(_) => ExitCode::SUCCESS,
+    })
 }
