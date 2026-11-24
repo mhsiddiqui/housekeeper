@@ -5,6 +5,12 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- `housekeeper who <command or path>`: which source and package a command or file comes from, following its
+  symlinks, with the evidence (the package manager lists it, it is inside a package's install folder, or inside a
+  folder a source installs into) and the other copies hidden behind it on the `PATH`. `--json` for scripts; exits 0
+  when an owner is found, 1 when nothing accounts for the file, 2 when there is no such command or file.
+
 ## 0.1.0 (2026-11-24)
 
 First release. Housekeeper lists every app installed on a Linux machine, whatever installed it. It only reads; it

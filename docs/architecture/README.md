@@ -40,7 +40,7 @@ Rust has no class inheritance; Housekeeper is assembled from small objects behin
 | `Platform` | Describes the system and owns the list of sources | `LinuxPlatform` |
 | `Source` | One way software gets installed: dpkg, Flatpak, Homebrew, npm… Reports availability and inventory | `DpkgSource`, `FlatpakSource`, `HomebrewSource`, … |
 | `LinuxSource` | How a Linux source is created, and whether it is a distribution's native package manager | every Linux source |
-| `OwnerLookup` | Optional ability: which paths belong to an installed package | `DpkgSource`, `RpmSource`, `PacmanSource` |
+| `OwnerLookup` | Optional ability: which installed packages own each of a set of paths | `DpkgSource`, `RpmSource`, `PacmanSource` |
 | `CommandRunner` | Runs a program (argv only, never a shell) with a timeout | `SystemRunner`, `FakeRunner` (tests) |
 
 Abilities that only some sources have are separate traits, exposed by a source as optional components rather than
@@ -99,6 +99,12 @@ and creates that one native source and every other source. It never names a sour
 Sources never hold each other. While a source is read, its `ScanContext` gives it every source of the platform
 and a place for warnings (D23). The manual source uses it to leave out what others account for: paths a native
 source's `owner_lookup()` says it owns, and programs that resolve into another source's `install_roots()`.
+
+The same three answers make `Housekeeper::who` ("who installed this?") in core: for a command or file it follows
+the symlinks and, file by file, takes the first source that accounts for one: a package database that lists it
+(`owner_lookup()`), a package whose install location contains it (`Package::location`, the deepest one along the
+chain), or a source folder that contains it (`install_roots()`). It names no source, so a new source is covered as
+soon as it reports locations or install roots.
 
 ### The Host
 

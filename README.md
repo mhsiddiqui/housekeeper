@@ -70,6 +70,7 @@ housekeeper list --all                         # plus dependencies, libraries, r
 housekeeper list --source flatpak --source snap  # only these sources (repeatable)
 housekeeper list --search godot                # name, title or summary contains this text
 housekeeper list --json                        # the whole scan as JSON
+housekeeper who vim                            # which source and package a command or file comes from
 ```
 
 `housekeeper sources` shows what was detected:
@@ -103,6 +104,25 @@ Godot Engine  4.7.2    flatpak  171.8 MB
 By default the list keeps what someone chose to install and hides what came along with it (dependencies, libraries,
 Flatpak runtimes, snap bases). `--all` shows everything. The IDs in the `sources` table are the values `--source`
 accepts.
+
+### Who installed this?
+`housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source
+and package it belongs to, with the evidence:
+
+```text
+$ housekeeper who vim
+/usr/bin/vim → /etc/alternatives/vim → /usr/bin/vim.basic
+Owner:   Debian packages · vim 2:9.1.2141-1ubuntu4.10 (installed on purpose, for all users)
+Because: Debian packages lists /usr/bin/vim.basic as a file of vim
+```
+
+The evidence is one of: the package manager lists the file (`dpkg-query --search`, `rpm -qf`, `pacman -Qo`), the
+file is inside a package's install folder (a pipx venv, an npm package, an `/opt` folder, nvm…), or it is inside a
+folder a source installs into (`/snap`, Flatpak exports…). When a command exists more than once on the `PATH`, the
+others are shown as `Hidden:` behind the one that runs. `--json` prints the same as a document.
+
+It exits with 0 when an owner is found, 1 when the file exists but nothing on the machine accounts for it (copied
+by hand or by a script, outside the folders Housekeeper reads), and 2 when there is no such command or file.
 
 ### JSON output
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
