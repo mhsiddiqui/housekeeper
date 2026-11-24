@@ -1,7 +1,7 @@
 //! Arch packages (Arch, Manjaro, EndeavourOS…), read from pacman's local database files.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use housekeeper_core::{
     Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
@@ -123,25 +123,26 @@ impl Source for PacmanSource {
 }
 
 impl OwnerLookup for PacmanSource {
-    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError> {
+    fn owners(&self, host: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError> {
         OwnerQuery {
             command: |paths| Cmd::new("pacman").arg("-Qo").args(args(paths)),
             // Unowned paths make pacman exit 1 (messages on stderr); only a killed pacman is a failure.
             failed: |output| output.code.is_none(),
-            parse: owned,
+            parse: owners,
         }
         .run(host, paths)
     }
 }
 
-/// Lines are `/path is owned by pkg version`; directories get a trailing slash. Errors go to stderr.
-fn owned(stdout: &str, wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
+/// Lines are `/path is owned by pkg version`, one per owner; directories get a trailing slash. Errors go to stderr.
+fn owners(stdout: &str) -> Vec<(&str, &str)> {
     stdout
         .lines()
         .filter_map(|line| line.rsplit_once(" is owned by "))
-        .map(|(path, _)| Path::new(path.trim_end_matches('/')))
-        .filter(|path| wanted.contains(path))
-        .map(Path::to_path_buf)
+        .filter_map(|(path, owner)| {
+            let package = owner.split_whitespace().next()?;
+            Some((path.trim_end_matches('/'), package))
+        })
         .collect()
 }
 
@@ -453,7 +454,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
 
     #[test]
     fn owner_lookup_reads_owner_lines_and_directory_slashes() {
-        use crate::owner::tests::{exit, paths, sorted};
+        use crate::owner::tests::{exit, owned, paths, sorted};
         let runner = FakeRunner::new().respond_with(
             "pacman -Qo /opt/visual-studio-code /usr/local/bin/tool /opt/manual",
             exit(
@@ -464,15 +465,18 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
             ),
         );
         let host = Fixture::new().host(runner);
-        let owned = PacmanSource
-            .owned_paths(
+        let owners = PacmanSource
+            .owners(
                 &host,
                 &paths(&["/opt/visual-studio-code", "/usr/local/bin/tool", "/opt/manual"]),
             )
             .unwrap();
         assert_eq!(
-            sorted(owned),
-            paths(&["/opt/visual-studio-code", "/usr/local/bin/tool"])
+            sorted(owners),
+            [
+                owned("/opt/visual-studio-code", &["visual-studio-code-bin"]),
+                owned("/usr/local/bin/tool", &["tool-git"]),
+            ]
         );
     }
 }

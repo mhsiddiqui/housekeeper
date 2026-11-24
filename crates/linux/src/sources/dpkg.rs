@@ -1,7 +1,7 @@
 //! Debian packages (Debian, Ubuntu, Mint, Pop!_OS…), read through `dpkg-query`.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use housekeeper_core::{
     Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
@@ -85,7 +85,7 @@ impl Source for DpkgSource {
 }
 
 impl OwnerLookup for DpkgSource {
-    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError> {
+    fn owners(&self, host: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError> {
         OwnerQuery {
             command: |paths| {
                 Cmd::new("dpkg-query")
@@ -94,7 +94,7 @@ impl OwnerLookup for DpkgSource {
             },
             // dpkg-query exits 1 when some paths are unowned and 2 on real errors.
             failed: |output| !matches!(output.code, Some(0 | 1)),
-            parse: owned,
+            parse: owners,
         }
         .run(host, paths)
     }
@@ -112,15 +112,14 @@ fn escape_glob(path: &str) -> String {
     out
 }
 
-/// Lines are `pkg[, pkg2]: /path`, plus `diversion by pkg from: /path` and `diversion by pkg to: /path` for diverted
-/// files, which say nothing about ownership.
-fn owned(stdout: &str, wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
+/// Lines are `pkg[, pkg2]: /path` (a package may carry `:arch`), plus `diversion by pkg from: /path` and
+/// `diversion by pkg to: /path` for diverted files, which say nothing about ownership.
+fn owners(stdout: &str) -> Vec<(&str, &str)> {
     stdout
         .lines()
         .filter(|line| !line.starts_with("diversion by "))
-        .filter_map(|line| line.split_once(": ").map(|(_, path)| Path::new(path)))
-        .filter(|path| wanted.contains(path))
-        .map(Path::to_path_buf)
+        .filter_map(|line| line.split_once(": "))
+        .flat_map(|(packages, path)| packages.split(", ").map(move |package| (path, package)))
         .collect()
 }
 
@@ -301,39 +300,39 @@ Auto-Installed: 0
 
     mod owner {
         use super::*;
-        use crate::owner::tests::{exit, paths, sorted};
+        use crate::owner::tests::{exit, owned, paths, sorted};
 
         #[test]
-        fn partial_matches_are_not_an_error() {
+        fn owners_of_the_paths_asked_about() {
             let runner = FakeRunner::new().respond_with(
-                "dpkg-query --search /opt/brave.com /opt/linear /usr/local/bin/ngrok",
+                "dpkg-query --search /opt /opt/brave.com /opt/linear /usr/local/bin/ngrok /usr/local/bin/words",
                 exit(
                     1,
-                    "brave-browser: /opt/brave.com\nngrok: /usr/local/bin/ngrok\n",
+                    "diversion by dictionaries-common from: /usr/local/bin/words\n\
+                     diversion by dictionaries-common to: /usr/local/bin/words.pre\n\
+                     t3code, freelens, zoom: /opt\n\
+                     t3code: /opt/T3 Code (Beta)\n\
+                     brave-browser: /opt/brave.com\n\
+                     ngrok:amd64: /usr/local/bin/ngrok\n",
                     "dpkg-query: no path found matching pattern /opt/linear\n",
                 ),
             );
             let host = Fixture::new().host(runner);
-            let owned = DpkgSource
-                .owned_paths(
-                    &host,
-                    &paths(&["/opt/brave.com", "/opt/linear", "/usr/local/bin/ngrok"]),
-                )
-                .unwrap();
-            assert_eq!(sorted(owned), paths(&["/opt/brave.com", "/usr/local/bin/ngrok"]));
-        }
-
-        #[test]
-        fn diversions_and_paths_not_asked_about_are_ignored() {
-            let stdout = "\
-diversion by dictionaries-common from: /usr/local/bin/words
-diversion by dictionaries-common to: /usr/local/bin/words.pre
-t3code, freelens, zoom: /opt
-t3code: /opt/T3 Code (Beta)
-";
-            let wanted_paths = paths(&["/usr/local/bin/words", "/opt/T3 Code (Beta)"]);
-            let wanted: HashSet<&Path> = wanted_paths.iter().map(PathBuf::as_path).collect();
-            assert_eq!(sorted(owned(stdout, &wanted)), paths(&["/opt/T3 Code (Beta)"]));
+            let asked = paths(&[
+                "/opt",
+                "/opt/brave.com",
+                "/opt/linear",
+                "/usr/local/bin/ngrok",
+                "/usr/local/bin/words",
+            ]);
+            assert_eq!(
+                sorted(DpkgSource.owners(&host, &asked).unwrap()),
+                [
+                    owned("/opt", &["t3code", "freelens", "zoom"]),
+                    owned("/opt/brave.com", &["brave-browser"]),
+                    owned("/usr/local/bin/ngrok", &["ngrok:amd64"]),
+                ]
+            );
         }
 
         #[test]
@@ -349,7 +348,7 @@ t3code: /opt/T3 Code (Beta)
             );
             let host = Fixture::new().host(runner);
             assert!(matches!(
-                DpkgSource.owned_paths(&host, &paths(&["/opt/x"])),
+                DpkgSource.owners(&host, &paths(&["/opt/x"])),
                 Err(SourceError::CommandFailed { code: Some(2), .. })
             ));
         }

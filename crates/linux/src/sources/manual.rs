@@ -316,8 +316,8 @@ fn owned_paths(host: &Host, scan: &ScanContext<'_>, asked: &[PathBuf]) -> HashSe
         let Some(lookup) = source.owner_lookup() else {
             continue;
         };
-        match lookup.owned_paths(host, asked) {
-            Ok(paths) => owned.extend(paths),
+        match lookup.owners(host, asked) {
+            Ok(owners) => owned.extend(owners.into_keys()),
             Err(error) => {
                 scan.warn(format!(
                     "could not ask {} which entries of {OPT} and {USR_LOCAL_BIN} it installed, so they are left \

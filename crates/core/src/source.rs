@@ -1,6 +1,6 @@
 //! The extension point for every way software gets installed.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -69,11 +69,12 @@ impl<'a> ScanContext<'a> {
     }
 }
 
-/// Ability: tell which paths belong to an installed package.
+/// Ability: tell which installed package owns a path.
 pub trait OwnerLookup: Send + Sync {
-    /// The subset of `paths` (logical, absolute) that an installed package owns. Exact matches only. Implementations
-    /// ask about all paths in one call.
-    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError>;
+    /// The packages that own each of `paths` (logical, absolute); paths nobody owns are absent. Each name is the
+    /// owning package's `Package::id` or `Package::name` in this source's inventory. Exact matches only.
+    /// Implementations ask about all paths in one call.
+    fn owners(&self, host: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError>;
 }
 
 #[derive(Debug, thiserror::Error)]
