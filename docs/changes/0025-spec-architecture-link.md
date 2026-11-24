@@ -1,7 +1,7 @@
 # 0025: Spec points to the architecture instead of its own outdated design
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `docs/spec-architecture-link`
+- **Branch / PR:** `docs/spec-architecture-link`, #11
 - **Plan chunks:** none
 - **Commits:** 11e1fce
 
