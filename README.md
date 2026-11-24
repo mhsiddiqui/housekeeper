@@ -2,12 +2,34 @@
 
 *Every app, however it got here.*
 
-Housekeeper shows every app installed on a Linux machine, whatever installed it (apt/dnf/zypper/pacman, Flatpak, Snap,
-Homebrew, AppImage, npm, pipx, uv, pip, cargo, or a script), and removes each one the way its own installer intended.
+Housekeeper shows every app installed on a Linux machine, whatever installed it: the distribution's package manager
+(apt/dpkg, dnf/rpm, zypper, pacman), Flatpak, Snap, Homebrew, AppImage, npm, pipx, uv, pip, cargo, or a script you
+ran once and forgot. Later versions will also remove each one the way its own installer intended.
 
-It is a front door to the native tools, not a replacement for them.
+It is a front door to the native tools, not a replacement for them: it reads what they already know and, when it
+changes something, it will ask them to do it.
 
-> **Status:** early development. See the [build plan](docs/planning/plan.md) for what works today.
+> **Status:** 0.1, early development. Housekeeper lists software and changes nothing. Removal, installing downloaded
+> files and the desktop app are planned; see the [build plan](docs/planning/plan.md).
+
+## Why
+Linux software arrives through many channels, and each keeps its own list. `apt list --installed` knows nothing about
+your Flatpaks, `flatpak list` knows nothing about `npm -g`, and nothing knows about the tarball you unpacked into
+`/opt` two years ago. Housekeeper asks every one of them and shows the answers in one list, with where each app came
+from.
+
+## What it finds
+| Kind | Sources | How it reads them |
+|---|---|---|
+| Distribution packages | dpkg (Debian, Ubuntu…), rpm (Fedora, RHEL, openSUSE…), pacman (Arch…) | `dpkg-query`, `rpm --queryformat`, pacman's database files; apt, zypp and pacman marks tell apps you chose from dependencies |
+| Image-based systems | rpm-ostree (Fedora Silverblue, Kinoite, Bazzite…) | packages you layered on top of the image count as yours |
+| Universal formats | Flatpak (system, user and custom installations), Snap, Homebrew on Linux | `flatpak list`, snapd's API, Homebrew's Cellar and Caskroom |
+| Portable apps | AppImage | the AppImage signature, in `~/Applications`, `~/Downloads`, `~/.local/bin`, `/opt` and similar folders |
+| Language tools | npm globals (system Node, npm prefixes, every nvm and fnm version), pipx, `uv tool`, `pip install --user`, `cargo install` | their own metadata files; no interpreter is started |
+| Installed by hand | `/opt`, `/usr/local/bin`, `~/.local/bin`, `~/bin`, and script installers such as rustup, nvm, pyenv, Bun, Deno, SDKMAN!, Volta, Homebrew, Oh My Zsh | what is left once every other source and the package manager have claimed their files |
+
+Exactly one distribution package manager is used per system, chosen from `/etc/os-release`, so a stray `rpm` on
+Ubuntu does not show up as a second system.
 
 ## Install
 Download the package for your distribution from the
@@ -15,25 +37,127 @@ Download the package for your distribution from the
 
 | Distribution | Command |
 |---|---|
-| Debian, Ubuntu, Mint, Pop!_OS | `sudo apt install ./housekeeper_*_amd64.deb` |
-| Fedora, RHEL, AlmaLinux, Rocky | `sudo dnf install ./housekeeper-*.x86_64.rpm` |
-| openSUSE | `sudo zypper install --allow-unsigned-rpm ./housekeeper-*.x86_64.rpm` |
-| Arch, EndeavourOS, Manjaro | `sudo pacman -U ./housekeeper-*-x86_64.pkg.tar.zst` |
-| Silverblue and anything else | extract `housekeeper-*-linux.tar.gz` and put `housekeeper` on your `PATH` |
+| Debian, Ubuntu, Linux Mint, Pop!_OS | `sudo apt install ./housekeeper_*_amd64.deb` |
+| Fedora, RHEL, AlmaLinux, Rocky Linux | `sudo dnf install ./housekeeper-*.x86_64.rpm` |
+| openSUSE Leap, Tumbleweed | `sudo zypper install --allow-unsigned-rpm ./housekeeper-*.x86_64.rpm` |
+| Arch Linux, EndeavourOS, Manjaro | `sudo pacman -U ./housekeeper-*-x86_64.pkg.tar.zst` |
+| Fedora Silverblue and anything else | the tarball, see below |
 
-ARM64 (aarch64) packages are attached too. Check downloads against `SHA256SUMS` with `sha256sum -c SHA256SUMS
---ignore-missing`. Remove it the same way you installed it (`sudo apt remove housekeeper`, …).
+On 64-bit ARM (aarch64), take the files named `arm64` or `aarch64` instead. The packages are not signed yet; check
+what you downloaded against the release's checksums:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+**Tarball.** Every build is one statically linked binary, so it runs on any distribution, old or new:
+
+```sh
+tar -xzf housekeeper-*-x86_64-linux.tar.gz
+install -Dm755 housekeeper-*-x86_64-linux/housekeeper ~/.local/bin/housekeeper
+```
+
+**Uninstall** the same way you installed: `sudo apt remove housekeeper`, `sudo dnf remove housekeeper`,
+`sudo zypper remove housekeeper`, `sudo pacman -R housekeeper`, or delete `~/.local/bin/housekeeper`.
 
 ## Use
 ```sh
-housekeeper sources                       # which sources exist on this machine
-housekeeper list                          # apps installed on purpose
-housekeeper list --all                    # plus dependencies, libraries, runtimes
-housekeeper list --source flatpak --search godot
-housekeeper list --json                   # machine-readable scan (schema 1)
+housekeeper sources                            # which sources exist on this machine
+housekeeper list                               # apps someone installed on purpose
+housekeeper list --all                         # plus dependencies, libraries, runtimes and system packages
+housekeeper list --source flatpak --source snap  # only these sources (repeatable)
+housekeeper list --search godot                # name, title or summary contains this text
+housekeeper list --json                        # the whole scan as JSON
 ```
-Nothing is changed on the system: this version only reads. From a source checkout, use
-`cargo run -p housekeeper-cli -- <command>` instead.
+
+`housekeeper sources` shows what was detected:
+
+```text
+Ubuntu 26.04.1 LTS (debian, x86_64)
+
+SOURCE                       ID        STATUS
+Debian packages              dpkg      available, 1.23.7
+Flatpak                      flatpak   available, 1.16.6
+Homebrew                     homebrew  not available: Homebrew is not installed
+Snap                         snap      available, 2.77.1+ubuntu26.04.2
+AppImage                     appimage  available
+cargo install                cargo     available
+npm (global)                 npm       available
+pip (user)                   pip       available
+pipx                         pipx      available
+uv tools                     uv        available
+Installed by hand or script  manual    available
+```
+
+`housekeeper list` prints a table on standard output and a summary on standard error:
+
+```text
+NAME          VERSION  SOURCE   SIZE
+Godot Engine  4.7.2    flatpak  171.8 MB
+
+1 shown of 10 found (use --all to include dependencies, libraries and runtimes).
+```
+
+By default the list keeps what someone chose to install and hides what came along with it (dependencies, libraries,
+Flatpak runtimes, snap bases). `--all` shows everything. The IDs in the `sources` table are the values `--source`
+accepts.
+
+### JSON output
+`housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
+`state` `ok`, `unavailable` or `failed`, and any warnings) and every package (`packages`: source, id, name, title,
+version, summary, kind, install reason, scope, size, install time, origin, location, commands). The `schema` field is
+`1`; it changes when a field is removed or changes meaning. Filters apply to `packages` only.
+
+### When a source is missing or fails
+- **not available** in `housekeeper sources` means the tool is not on this machine (or, for Snap, snapd is not
+  running). That source is skipped.
+- **warning: could not read …** after `housekeeper list` means a source was found but failed, for example a package
+  manager that did not answer within 60 seconds. The other sources are still listed.
+- **warning: Installed by hand or script: could not ask …** means the package manager could not say which entries of
+  `/opt` and `/usr/local/bin` it owns; those entries are left out rather than listed twice.
+
+## Privacy and safety
+- **Read-only.** This version never changes the system. It reads package databases and metadata files and runs the
+  package managers' query commands, each with a timeout.
+- **No root.** Run it as yourself; it never asks for a password.
+- **Nothing leaves the machine.** No network access, no account, no telemetry.
+
+## Supported distributions
+Every release is installed, run and removed on these, for x86_64 and aarch64, before it is published:
+
+Debian (stable, oldstable) · Ubuntu 22.04, 24.04 and the latest release · Fedora (latest) · AlmaLinux 9 and 10 ·
+openSUSE Leap and Tumbleweed · Arch Linux (x86_64 only) · Fedora Silverblue (tarball, x86_64 only).
+
+Derivatives work through `ID_LIKE` in `/etc/os-release` (Linux Mint, Pop!_OS, Rocky Linux, EndeavourOS, Manjaro,
+CachyOS…). On a distribution none of the package managers claims, Housekeeper uses whichever of dpkg, rpm or pacman
+is installed, and every other source works as usual.
+
+## Build from source
+You need Rust 1.85 or newer.
+
+```sh
+git clone https://github.com/mhsiddiqui/housekeeper.git
+cd housekeeper
+cargo build --release -p housekeeper-cli
+./target/release/housekeeper list
+```
+
+`scripts/package.sh` builds the same static packages as a release (it needs the `x86_64-unknown-linux-musl` Rust
+target and [nfpm](https://nfpm.goreleaser.com)). Running the checks and contributing are described in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Roadmap
+The [build plan](docs/planning/plan.md) has the details. In order:
+
+1. **Identity and ownership:** link apps to their desktop entries and icons, group one app installed from several
+   sources, `housekeeper who <command or path>`, `housekeeper show <app>`.
+2. **Removal planning:** for each app, the way its installer intended (its own uninstaller, its package manager, or a
+   reviewed recipe), simulated first, with protected system packages blocked.
+3. **Making changes safely:** a small privileged helper started through polkit, an operation queue, a history log, and
+   leftovers moved to the Trash.
+4. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
+5. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
+   scripts.
 
 ## Documentation
 All documentation lives in [docs/](docs/README.md), grouped by section:
@@ -46,6 +170,11 @@ All documentation lives in [docs/](docs/README.md), grouped by section:
 - **History**: [change records](docs/changes/README.md) (one per change), [changelog](CHANGELOG.md) (per release).
 
 Working on the code with an AI agent? It follows [AGENTS.md](AGENTS.md).
+
+## Contributing
+Bug reports and pull requests are welcome on [GitHub](https://github.com/mhsiddiqui/housekeeper/issues). When
+something is listed wrongly, missing, or shown twice, the output of `housekeeper sources` and your distribution's
+`/etc/os-release` help a lot. How to work on the code is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 Copyright (C) 2026 Muhammad Hassan Siddiqi.
