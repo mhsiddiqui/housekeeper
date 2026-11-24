@@ -42,3 +42,4 @@ links back.
 | [0026](0026-architecture-diagram.md) | Redraw the architecture diagrams in the guide | none | #16 |
 | [0027](0027-readme.md) | Complete the README for the first release | 0.4 | #17 |
 | [0028](0028-format-sources.md) | Format and check the source files cargo fmt never reached | none | #18 |
+| [0029](0029-ci-badge.md) | CI status badge in the README | none | `docs/ci-badge` |
