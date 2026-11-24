@@ -440,7 +440,7 @@ finishes, so the desktop app can show progress per source.</figcaption>
 as an optional component:</p>
 <pre><code><span class="k">trait</span> <span class="t">Source</span> {
     <span class="c">// … info, probe, inventory as today …</span>
-    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// today: dpkg, rpm, pacman answer "who installed this file?"</span>
+    <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// today: dpkg, rpm, pacman name the package that owns a file</span>
     <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// Phase 3/4: plan and run removal</span>
     <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// Phase 5: install a downloaded file</span>
     <span class="k">fn</span> updater(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Updater&gt;       { None }  <span class="c">// Phase 7</span>
@@ -509,7 +509,7 @@ register!(ApkSource);
 }
 
 <span class="k">impl</span> OwnerLookup <span class="k">for</span> ApkSource {
-    <span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;"</span>
+    <span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;" into path → package names</span>
 }</code></pre></li>
 
   <li><strong>Test it without an Alpine machine</strong>: a <code>Fixture</code> with a sample

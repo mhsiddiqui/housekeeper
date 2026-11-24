@@ -1,7 +1,7 @@
 //! RPM packages (Fedora, RHEL and rebuilds, openSUSE, Silverblue), read through `rpm --queryformat`.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use housekeeper_core::{
     Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
@@ -155,30 +155,29 @@ impl Source for RpmSource {
 }
 
 impl OwnerLookup for RpmSource {
-    fn owned_paths(&self, host: &Host, paths: &[PathBuf]) -> Result<HashSet<PathBuf>, SourceError> {
+    fn owners(&self, host: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError> {
         OwnerQuery {
-            // The owning packages' file lists: unlike `%{NAME}`, they say which argument was owned even when an
-            // argument has several owners or none (missing files print nothing on stdout).
+            // Each owning package's name beside every file it owns: unlike plain `%{NAME}`, this says which argument
+            // was owned even when an argument has several owners or none (missing files print nothing on stdout).
             command: |paths| {
                 Cmd::new("rpm")
-                    .args(["-qf", "--queryformat", "[%{FILENAMES}\\n]"])
+                    .args(["-qf", "--queryformat", "[%{=NAME}\\t%{FILENAMES}\\n]"])
                     .args(args(paths))
             },
             // Unowned or missing paths make rpm exit non-zero; only a killed rpm is a failure.
             failed: |output| output.code.is_none(),
-            parse: owned,
+            parse: owners,
         }
         .run(host, paths)
     }
 }
 
-/// One file of an owning package per line; "file … is not owned by any package" lines never equal a path.
-fn owned(stdout: &str, wanted: &HashSet<&Path>) -> HashSet<PathBuf> {
+/// `name<TAB>file` for every file of an owning package; "file … is not owned by any package" lines have no tab.
+fn owners(stdout: &str) -> Vec<(&str, &str)> {
     stdout
         .lines()
-        .map(Path::new)
-        .filter(|path| wanted.contains(path))
-        .map(Path::to_path_buf)
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(package, path)| (path, package))
         .collect()
 }
 
@@ -524,23 +523,31 @@ vim-enhanced\t2\t9.1.825\t1.fc41\tx86_64\t4100000\t1731300100\tA version of the 
     }
 
     #[test]
-    fn owner_lookup_matches_paths_in_owner_file_lists() {
-        use crate::owner::tests::{exit, paths, sorted};
+    fn owner_lookup_names_every_package_that_lists_a_path() {
+        use crate::owner::tests::{exit, owned, paths, sorted};
+        // The shape `rpm -qf --queryformat '[%{=NAME}\t%{FILENAMES}\n]'` prints on Fedora.
         let stdout = "\
-/opt/google
-/opt/google/chrome
-/opt/google/chrome/chrome
-/usr/bin/google-chrome-stable
+google-chrome-stable\t/opt/google
+google-chrome-stable\t/opt/google/chrome
+google-chrome-stable\t/usr/bin/google-chrome-stable
+google-earth-pro-stable\t/opt/google
+google-earth-pro-stable\t/opt/google/earth
 file /opt/manual is not owned by any package
 ";
         let runner = FakeRunner::new().respond_with(
-            "rpm -qf --queryformat [%{FILENAMES}\\n] /opt/google /opt/manual /opt/gone",
+            "rpm -qf --queryformat [%{=NAME}\\t%{FILENAMES}\\n] /opt/google /opt/manual /opt/gone",
             exit(2, stdout, "error: file /opt/gone: No such file or directory\n"),
         );
         let host = Fixture::new().host(runner);
-        let owned = RpmSource::new(false)
-            .owned_paths(&host, &paths(&["/opt/google", "/opt/manual", "/opt/gone"]))
+        let owners = RpmSource::new(false)
+            .owners(&host, &paths(&["/opt/google", "/opt/manual", "/opt/gone"]))
             .unwrap();
-        assert_eq!(sorted(owned), paths(&["/opt/google"]));
+        assert_eq!(
+            sorted(owners),
+            [owned(
+                "/opt/google",
+                &["google-chrome-stable", "google-earth-pro-stable"]
+            )]
+        );
     }
 }

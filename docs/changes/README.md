@@ -44,4 +44,5 @@ links back.
 | [0028](0028-format-sources.md) | Format and check the source files cargo fmt never reached | none | #18 |
 | [0029](0029-ci-badge.md) | CI status badge in the README | none | #19 |
 | [0030](0030-release-0.1.0.md) | Prepare release 0.1.0 | 0.4 | #20 |
-| [0031](0031-release-0.1.0-published.md) | Release 0.1.0 published and checked | 0.4 | `docs/release-0.1.0-done` |
+| [0031](0031-release-0.1.0-published.md) | Release 0.1.0 published and checked | 0.4 | #21 |
+| [0032](0032-who-command.md) | `housekeeper who`: which source and package a command or file comes from | 2.3 | `feat/who-command` |

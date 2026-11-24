@@ -13,6 +13,9 @@ use std::sync::Arc;
 use crate::command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 use crate::source::SourceError;
 
+/// How many symlinks are followed before giving up, as Linux does (`ELOOP`).
+pub(crate) const MAX_LINKS: usize = 40;
+
 /// A directory entry, with a logical path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
@@ -133,7 +136,7 @@ impl Host {
     /// targets do not escape it.
     fn resolve(&self, path: impl AsRef<Path>) -> PathBuf {
         let mut path = path.as_ref().to_path_buf();
-        for _ in 0..16 {
+        for _ in 0..MAX_LINKS {
             match self.link_target(&path) {
                 Some(target) => path = target,
                 None => break,
@@ -182,6 +185,38 @@ impl Host {
     /// Size, type and modification time, following symlinks within the root.
     pub fn metadata(&self, path: impl AsRef<Path>) -> Option<fs::Metadata> {
         fs::metadata(self.resolve(path)).ok()
+    }
+
+    /// What the path is, following symlinks within the root; `None` when nothing is there.
+    pub fn file_type(&self, path: impl AsRef<Path>) -> Option<FileType> {
+        self.metadata(path).map(|meta| file_type_of(&meta))
+    }
+
+    /// The path with every symlink in it resolved within the root, like `realpath` (a directory link such as
+    /// `/bin → usr/bin` included). Parts that do not exist are kept as they are.
+    pub fn canonical(&self, path: impl AsRef<Path>) -> PathBuf {
+        self.canonical_within(path.as_ref(), 0)
+    }
+
+    fn canonical_within(&self, path: &Path, depth: usize) -> PathBuf {
+        let mut out = PathBuf::from("/");
+        for component in path.components() {
+            match component {
+                Component::Normal(part) => {
+                    out.push(part);
+                    if depth < MAX_LINKS {
+                        if let Some(target) = self.link_target(&out) {
+                            out = self.canonical_within(&target, depth + 1);
+                        }
+                    }
+                }
+                Component::ParentDir => {
+                    out.pop();
+                }
+                Component::RootDir | Component::CurDir | Component::Prefix(_) => {}
+            }
+        }
+        out
     }
 
     pub fn has_program(&self, name: &str) -> bool {
@@ -233,7 +268,7 @@ pub(crate) fn is_executable(meta: &fs::Metadata) -> bool {
 }
 
 /// Resolves `.` and `..` without touching the file system.
-fn normalize(path: &Path) -> PathBuf {
+pub(crate) fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::from("/");
     for component in path.components() {
         match component {

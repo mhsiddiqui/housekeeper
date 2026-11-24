@@ -68,8 +68,8 @@ impl Selection<'_> {
 
 /// Composition root: a platform and the host it inspects. Services hang off this.
 pub struct Housekeeper {
-    platform: Box<dyn Platform>,
-    host: Host,
+    pub(crate) platform: Box<dyn Platform>,
+    pub(crate) host: Host,
 }
 
 impl Housekeeper {
