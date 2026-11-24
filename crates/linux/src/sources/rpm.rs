@@ -4,14 +4,14 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind, ScanContext,
+    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{register, Context, Family, LinuxSource, Native};
+use crate::provider::{Context, Family, LinuxSource, Native, register};
 
 pub const ID: SourceId = SourceId::new("rpm");
 
@@ -135,17 +135,19 @@ impl Source for RpmSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let listing = host.run_ok(&Cmd::new("rpm").args(["-qa", "--queryformat", FORMAT]))?;
-    let reasons = self.reasons(host)?;
-    let mut protected: HashSet<String> = CORE_PACKAGES.iter().map(|name| name.to_string()).collect();
-    for dir in PROTECTED_DIRS {
-        for entry in host.read_dir(dir)? {
-            if entry.name.ends_with(".conf") {
-                protected.extend(names(&host.read_to_string(&entry.path)?));
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("rpm").args(["-qa", "--queryformat", FORMAT]))?;
+        let reasons = self.reasons(host)?;
+        let mut protected: HashSet<String> = CORE_PACKAGES.iter().map(|name| name.to_string()).collect();
+        for dir in PROTECTED_DIRS {
+            for entry in host.read_dir(dir)? {
+                if entry.name.ends_with(".conf") {
+                    protected.extend(names(&host.read_to_string(&entry.path)?));
+                }
             }
         }
+        parse_listing(&listing, &reasons, &protected)
     }
-    parse_listing(&listing, &reasons, &protected) }
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
@@ -322,7 +324,9 @@ vim-enhanced\t2\t9.1.825\t1.fc41\tx86_64\t4100000\t1731300100\tA version of the 
 
     fn scan(fixture: &Fixture, runner: FakeRunner, image_based: bool) -> Vec<Package> {
         let runner = runner.respond(&command(), LISTING);
-        RpmSource::new(image_based).inventory(&fixture.host(runner), &ScanContext::default()).unwrap()
+        RpmSource::new(image_based)
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap()
     }
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {

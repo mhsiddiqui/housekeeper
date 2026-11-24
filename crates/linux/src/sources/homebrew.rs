@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind, ScanContext,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("homebrew");
 
@@ -44,27 +44,29 @@ impl Source for HomebrewSource {
         }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let prefixes = prefixes(host);
-    let qualify = prefixes.len() > 1;
-    let mut packages = Vec::new();
-    for prefix in &prefixes {
-        let scope = if prefix.starts_with(host.home()) {
-            Scope::User
-        } else {
-            Scope::System
-        };
-        // Ids only need the prefix when two installations exist side by side.
-        let id = |kind: &str, name: &str| {
-            if qualify {
-                format!("{}:{kind}/{name}", prefix.display())
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let prefixes = prefixes(host);
+        let qualify = prefixes.len() > 1;
+        let mut packages = Vec::new();
+        for prefix in &prefixes {
+            let scope = if prefix.starts_with(host.home()) {
+                Scope::User
             } else {
-                format!("{kind}/{name}")
-            }
-        };
-        packages.extend(formulae(host, prefix, scope, &id)?);
-        packages.extend(casks(host, prefix, scope, &id)?);
+                Scope::System
+            };
+            // Ids only need the prefix when two installations exist side by side.
+            let id = |kind: &str, name: &str| {
+                if qualify {
+                    format!("{}:{kind}/{name}", prefix.display())
+                } else {
+                    format!("{kind}/{name}")
+                }
+            };
+            packages.extend(formulae(host, prefix, scope, &id)?);
+            packages.extend(casks(host, prefix, scope, &id)?);
+        }
+        Ok(packages)
     }
-    Ok(packages) }
 }
 
 /// Installed prefixes: `$HOMEBREW_PREFIX`, the default `/home/linuxbrew/.linuxbrew`, then `~/.linuxbrew`.
@@ -246,7 +248,11 @@ mod tests {
     }
 
     fn scan(fixture: &Fixture, vars: &[(&str, &str)]) -> Vec<Package> {
-        HomebrewSource.inventory(&fixture.host_with_vars(FakeRunner::new(), vars), &ScanContext::default())
+        HomebrewSource
+            .inventory(
+                &fixture.host_with_vars(FakeRunner::new(), vars),
+                &ScanContext::default(),
+            )
             .unwrap()
     }
 
@@ -262,7 +268,10 @@ mod tests {
         let fixture = Fixture::new();
         brew(&fixture, PREFIX);
         fixture
-            .file(&format!("{PREFIX}/Cellar/jq/1.7.1/INSTALL_RECEIPT.json"), receipt(true, "homebrew/core"))
+            .file(
+                &format!("{PREFIX}/Cellar/jq/1.7.1/INSTALL_RECEIPT.json"),
+                receipt(true, "homebrew/core"),
+            )
             .executable(&format!("{PREFIX}/Cellar/jq/1.7.1/bin/jq"), ELF)
             .file(
                 &format!("{PREFIX}/Cellar/oniguruma/6.9.9/INSTALL_RECEIPT.json"),
@@ -279,10 +288,16 @@ mod tests {
         assert_eq!(jq.installed_at, Some(1_733_400_000));
         assert_eq!(jq.origin.as_deref(), Some("homebrew/core"));
         assert_eq!(jq.scope, Scope::System);
-        assert_eq!(jq.location.as_deref(), Some(Path::new("/home/linuxbrew/.linuxbrew/Cellar/jq/1.7.1")));
+        assert_eq!(
+            jq.location.as_deref(),
+            Some(Path::new("/home/linuxbrew/.linuxbrew/Cellar/jq/1.7.1"))
+        );
 
         let onig = find(&packages, "formula/oniguruma");
-        assert_eq!((onig.reason, onig.kind), (InstallReason::Dependency, PackageKind::Library));
+        assert_eq!(
+            (onig.reason, onig.kind),
+            (InstallReason::Dependency, PackageKind::Library)
+        );
     }
 
     #[test]
@@ -290,10 +305,19 @@ mod tests {
         let fixture = Fixture::new();
         brew(&fixture, PREFIX);
         fixture
-            .file(&format!("{PREFIX}/Cellar/node/22.11.0/INSTALL_RECEIPT.json"), receipt(true, "homebrew/core"))
-            .file(&format!("{PREFIX}/Cellar/node/23.3.0/INSTALL_RECEIPT.json"), receipt(true, "homebrew/core"))
+            .file(
+                &format!("{PREFIX}/Cellar/node/22.11.0/INSTALL_RECEIPT.json"),
+                receipt(true, "homebrew/core"),
+            )
+            .file(
+                &format!("{PREFIX}/Cellar/node/23.3.0/INSTALL_RECEIPT.json"),
+                receipt(true, "homebrew/core"),
+            )
             .symlink(&format!("{PREFIX}/opt/node"), "../Cellar/node/22.11.0");
-        assert_eq!(find(&scan(&fixture, &[]), "formula/node").version.as_deref(), Some("22.11.0"));
+        assert_eq!(
+            find(&scan(&fixture, &[]), "formula/node").version.as_deref(),
+            Some("22.11.0")
+        );
     }
 
     #[test]
@@ -316,7 +340,10 @@ mod tests {
             &format!("{PREFIX}/Cellar/k9s/0.32.7/INSTALL_RECEIPT.json"),
             receipt(true, "derailed/k9s"),
         );
-        assert_eq!(find(&scan(&fixture, &[]), "formula/k9s").origin.as_deref(), Some("derailed/k9s"));
+        assert_eq!(
+            find(&scan(&fixture, &[]), "formula/k9s").origin.as_deref(),
+            Some("derailed/k9s")
+        );
     }
 
     #[test]
@@ -325,7 +352,9 @@ mod tests {
         brew(&fixture, PREFIX);
         fixture
             .dir(&format!("{PREFIX}/Caskroom/font-fira-code/6.2"))
-            .dir(&format!("{PREFIX}/Caskroom/font-fira-code/.metadata/6.2/20241201000000.000/Casks"));
+            .dir(&format!(
+                "{PREFIX}/Caskroom/font-fira-code/.metadata/6.2/20241201000000.000/Casks"
+            ));
         let packages = scan(&fixture, &[]);
         assert_eq!(packages.len(), 1);
         let font = find(&packages, "cask/font-fira-code");

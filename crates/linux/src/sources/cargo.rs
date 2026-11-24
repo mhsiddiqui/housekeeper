@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use housekeeper_core::{
-    Availability, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId, SourceInfo,
-    SourceKind, ScanContext,
+    Availability, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError, SourceId,
+    SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
-use crate::provider::{register, Context, LinuxSource};
+use crate::provider::{Context, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("cargo");
 
@@ -44,34 +44,36 @@ impl Source for CargoSource {
         vec![cargo_home(host)]
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = cargo_home(host);
-    let installs = if let Some(json) = host.read_optional(home.join(".crates2.json"))? {
-        parse_crates2(&json)?
-    } else if let Some(toml) = host.read_optional(home.join(".crates.toml"))? {
-        parse_crates_v1(&toml)?
-    } else {
-        return Ok(Vec::new());
-    };
-    let bin = home.join("bin");
-    let scope = if bin.starts_with(host.home()) {
-        Scope::User
-    } else {
-        Scope::System
-    };
-    installs
-        .into_iter()
-        .map(|(key, bins)| {
-            let (name, version, source) = split_key(&key)?;
-            let mut package = Package::new(ID, name, name, scope);
-            package.version = Some(version.to_string());
-            package.origin = Some(origin(source));
-            package.location = Some(bin.clone());
-            package.commands = bins;
-            package.kind = PackageKind::App;
-            package.reason = InstallReason::Explicit;
-            Ok(package)
-        })
-        .collect() }
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+        let home = cargo_home(host);
+        let installs = if let Some(json) = host.read_optional(home.join(".crates2.json"))? {
+            parse_crates2(&json)?
+        } else if let Some(toml) = host.read_optional(home.join(".crates.toml"))? {
+            parse_crates_v1(&toml)?
+        } else {
+            return Ok(Vec::new());
+        };
+        let bin = home.join("bin");
+        let scope = if bin.starts_with(host.home()) {
+            Scope::User
+        } else {
+            Scope::System
+        };
+        installs
+            .into_iter()
+            .map(|(key, bins)| {
+                let (name, version, source) = split_key(&key)?;
+                let mut package = Package::new(ID, name, name, scope);
+                package.version = Some(version.to_string());
+                package.origin = Some(origin(source));
+                package.location = Some(bin.clone());
+                package.commands = bins;
+                package.kind = PackageKind::App;
+                package.reason = InstallReason::Explicit;
+                Ok(package)
+            })
+            .collect()
+    }
 }
 
 /// `$CARGO_HOME`, defaulting to `~/.cargo`.
@@ -169,7 +171,9 @@ mod tests {
             "/home/user/.cargo/.crates.toml",
             "[v1]\n\"stale 0.1.0 (path+file:///x)\" = [\"stale\"]\n",
         );
-        let packages = CargoSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
+        let packages = CargoSource
+            .inventory(&fixture.host(FakeRunner::new()), &ScanContext::default())
+            .unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["cargo-packager", "mytool", "rmux", "zellij"]);
 
