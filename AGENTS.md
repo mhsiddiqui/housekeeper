@@ -70,6 +70,7 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
 ## Checks
 ```sh
 cargo fmt --all --check
+rustfmt --check crates/linux/src/sources/*.rs   # cargo fmt cannot see these (declared by build.rs)
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
