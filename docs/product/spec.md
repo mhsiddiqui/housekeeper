@@ -125,8 +125,7 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
   - **Columns** (default): app list, then details (location, update source, removal method, Home/Repo/Docs links),
     then a live web view of the project's site with how it was installed and how it will be removed.
   - **Table**, for sorting and selecting many items.
-- Sidebar: Discover; one group per computer (this one plus SSH hosts) with Installed (split by source) and Updates;
-  the Manage tools; and Categories.
+- Sidebar: Discover; this computer's Installed (split by source) and Updates; the Manage tools; and Categories.
 - **Duplicate detection** (the same app from two sources).
 - Details show **why we believe it's installed**: the ownership command used (`dpkg -S`, `rpm -qf`, `pacman -Qo`,
   `flatpak info`, manifest file, …).
@@ -251,10 +250,11 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 - Startup apps (`~/.config/autostart`) and background services (systemd user/system units): turn them on or off,
   and remove leftovers from uninstalled apps. Removing an app removes its startup entries.
 
-### 15. Other computers and command line
-- Manage other machines over SSH using the existing `~/.ssh/config` and keys. Nothing is installed on them.
-- A CLI with the same engine (`list --json`, `which`, `remove`, `update --all`, `--host <name>`) for scripts and
-  servers without a desktop.
+### 15. Command line
+- A CLI with the same engine (`list --json`, `which`, `remove`, `update --all`) for scripts and servers without a
+  desktop.
+- Housekeeper manages only the computer it runs on; other computers over SSH are not planned
+  ([decision D22](../architecture/README.md#decisions)).
 
 ### 16. Settings, first run, accessibility, translations
 - **First run:** explains what's scanned (read-only) and asks three opt-in questions: Trash, shell hook, and anonymous
@@ -265,7 +265,6 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
   - Safety: Trash, and a snapshot before changes when Snapper/Timeshift is present.
   - Privacy: shows exactly what's sent.
   - Theme (system/dark/light) and language.
-  - SSH machines.
 - **Keyboard:** `/` search, `j`/`k` move, Enter opens, Space selects, Delete removes, `?` lists shortcuts. Every
   control is reachable with Tab and labelled for screen readers.
 - **Translations:** text lives in translation files, translated by the community (e.g. Weblate); right-to-left
@@ -368,5 +367,5 @@ script-installed tools (start with the ~50 most common). Anything still unknown 
 3. Tracked terminal + shell hook + manifests.
 4. Updates + Cleanup + Repositories (with each distro's rules).
 5. Unified search, Who-owns, Export/migrate, Environment (variables, PATH, aliases).
-6. Storage plugins, Defaults & startup, other computers over SSH, CLI.
+6. Storage plugins, Defaults & startup, CLI.
 7. Image-based mode, Nix, PackageKit fallback for other distros.

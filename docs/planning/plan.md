@@ -97,9 +97,10 @@ Storage view, unused apps, caches and orphaned dependencies, default apps and st
 Integrated terminal that records what an install script changed (file snapshot diff) and writes a manifest, so the
 install can be removed later (removal tier 5).
 
-## Phase 12: Beyond one Linux machine ⬜
-Other computers over SSH (runs `housekeeper --json` remotely), optional "Back up my apps" to a secret GitHub Gist,
-further platforms (macOS: Homebrew and `.app`; Windows: winget) as new platform crates.
+## Phase 12: Backup and other platforms ⬜
+Optional "Back up my apps" to a secret GitHub Gist, further platforms (macOS: Homebrew and `.app`; Windows: winget) as
+new platform crates. Managing other computers over SSH is not planned
+([decision D22](../architecture/README.md#decisions)).
 
 ## Later: Website ⬜
 A project website (what it does, install instructions, downloads from GitHub releases). Not started; planned once the

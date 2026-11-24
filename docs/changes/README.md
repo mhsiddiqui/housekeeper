@@ -32,3 +32,4 @@ links back.
 | [0016](0016-ci-for-main-only.md) | CI only for `main`, and bringing stacked work into `main` | 0.5 | #6 |
 | [0017](0017-merge-gate-active.md) | Merge gate active on `main` | 0.5 | #7 |
 | [0018](0018-license-gpl3.md) | Licence changed to GPL-3.0-or-later | 0.1 | `chore/license-gpl3` |
+| [0019](0019-drop-remote-computers.md) | Drop managing other computers over SSH | 12 (scope) | #9 |
