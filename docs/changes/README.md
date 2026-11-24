@@ -40,3 +40,4 @@ links back.
 | [0024](0024-scan-progress.md) | Report each source's result as soon as it finishes | none (prepares 6.3) | #14 |
 | [0025](0025-spec-architecture-link.md) | Spec points to the architecture instead of its own outdated design | none | #11 |
 | [0026](0026-architecture-diagram.md) | Redraw the architecture diagrams in the guide | none | `docs/architecture-diagram` |
+| [0028](0028-format-sources.md) | Format and check the source files cargo fmt never reached | none | `ci/format-sources` |
