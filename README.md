@@ -1,5 +1,7 @@
 # Housekeeper
 
+[![CI](https://github.com/mhsiddiqui/housekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/mhsiddiqui/housekeeper/actions/workflows/ci.yml)
+
 *Every app, however it got here.*
 
 Housekeeper shows every app installed on a Linux machine, whatever installed it: the distribution's package manager
