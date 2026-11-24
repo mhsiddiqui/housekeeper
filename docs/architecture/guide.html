@@ -275,23 +275,27 @@ used, and that native source is handed to the others through <code>Context</code
 <code>Arc</code>).</p>
 
 <h3 id="new-provider">Adding a provider: one file</h3>
-<p><code>PROVIDERS</code> is generated. <code>crates/linux/build.rs</code> reads every file in
-<code>crates/linux/src/sources/</code>, finds its <code>impl LinuxSource for &lt;Type&gt;</code>, and lists it. So a new
-provider is a new file with two impls and nothing else:</p>
+<p><code>PROVIDERS</code> is generated. <code>crates/linux/build.rs</code> lists the files in
+<code>crates/linux/src/sources/</code>, declares each as a module and adds its <code>PROVIDER</code> to the list. The
+file defines <code>PROVIDER</code> with one line, <code>register!(&lt;Type&gt;);</code>. So a new provider is a new file
+with two impls, that line and nothing else:</p>
 <pre><code><span class="c">// crates/linux/src/sources/homebrew.rs</span>
 <span class="k">pub struct</span> <span class="t">HomebrewSource</span>;
 
 <span class="k">impl</span> LinuxSource <span class="k">for</span> HomebrewSource {                 <span class="c">// how it is created (and, for natives, which distros it serves)</span>
     <span class="k">fn</span> create(_: &amp;Context&lt;'_&gt;) -&gt; Self { Self }
 }
+register!(HomebrewSource);                                <span class="c">// defines PROVIDER, which the build script lists</span>
 
 <span class="k">impl</span> Source <span class="k">for</span> HomebrewSource {                      <span class="c">// what it does</span>
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"homebrew"</span>, <span class="s">"Homebrew"</span>, SourceKind::Universal) }
     <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability { <span class="c">/* is there a brew? */</span> }
     <span class="k">fn</span> inventory(&amp;self, host: &amp;Host) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt; { <span class="c">/* Cellar, Caskroom */</span> }
 }</code></pre>
-<p>A file in that folder without exactly one <code>impl LinuxSource for</code> stops the build with a message naming
-the file, so a forgotten registration cannot slip through (decision D20).</p>
+<p>The build script never reads the files' contents. A file that forgets <code>register!</code> fails to compile:
+the generated list names <code>homebrew::PROVIDER</code>, which does not exist, and the comment next to it says to add
+<code>register!(&lt;Type&gt;);</code>. Sources never import from each other; code two sources share lives in a module
+outside <code>sources/</code>, such as <code>files.rs</code> or <code>python.rs</code> (decision D20).</p>
 
 <!-- ======================================================================= -->
 <h2 id="scan">6. What happens during a scan</h2>
@@ -367,6 +371,7 @@ with no change at all, because detection checks <code>ID</code> first and then e
     });
     <span class="k">fn</span> create(_: &amp;Context&lt;'_&gt;) -&gt; Self { Self }
 }
+register!(ApkSource);
 
 <span class="k">impl</span> Source <span class="k">for</span> ApkSource {
     <span class="k">fn</span> info(&amp;self) -&gt; SourceInfo { SourceInfo::new(<span class="s">"apk"</span>, <span class="s">"Alpine packages"</span>, SourceKind::System) }
@@ -452,10 +457,9 @@ on the real system.</p>
 a <code>Family</code> enum, a <code>NativeManager</code> enum, and three <code>match</code> arms). Now each native source
 declares its distributions and answers "who owns this file?" itself (<code>OwnerLookup</code>), and the build script
 registers every source, so adding a distribution or any other provider is one file.</p>
-<p style="margin-bottom:0">The price is a small build script (<code>crates/linux/build.rs</code>) that finds
-<code>impl LinuxSource for &lt;Type&gt;</code> in each file. Writing the impl any other way (through a macro, or with a
-path such as <code>impl crate::provider::LinuxSource for</code>) is not recognised; the build then stops with a clear
-message rather than silently skipping the source.</p>
+<p style="margin-bottom:0">The price is a small build script (<code>crates/linux/build.rs</code>) that turns each file
+in <code>src/sources/</code> into a module, and one <code>register!(&lt;Type&gt;);</code> line per source. File names
+there must be valid Rust identifiers; the build stops with a clear message otherwise.</p>
 </div>
 <p>Other deliberate limits:</p>
 <ul>
@@ -477,7 +481,8 @@ message rather than silently skipping the source.</p>
   <tr><td><code>crates/core/src/testing.rs</code></td><td><code>Fixture</code> and <code>FakeRunner</code> for tests</td></tr>
   <tr><td><code>crates/linux/src/distro.rs</code></td><td><code>os-release</code> parsing (<code>ID</code>, <code>ID_LIKE</code>, image-based)</td></tr>
   <tr><td><code>crates/linux/src/provider.rs</code></td><td><code>LinuxSource</code>, <code>Native</code>, <code>Family</code>, <code>Context</code>: the contract every Linux source implements</td></tr>
-  <tr><td><code>crates/linux/build.rs</code></td><td>Finds every source in <code>src/sources/</code> and generates the <code>PROVIDERS</code> list</td></tr>
+  <tr><td><code>crates/linux/build.rs</code></td><td>Declares every file in <code>src/sources/</code> as a module and generates the <code>PROVIDERS</code> list</td></tr>
+  <tr><td><code>crates/linux/src/files.rs</code>, <code>python.rs</code></td><td>Helpers shared by several sources (AppImage detection, symlinks, <code>.dist-info</code> names)</td></tr>
   <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and assembles all sources</td></tr>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>

@@ -59,8 +59,9 @@ changes on sources that don't support it.
 
 ### Adding a provider is one file
 
-Every file in `crates/linux/src/sources/` is a source and registers itself: `crates/linux/build.rs` finds the file's
-`impl LinuxSource for <Type>` and adds it to the generated provider list. Nothing else is edited.
+Every file in `crates/linux/src/sources/` is a source and registers itself: `crates/linux/build.rs` declares the file
+as a module and adds its `PROVIDER` to the generated provider list, and the file defines `PROVIDER` with
+`register!(<Type>);`. Nothing else is edited. A file without `register!` fails to compile.
 
 ```rust
 // crates/linux/src/sources/homebrew.rs (the whole registration)
@@ -69,6 +70,7 @@ pub struct HomebrewSource;
 impl LinuxSource for HomebrewSource {
     fn create(_: &Context<'_>) -> Self { Self }
 }
+register!(HomebrewSource);
 impl Source for HomebrewSource { /* info, probe, inventory */ }
 ```
 
@@ -126,7 +128,7 @@ Each challenge raised during design review, and the decision taken.
 | D17 | Name | "Housekeeper". "Linux" in a product name needs a Linux Foundation sublicence. |
 | D18 | One binary for every distribution | The CLI is linked statically against musl, so the same file runs on old and new distributions regardless of their glibc. All dependencies are pure Rust, so this costs nothing. |
 | D19 | Proving it works on each distribution | CI installs every package with the native package manager in containers of each supported release (Debian, Ubuntu, Fedora, AlmaLinux, openSUSE, Arch; x86_64 and aarch64), runs it against the real package database, checks it lists its own package, and removes it. Silverblue is checked from its official image using the tarball. |
-| D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and is registered by `build.rs`, which finds its `impl LinuxSource for <Type>`; a file without exactly one such impl fails the build with a clear message. Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. |
+| D20 | Adding a provider must not mean editing lists | Every file in `crates/linux/src/sources/` implements `Source` + `LinuxSource` and calls `register!(<Type>)`, which defines its `PROVIDER`. `build.rs` only lists the files: it declares one module per file and adds its `PROVIDER` to the generated list, so the compiler reports a file without `register!`. Sources never import from each other; code they share lives outside `sources/` (`files.rs`, `python.rs`). Native package managers declare their families in the same file and offer `OwnerLookup` themselves. Explicit registration (one line per source) was the alternative; generated registration was chosen so a provider is exactly one file. Finding `impl LinuxSource for` in the source text was tried first and dropped: comments and strings fooled it and the compiler could not check it. |
 | D21 | Licence: nobody may turn Housekeeper into closed software | GNU GPL v3.0 or later. Anyone distributing it, modified or not, must provide the source under the same licence. "Or later" (the FSF's recommendation) lets the project move to a future GPL version without asking every contributor. MIT and Apache-2.0 were rejected because they allow closed forks; AGPL was not needed because Housekeeper is not a network service. Dependencies stay permissive (MIT, Apache-2.0, Unicode-3.0), all GPL-compatible; `cargo deny` enforces it. |
 | D22 | Managing other computers (over SSH) | Not planned. Housekeeper manages only the machine it runs on; `Host` and `CommandRunner` stay local, and the runner is swapped only for tests. Earlier documents disagreed on how it would work (swap the runner, run `housekeeper --json` on the other machine, install nothing there), and swapping the runner alone could not work because `Host` reads files locally. Bringing it back needs a new decision that picks one design. |
 | D24 | Reading packages and changing them are different jobs: rpm is read on Fedora, openSUSE and Silverblue, but changed through dnf, zypper or rpm-ostree (and dpkg through apt, pacman's AUR through paru or yay) | The native source reads the package database (dpkg, rpm, pacman) and stays one per system (D2). Changing packages (simulate, remove, install, update, hold) belongs to a **package tool**: one file per tool (apt, dnf, zypper, rpm-ostree, transactional-update, pacman, an AUR helper) in its own folder of `crates/linux/src/`, registered like sources (D20), declaring the families or `os-release` IDs it serves and when it applies (image-based or not). `LinuxPlatform` picks the tool the same way it picks the native source, and the native source's `remover()` and later abilities come from that tool. A database file therefore never branches on distribution, and a distribution that shares a database but not a tool (Mageia, PCLinuxOS) is one new tool file. Settled before Phase 3.1. |
