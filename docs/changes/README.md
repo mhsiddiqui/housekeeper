@@ -39,4 +39,5 @@ links back.
 | [0023](0023-platform-crate.md) | Core builds on any OS; `housekeeper-platform` picks the platform | none | #15 |
 | [0024](0024-scan-progress.md) | Report each source's result as soon as it finishes | none (prepares 6.3) | #14 |
 | [0025](0025-spec-architecture-link.md) | Spec points to the architecture instead of its own outdated design | none | #11 |
-| [0026](0026-architecture-diagram.md) | Redraw the architecture diagrams in the guide | none | `docs/architecture-diagram` |
+| [0026](0026-architecture-diagram.md) | Redraw the architecture diagrams in the guide | none | #16 |
+| [0027](0027-readme.md) | Complete the README for the first release | 0.4 | `docs/readme` |
