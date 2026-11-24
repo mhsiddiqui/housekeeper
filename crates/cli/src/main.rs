@@ -155,8 +155,14 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
         }
     )?;
     for report in &scan.sources {
-        if let SourceStatus::Failed { error } = &report.status {
-            writeln!(err, "warning: could not read {}: {error}", report.info.label)?;
+        match &report.status {
+            SourceStatus::Failed { error } => writeln!(err, "warning: could not read {}: {error}", report.info.label)?,
+            SourceStatus::Ok { warnings, .. } => {
+                for warning in warnings {
+                    writeln!(err, "warning: {}: {warning}", report.info.label)?;
+                }
+            }
+            SourceStatus::Unavailable { .. } => {}
         }
     }
     Ok(())

@@ -87,7 +87,7 @@ pub enum RunError {
     },
 }
 
-/// Executes programs. Swapped for a fake in tests and, later, for an SSH runner.
+/// Executes programs. Swapped for a fake in tests.
 pub trait CommandRunner: Send + Sync {
     fn run(&self, cmd: &Cmd) -> Result<Output, RunError>;
 

@@ -46,7 +46,8 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
 
 ## Code rules
 - **Composition:** a new way of installing software is **one new file** in `crates/linux/src/sources/` with a type that
-  implements `Source` and `LinuxSource`; `build.rs` registers it, so no list is edited (D20). A new distribution is the
+  implements `Source` and `LinuxSource` and a `register!(<Type>);` line; `build.rs` lists it, so no list is edited
+  (D20). Sources never import from each other; shared code lives outside `sources/`. A new distribution is the
   same: its native package manager's file declares `LinuxSource::NATIVE` (families and `os-release` IDs) and
   implements `OwnerLookup` (see the [guide](docs/architecture/guide.html#new-distro)). A new operating system is a new
   crate implementing `Platform`, registered in `housekeeper-platform` (D27). Core never mentions an OS, distribution

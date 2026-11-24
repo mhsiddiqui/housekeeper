@@ -5,11 +5,12 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
+    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Source, SourceError, SourceId,
     SourceInfo, SourceKind,
 };
 
-use crate::provider::{Context, LinuxSource};
+use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("appimage");
 
@@ -18,9 +19,6 @@ const HOME_DIRS: &[&str] = &["Applications", "AppImages", ".local/bin", "bin", "
 
 /// Home directories that are on the PATH, so an AppImage in (or linked from) them is a command.
 const PATH_DIRS: &[&str] = &[".local/bin", "bin"];
-
-/// ELF identification bytes 8–10 hold `AI` and the AppImage type (1 or 2).
-const MAGIC_LEN: usize = 11;
 
 /// Architecture and OS words release names carry around the version.
 const PLATFORM_WORDS: &[&str] = &[
@@ -35,6 +33,7 @@ impl LinuxSource for AppImageSource {
         Self
     }
 }
+register!(AppImageSource);
 
 impl Source for AppImageSource {
     fn info(&self) -> SourceInfo {
@@ -45,40 +44,38 @@ impl Source for AppImageSource {
         Availability::Available { version: None }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let home = host.home();
-        let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
-        for entry in host.read_dir(home.join("Applications"))? {
-            if entry.file_type == Some(FileType::Dir) {
-                dirs.push(entry.path);
-            }
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let home = host.home();
+    let mut dirs: Vec<PathBuf> = HOME_DIRS.iter().map(|dir| home.join(dir)).collect();
+    for entry in host.read_dir(home.join("Applications"))? {
+        if entry.file_type == Some(FileType::Dir) {
+            dirs.push(entry.path);
         }
-        dirs.push(PathBuf::from("/opt"));
-        let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
-
-        let mut packages: Vec<Package> = Vec::new();
-        let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
-        for dir in &dirs {
-            for entry in host.read_dir(dir)? {
-                if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
-                    continue;
-                }
-                let target = resolve_symlinks(host, &entry.path);
-                let index = match by_target.get(&target) {
-                    Some(&index) => index,
-                    None => {
-                        packages.push(package(host, &target));
-                        by_target.insert(target, packages.len() - 1);
-                        packages.len() - 1
-                    }
-                };
-                if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
-                    packages[index].commands.push(entry.name);
-                }
-            }
-        }
-        Ok(packages)
     }
+    dirs.push(PathBuf::from("/opt"));
+    let path_dirs: Vec<PathBuf> = PATH_DIRS.iter().map(|dir| home.join(dir)).collect();
+    
+    let mut packages: Vec<Package> = Vec::new();
+    let mut by_target: HashMap<PathBuf, usize> = HashMap::new();
+    for dir in &dirs {
+        for entry in host.read_dir(dir)? {
+            if !matches!(entry.file_type, Some(FileType::File { .. })) || !is_appimage(host, &entry.path) {
+                continue;
+            }
+            let target = resolve_symlinks(host, &entry.path);
+            let index = match by_target.get(&target) {
+                Some(&index) => index,
+                None => {
+                    packages.push(package(host, &target));
+                    by_target.insert(target, packages.len() - 1);
+                    packages.len() - 1
+                }
+            };
+            if path_dirs.contains(dir) && !packages[index].commands.contains(&entry.name) {
+                packages[index].commands.push(entry.name);
+            }
+        }
+    }
+    Ok(packages) }
 }
 
 fn package(host: &Host, path: &Path) -> Package {
@@ -94,33 +91,6 @@ fn package(host: &Host, path: &Path) -> Package {
         package.installed_at = Some(meta.mtime());
     }
     package
-}
-
-/// Whether a file is an AppImage (type 1 or 2), judged by its ELF header. Unreadable files are not.
-pub(crate) fn is_appimage(host: &Host, path: &Path) -> bool {
-    host.read_head(path, MAGIC_LEN)
-        .is_ok_and(|head| head.starts_with(b"\x7fELF") && matches!(head.get(8..MAGIC_LEN), Some(b"AI\x01" | b"AI\x02")))
-}
-
-/// Follows a chain of symlinks to the file it ends at (logical path).
-pub(crate) fn resolve_symlinks(host: &Host, path: &Path) -> PathBuf {
-    let mut path = path.to_path_buf();
-    for _ in 0..16 {
-        match host.link_target(&path) {
-            Some(target) => path = target,
-            None => break,
-        }
-    }
-    path
-}
-
-/// User scope for anything under the home directory, system otherwise.
-pub(crate) fn scope_of(host: &Host, path: &Path) -> Scope {
-    if path.starts_with(host.home()) {
-        Scope::User
-    } else {
-        Scope::System
-    }
 }
 
 /// Name and version from a release file name: `Joplin-3.0.15-x86_64.AppImage` → (`Joplin`, `3.0.15`).
@@ -179,12 +149,6 @@ fn words(stem: &str) -> Vec<(usize, usize)> {
     words
 }
 
-/// Starts with a digit, or `v` and a digit: `1.6.7`, `v2`, `18`.
-pub(crate) fn looks_like_version(word: &str) -> bool {
-    let digits = word.strip_prefix(['v', 'V']).unwrap_or(word);
-    digits.starts_with(|c: char| c.is_ascii_digit())
-}
-
 fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> {
     let split = text.len().checked_sub(suffix.len())?;
     let (head, tail) = (text.get(..split)?, text.get(split..)?);
@@ -195,6 +159,7 @@ fn strip_suffix_ignore_case<'a>(text: &'a str, suffix: &str) -> Option<&'a str> 
 mod tests {
     use super::*;
     use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
+    use housekeeper_core::Scope;
 
     /// Start of an ELF header with the AppImage type 2 marker.
     const TYPE2: &[u8] = b"\x7fELF\x02\x01\x01\x00AI\x02\x00\x00\x00\x00\x00";
@@ -203,7 +168,7 @@ mod tests {
     const PLAIN_ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 
     fn scan(fixture: &Fixture) -> Vec<Package> {
-        AppImageSource.inventory(&fixture.host(FakeRunner::new())).unwrap()
+        AppImageSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap()
     }
 
     fn ids(packages: &[Package]) -> Vec<&str> {

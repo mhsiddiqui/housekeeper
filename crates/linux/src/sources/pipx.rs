@@ -4,11 +4,11 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
     Availability, FileType, Host, InstallReason, Package, PackageKind, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    SourceInfo, SourceKind, ScanContext,
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource};
+use crate::provider::{register, Context, LinuxSource};
 
 pub const ID: SourceId = SourceId::new("pipx");
 
@@ -19,6 +19,7 @@ impl LinuxSource for PipxSource {
         Self
     }
 }
+register!(PipxSource);
 
 impl Source for PipxSource {
     fn info(&self) -> SourceInfo {
@@ -33,19 +34,21 @@ impl Source for PipxSource {
         }
     }
 
-    fn inventory(&self, host: &Host) -> Result<Vec<Package>, SourceError> {
-        let mut packages = Vec::new();
-        for entry in host.read_dir(venvs_dir(host))? {
-            if entry.file_type != Some(FileType::Dir) || entry.name.starts_with('.') {
-                continue;
-            }
-            let metadata = host
-                .read_optional(entry.path.join("pipx_metadata.json"))?
-                .and_then(|text| serde_json::from_str::<Metadata>(&text).ok());
-            packages.push(to_package(&entry.name, &entry.path, metadata));
-        }
-        Ok(packages)
+    fn install_roots(&self, host: &Host) -> Vec<PathBuf> {
+        vec![venvs_dir(host)]
     }
+
+    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> { let mut packages = Vec::new();
+    for entry in host.read_dir(venvs_dir(host))? {
+        if entry.file_type != Some(FileType::Dir) || entry.name.starts_with('.') {
+            continue;
+        }
+        let metadata = host
+            .read_optional(entry.path.join("pipx_metadata.json"))?
+            .and_then(|text| serde_json::from_str::<Metadata>(&text).ok());
+        packages.push(to_package(&entry.name, &entry.path, metadata));
+    }
+    Ok(packages) }
 }
 
 /// `$PIPX_HOME`, else the XDG location pipx 1.3+ uses, else the legacy `~/.local/pipx`.
@@ -167,7 +170,7 @@ mod tests {
         fixture
             .file(&format!("{VENVS}/activity-sim/pipx_metadata.json"), ACTIVITY_SIM)
             .file(&format!("{VENVS}/black@24/pipx_metadata.json"), BLACK_SUFFIXED);
-        let packages = PipxSource.inventory(&fixture.host(FakeRunner::new())).unwrap();
+        let packages = PipxSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
         assert_eq!(packages.len(), 2);
 
         let sim = find(&packages, "activity-sim");
@@ -198,11 +201,10 @@ mod tests {
                 BLACK_SUFFIXED,
             );
         let host = fixture.host_with_vars(FakeRunner::new(), &[("PIPX_HOME", "/opt/pipx")]);
-        let ids: Vec<_> = PipxSource.inventory(&host).unwrap().into_iter().map(|p| p.id).collect();
+        let ids: Vec<_> = PipxSource.inventory(&host, &ScanContext::default()).unwrap().into_iter().map(|p| p.id).collect();
         assert_eq!(ids, ["activity-sim"]);
 
-        let legacy: Vec<_> = PipxSource
-            .inventory(&fixture.host(FakeRunner::new()))
+        let legacy: Vec<_> = PipxSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default())
             .unwrap()
             .into_iter()
             .map(|p| p.id)
@@ -216,7 +218,7 @@ mod tests {
         fixture
             .file(&format!("{VENVS}/httpie/pipx_metadata.json"), "{\"main_package\": ")
             .dir(&format!("{VENVS}/ruff/bin"));
-        let packages = PipxSource.inventory(&fixture.host(FakeRunner::new())).unwrap();
+        let packages = PipxSource.inventory(&fixture.host(FakeRunner::new()), &ScanContext::default()).unwrap();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["httpie", "ruff"]);
         assert_eq!(packages[0].name, "httpie");

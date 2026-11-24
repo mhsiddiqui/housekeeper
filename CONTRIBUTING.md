@@ -53,8 +53,9 @@ docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" fedora:lat
 
 ## Code
 - Read [docs/architecture/README.md](docs/architecture/README.md) first. A new way of installing software is one new
-  file in `crates/linux/src/sources/` implementing `Source` and `LinuxSource`; it registers itself, nothing else
-  changes ([how](docs/architecture/guide.html#new-provider)).
+  file in `crates/linux/src/sources/` implementing `Source` and `LinuxSource` and calling `register!(<Type>);`; it
+  registers itself, nothing else changes ([how](docs/architecture/guide.html#new-provider)). Sources never import from
+  each other; code they share lives outside `sources/`.
 - Sources read the machine only through `Host` (logical paths, injected command runner), so every source is tested
   with fixture files and recorded command output.
 - Tests should catch bugs a user would notice: wrong install reason, missed packages, crashes on unusual input.

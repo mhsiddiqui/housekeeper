@@ -1,6 +1,7 @@
 //! Scanning every source of a platform.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::host::Host;
 use crate::model::{Availability, Package, SourceInfo, SystemInfo};
 use crate::platform::Platform;
-use crate::source::Source;
+use crate::source::{ScanContext, Source};
 
 /// Version of the JSON document produced from a `Scan`. Bumped on incompatible changes.
 pub const SCAN_SCHEMA: u32 = 1;
@@ -18,9 +19,19 @@ pub const SCAN_SCHEMA: u32 = 1;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum SourceStatus {
-    Ok { version: Option<String>, packages: usize },
-    Unavailable { reason: String },
-    Failed { error: String },
+    Ok {
+        version: Option<String>,
+        packages: usize,
+        /// Problems that did not stop the source; its list may be incomplete.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
+    Unavailable {
+        reason: String,
+    },
+    Failed {
+        error: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,6 +96,17 @@ impl Housekeeper {
 
     /// Reads every selected source in parallel. A source that fails or panics is reported, not fatal.
     pub fn scan(&self, selection: &Selection<'_>) -> Scan {
+        self.scan_with(selection, |_, _| {})
+    }
+
+    /// Like [`scan`](Self::scan), but hands each source's report and packages to `on_report` as soon as that source
+    /// finishes, so a caller can show progress per source. The returned `Scan` is the same as `scan` returns.
+    ///
+    /// `on_report` runs once per selected source, on that source's scanning thread, so calls come concurrently from
+    /// several threads in the order the sources finish. It sees every outcome: available, unavailable, failed, and a
+    /// panicking source (reported as failed). If `on_report` itself panics, that source is treated like a panicking
+    /// source: the scan reports it as failed with no packages, and the other sources are unaffected.
+    pub fn scan_with(&self, selection: &Selection<'_>, on_report: impl Fn(&SourceReport, &[Package]) + Sync) -> Scan {
         let selected: Vec<&dyn Source> = self
             .platform
             .sources()
@@ -93,10 +115,18 @@ impl Housekeeper {
             .filter(|source| selection.includes(&source.info()))
             .collect();
 
+        let on_report = &on_report;
         let results: Vec<(SourceReport, Vec<Package>)> = thread::scope(|scope| {
+            let all = self.platform.sources();
             let handles: Vec<_> = selected
                 .iter()
-                .map(|source| scope.spawn(|| scan_one(*source, &self.host)))
+                .map(|source| {
+                    scope.spawn(move || {
+                        let (report, packages) = scan_one(*source, &self.host, all);
+                        on_report(&report, &packages);
+                        (report, packages)
+                    })
+                })
                 .collect();
             handles
                 .into_iter()
@@ -138,23 +168,28 @@ impl Housekeeper {
     }
 }
 
-fn scan_one(source: &dyn Source, host: &Host) -> (SourceReport, Vec<Package>) {
+/// `all` is every source of the platform, which the source may consult through its [`ScanContext`].
+fn scan_one(source: &dyn Source, host: &Host, all: &[Arc<dyn Source>]) -> (SourceReport, Vec<Package>) {
     let started = Instant::now();
     let info = source.info();
     let (status, packages) = match catch_unwind(AssertUnwindSafe(|| source.probe(host))) {
         Err(_) => (failed("internal error while probing this source"), Vec::new()),
         Ok(Availability::Unavailable { reason }) => (SourceStatus::Unavailable { reason }, Vec::new()),
-        Ok(Availability::Available { version }) => match catch_unwind(AssertUnwindSafe(|| source.inventory(host))) {
-            Err(_) => (failed("internal error while reading this source"), Vec::new()),
-            Ok(Err(error)) => (failed(error.to_string()), Vec::new()),
-            Ok(Ok(packages)) => (
-                SourceStatus::Ok {
-                    version,
-                    packages: packages.len(),
-                },
-                packages,
-            ),
-        },
+        Ok(Availability::Available { version }) => {
+            let context = ScanContext::new(all);
+            match catch_unwind(AssertUnwindSafe(|| source.inventory(host, &context))) {
+                Err(_) => (failed("internal error while reading this source"), Vec::new()),
+                Ok(Err(error)) => (failed(error.to_string()), Vec::new()),
+                Ok(Ok(packages)) => (
+                    SourceStatus::Ok {
+                        version,
+                        packages: packages.len(),
+                        warnings: context.into_warnings(),
+                    },
+                    packages,
+                ),
+            }
+        }
     };
     let report = SourceReport {
         info,
@@ -174,7 +209,7 @@ mod tests {
     use crate::model::{PackageKind, Scope, SourceId, SourceKind};
     use crate::source::SourceError;
     use crate::testing::{FakeRunner, Fixture};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     struct Stub {
         info: SourceInfo,
@@ -193,7 +228,7 @@ mod tests {
                 Availability::unavailable("not installed")
             }
         }
-        fn inventory(&self, _: &Host) -> Result<Vec<Package>, SourceError> {
+        fn inventory(&self, _: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
             (self.behaviour)()
         }
     }
@@ -261,7 +296,8 @@ mod tests {
             status("good"),
             &SourceStatus::Ok {
                 version: None,
-                packages: 2
+                packages: 2,
+                warnings: Vec::new(),
             }
         );
         assert!(matches!(status("broken"), SourceStatus::Failed { error } if error.contains("garbage")));
@@ -280,5 +316,38 @@ mod tests {
         assert_eq!(scan.sources.len(), 1);
         assert_eq!(scan.packages.len(), 1);
         assert_eq!(scan.packages[0].name, "two");
+    }
+
+    #[test]
+    fn progress_reports_each_selected_source_once_with_its_own_packages() {
+        let hk = housekeeper(vec![
+            stub("good", true, || Ok(vec![app("good", "zed"), app("good", "Alacritty")])),
+            stub("other", true, || Ok(vec![app("other", "vim")])),
+            stub("broken", true, || Err(SourceError::parse("db", "garbage"))),
+            stub("panics", true, || panic!("bug")),
+            stub("absent", false, || unreachable!("unavailable sources are not read")),
+            stub("skipped", true, || Ok(vec![app("skipped", "nano")])),
+        ]);
+        let only = ["good", "other", "broken", "panics", "absent"].map(String::from);
+        let seen = Mutex::new(Vec::new());
+        let scan = hk.scan_with(&Selection::Only(&only), |report, packages| {
+            seen.lock().unwrap().push((report.clone(), packages.to_vec()));
+        });
+
+        let mut seen = seen.into_inner().unwrap();
+        seen.sort_by(|a, b| a.0.info.id.cmp(&b.0.info.id));
+        let ids: Vec<_> = seen.iter().map(|(report, _)| report.info.id.as_str()).collect();
+        assert_eq!(ids, ["absent", "broken", "good", "other", "panics"]);
+        for (report, packages) in &seen {
+            assert!(scan.sources.contains(report), "report of {}", report.info.id);
+            let in_scan: Vec<_> = scan.packages.iter().filter(|p| p.source == report.info.id).collect();
+            let mut streamed: Vec<_> = packages.iter().collect();
+            streamed.sort_by_key(|p| p.display_name().to_lowercase());
+            assert_eq!(streamed, in_scan, "packages of {}", report.info.id);
+        }
+        assert!(matches!(seen[0].0.status, SourceStatus::Unavailable { .. }));
+        assert!(matches!(seen[1].0.status, SourceStatus::Failed { .. }));
+        assert!(matches!(seen[4].0.status, SourceStatus::Failed { .. }));
+        assert_eq!(seen[2].1.len(), 2);
     }
 }

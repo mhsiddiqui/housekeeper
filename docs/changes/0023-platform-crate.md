@@ -1,7 +1,7 @@
 # 0023: Build core on any OS and pick the platform in one crate
 
 - **Date:** 2026-11-23
-- **Branch / PR:** `refactor/platform-crate`
+- **Branch / PR:** `refactor/platform-crate`, #15
 - **Plan chunks:** none (architecture review)
 - **Commits:** 23899a7, 33650f9, 9fd9046
 
