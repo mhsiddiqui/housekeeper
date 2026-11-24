@@ -39,6 +39,9 @@
 - **CLI**: the default `list` hides components; `--all` help and the summary line say so; scan warnings are printed.
 - **`scripts/test-package.sh`**: on every distribution, the default list must show `housekeeper` (its command makes it
   an app, through the real batched ownership query) and the native source must report at least one component.
+  zypper now installs and removes the package with `--no-remote`: the first CI run of this branch failed on
+  Tumbleweed with exit code 106 because zypper, even with `--no-refresh`, builds its online repositories' caches
+  (fetching their keys) before installing a local RPM, and a mirror did not answer.
 - Docs: decision D28 and the `Platform` row in the architecture, the guide's `Platform` walkthrough, README (default
   list, menu entries, JSON fields), CHANGELOG, plan 2.1 ✅, decision range D1–D28 in AGENTS.md and docs/README.md.
 
@@ -72,6 +75,9 @@ database was agreed with the user before starting (D28 records the alternatives)
   Ubuntu 24.04, Fedora (latest), AlmaLinux 9, openSUSE Leap and Arch Linux containers, x86_64: all passed, including
   the new checks. In Fedora, Arch and Debian containers `list` took 0.26 s, 0.11 s and 0.05 s; Fedora's 148 rpm
   packages split into 36 apps, 41 components and 71 libraries.
+- The Tumbleweed failure reproduced offline (`docker run --network none`): the old zypper command exited 106 with
+  "Error building the cache … download.opensuse.org"; with `--no-remote`, `scripts/test-package.sh dist` passed on
+  Tumbleweed and Leap with no network at all.
 
 ## Known limits and follow-ups
 - Launchers come from the folders `$XDG_DATA_DIRS` names. A session that lacks Flatpak's or Snap's folders there (a
