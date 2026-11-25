@@ -9,12 +9,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::host::Host;
 use crate::model::Package;
-use crate::source::SourceError;
+use crate::source::{Source, SourceError};
 
 /// Ability: say how one of the source's packages is removed.
 pub trait Remover: Send + Sync {
     /// How `package` (one of this source's) would be removed. Reads only.
     fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError>;
+}
+
+/// How `package` (one of `source`'s) would be removed: the source's plan, or `Unknown` when it has no remover, blocked
+/// when the package is protected (D5) whatever the source planned.
+pub(crate) fn plan(source: &dyn Source, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+    let plan = match source.remover() {
+        Some(remover) => remover.plan(host, package)?,
+        None => RemovalPlan::unknown(),
+    };
+    Ok(match &package.protected {
+        Some(why) => plan.blocked(format!("protected: {why}")),
+        None => plan,
+    })
 }
 
 /// How an installed item would be removed.

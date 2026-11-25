@@ -50,8 +50,8 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
     if let Some(location) = &package.location {
         line("Location", &location.display().to_string())?;
     }
-    if package.protected {
-        line("Protected", "yes: removing it could break the system")?;
+    if let Some(why) = &package.protected {
+        line("Protected", &format!("yes: {why}"))?;
     }
     if !package.commands.is_empty() {
         line("Commands", &package.commands.join(", "))?;

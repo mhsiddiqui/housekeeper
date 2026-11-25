@@ -28,11 +28,19 @@ the project uses [Semantic Versioning](https://semver.org/).
   an AppImage and the launchers that start it, or with rustup's own uninstaller. Each step says whether it would run
   as you or as root, and what blocks it (a package that is part of a Silverblue image, an npm or cargo install
   outside your home folder). `--json` has the plan as `removal`.
+- A protected package's removal is blocked, and `housekeeper show` says why it is protected: dpkg's Essential or
+  Protected mark (newly read; `init` and `libgcc-s1` are Protected on Debian and Ubuntu) or Priority required, dnf's
+  protected packages (now also `protected_packages` in `/etc/dnf/dnf.conf`), Arch's `base` and everything it depends
+  on (new), the core packages, snapd and the system's snaps, and the running kernel (new, on every distribution).
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
   (fonts, firmware, themes, data, plugins) are a new kind, `component`, shown with `--all`. On an Ubuntu desktop the
   default list went from 525 to 210 entries.
+- `--json`: `protected` is now the reason a package is protected (a string, or `null`) instead of `true`/`false`, so
+  the scan's `schema` is `2`.
+- Kernels other than the running one are no longer protected on Fedora, openSUSE and Arch, so older kernels can be
+  removed; the running kernel is protected instead.
 
 ### Fixed
 - `housekeeper who` named the wrong snap for a snap command when a later file on its symlink chain had another

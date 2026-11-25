@@ -623,14 +623,14 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/linux/src/distro.rs</code></td><td><code>os-release</code> parsing (<code>ID</code>, <code>ID_LIKE</code>, image-based)</td></tr>
   <tr><td><code>crates/linux/src/provider.rs</code></td><td><code>LinuxSource</code>, <code>Native</code>, <code>Family</code>, <code>Context</code>: the contract every Linux source implements; <code>PackageTool</code>, <code>LinuxTool</code>, <code>Serves</code> for package tools</td></tr>
   <tr><td><code>crates/linux/build.rs</code></td><td>Declares every file in <code>src/sources/</code> and <code>src/tools/</code> as a module and generates the <code>PROVIDERS</code> and <code>TOOLS</code> lists</td></tr>
-  <tr><td><code>crates/linux/src/files.rs</code>, <code>python.rs</code></td><td>Helpers shared by several sources (AppImage detection, symlinks, <code>.dist-info</code> names)</td></tr>
+  <tr><td><code>crates/linux/src/files.rs</code>, <code>python.rs</code>, <code>kernel.rs</code></td><td>Helpers shared by several sources (AppImage detection, symlinks, <code>.dist-info</code> names, protecting the running kernel)</td></tr>
   <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and its package tool and assembles all sources</td></tr>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/linux/src/tools/*.rs</code></td><td>One file per package tool (apt, dnf, zypper, rpm-ostree, pacman)</td></tr>
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D31)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D32)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

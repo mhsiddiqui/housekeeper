@@ -9,7 +9,7 @@ use crate::group::{Shared, keys};
 use crate::host::{FileType, Host};
 use crate::inventory::{Housekeeper, Selection, SourceStatus};
 use crate::model::{Package, SourceInfo};
-use crate::remove::RemovalPlan;
+use crate::remove::{self, RemovalPlan};
 
 /// What a query names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,18 +170,15 @@ impl Housekeeper {
                     }
                 });
 
-        let removal = match source.remover() {
-            Some(remover) => match remover.plan(&self.host, &package) {
-                Ok(plan) => Some(plan),
-                Err(error) => {
-                    warnings.push(format!(
-                        "could not plan the removal of {} from {}: {error}",
-                        package.name, info.label
-                    ));
-                    None
-                }
-            },
-            None => Some(RemovalPlan::unknown()),
+        let removal = match remove::plan(source.as_ref(), &self.host, &package) {
+            Ok(plan) => Some(plan),
+            Err(error) => {
+                warnings.push(format!(
+                    "could not plan the removal of {} from {}: {error}",
+                    package.name, info.label
+                ));
+                None
+            }
         };
 
         Lookup::Found(Box::new(Details {
@@ -471,6 +468,50 @@ mod tests {
                 .any(|w| w.contains("could not plan the removal of broken")),
             "{:?}",
             broken.warnings
+        );
+    }
+
+    #[test]
+    fn a_protected_package_blocks_its_plan_whatever_the_source_planned() {
+        let fixture = Fixture::new();
+        let apt = RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::Helper, ["apt-get", "remove", "--yes", "init"])],
+        );
+        let protect = |mut package: Package| {
+            package.protected = Some("dpkg marks it Protected".into());
+            package
+        };
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![
+                Stub {
+                    id: "dpkg",
+                    packages: vec![
+                        protect(package("dpkg", "init", None, &[])),
+                        package("dpkg", "vim", None, &[]),
+                    ],
+                    plan: Some(apt.clone()),
+                    ..Stub::default()
+                },
+                Stub {
+                    id: "manual",
+                    packages: vec![protect(package("manual", "tool", None, &[]))],
+                    ..Stub::default()
+                },
+            ],
+        );
+
+        assert_eq!(
+            found(hk.show("dpkg:init")).removal,
+            Some(apt.clone().blocked("protected: dpkg marks it Protected")),
+            "the steps stay, to show what it would take"
+        );
+        assert_eq!(found(hk.show("dpkg:vim")).removal, Some(apt));
+        assert_eq!(
+            found(hk.show("manual:tool")).removal.map(|plan| plan.blockers),
+            Some(vec!["protected: dpkg marks it Protected".to_string()])
         );
     }
 }

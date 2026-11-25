@@ -146,8 +146,9 @@ pub struct Package {
     /// AppStream component IDs (`org.mozilla.firefox`): the app's name in software catalogs, the same whichever source
     /// installed it.
     pub app_ids: Vec<String>,
-    /// Removing it could break the system.
-    pub protected: bool,
+    /// Why removing it could break the system (`dpkg marks it Essential`); `None` when nothing protects it. A
+    /// protected package's removal plan is blocked.
+    pub protected: Option<String>,
 }
 
 /// An entry in the system's application menu (a desktop entry on Linux).
@@ -201,7 +202,7 @@ impl Package {
             launchers: Vec::new(),
             icon: None,
             app_ids: Vec::new(),
-            protected: false,
+            protected: None,
         }
     }
 

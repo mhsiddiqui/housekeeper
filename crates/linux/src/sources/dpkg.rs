@@ -10,6 +10,7 @@ use housekeeper_core::{
 };
 
 use super::version_line;
+use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
 use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
@@ -17,7 +18,7 @@ pub const ID: SourceId = SourceId::new("dpkg");
 
 /// One line per package, tab-separated. `\t` and `\n` are expanded by dpkg-query itself.
 const FORMAT: &str = "--showformat=${binary:Package}\\t${Package}\\t${Architecture}\\t${Version}\\t${db:Status-Abbrev}\\t\
-${Installed-Size}\\t${Section}\\t${Priority}\\t${Essential}\\t${binary:Summary}\\n";
+${Installed-Size}\\t${Section}\\t${Priority}\\t${Essential}\\t${Protected}\\t${binary:Summary}\\n";
 
 /// Per package: id, name, status, and the relations that make it need other packages, tab-separated.
 const RELATIONS_FORMAT: &str =
@@ -82,13 +83,18 @@ impl Source for DpkgSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
         let listing = host.run_ok(&Cmd::new("dpkg-query").args(["--show", FORMAT]))?;
         let auto = host
             .read_optional(APT_EXTENDED_STATES)?
             .map(|text| auto_installed(&text))
             .unwrap_or_default();
-        parse_listing(&listing, &auto)
+        let mut packages = parse_listing(&listing, &auto)?;
+        // dpkg names the owner by its id (`binary:Package`); a kernel's version is part of its package name.
+        protect_running_kernel(host, scan, &mut packages, |images| {
+            Ok(self.owners(host, images)?.into_values().flatten().collect())
+        });
+        Ok(packages)
     }
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
@@ -258,12 +264,13 @@ fn parse_listing(listing: &str, auto: &HashSet<(String, String)>) -> Result<Vec<
             section,
             priority,
             essential,
+            protected,
             summary,
         ] = fields[..]
         else {
             return Err(SourceError::parse(
                 "dpkg-query output",
-                format!("expected 10 fields: {line:?}"),
+                format!("expected 11 fields: {line:?}"),
             ));
         };
         if !is_installed(status) {
@@ -273,7 +280,7 @@ fn parse_listing(listing: &str, auto: &HashSet<(String, String)>) -> Result<Vec<
         package.version = Some(version.to_string()).filter(|v| !v.is_empty());
         package.summary = Some(summary.to_string()).filter(|s| !s.is_empty());
         package.size_bytes = size_kib.parse::<u64>().ok().map(|kib| kib * 1024);
-        package.protected = essential == "yes" || priority == "required";
+        package.protected = protection(essential, protected, priority);
         package.reason = if matches!(priority, "required" | "important") {
             InstallReason::System
         } else if auto.contains(&(name.to_string(), arch.to_string())) {
@@ -290,18 +297,37 @@ fn parse_listing(listing: &str, auto: &HashSet<(String, String)>) -> Result<Vec<
     Ok(packages)
 }
 
+/// Why dpkg protects a package: apt refuses to remove Essential and Protected packages without being told the exact
+/// phrase, and Priority required marks what a minimal system needs.
+fn protection(essential: &str, protected: &str, priority: &str) -> Option<String> {
+    let why = if essential == "yes" {
+        "dpkg marks it Essential"
+    } else if protected == "yes" {
+        "dpkg marks it Protected"
+    } else if priority == "required" {
+        "its priority is required: a minimal system needs it"
+    } else {
+        return None;
+    };
+    Some(why.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use housekeeper_core::testing::{FakeRunner, Fixture};
 
     const LISTING: &str = "\
-firefox\tfirefox\tamd64\t1:1snap1-0ubuntu5\tii \t260\tweb\toptional\tno\tTransitional package - firefox -> firefox snap
-libc6:amd64\tlibc6\tamd64\t2.39-0ubuntu8.3\tii \t13456\tlibs\toptional\tno\tGNU C Library: Shared libraries
-libc6:i386\tlibc6\ti386\t2.39-0ubuntu8.3\tii \t12960\tlibs\toptional\tno\tGNU C Library: Shared libraries
-bash\tbash\tamd64\t5.2.21-2ubuntu4\tii \t1868\tshells\trequired\tyes\tGNU Bourne Again SHell
-gimp\tgimp\tamd64\t2.10.36-3\trc \t\tgraphics\toptional\tno\tGNU Image Manipulation Program
-libfoo-dev\tlibfoo-dev\tamd64\t1.0\tii \t40\tuniverse/libdevel\toptional\tno\tfoo headers
+firefox\tfirefox\tamd64\t1:1snap1-0ubuntu5\tii \t260\tweb\toptional\tno\tno\tTransitional package - firefox -> firefox snap
+libc6:amd64\tlibc6\tamd64\t2.39-0ubuntu8.3\tii \t13456\tlibs\toptional\tno\tno\tGNU C Library: Shared libraries
+libc6:i386\tlibc6\ti386\t2.39-0ubuntu8.3\tii \t12960\tlibs\toptional\tno\tno\tGNU C Library: Shared libraries
+bash\tbash\tamd64\t5.2.21-2ubuntu4\tii \t1868\tshells\trequired\tyes\tno\tGNU Bourne Again SHell
+gimp\tgimp\tamd64\t2.10.36-3\trc \t\tgraphics\toptional\tno\tno\tGNU Image Manipulation Program
+libfoo-dev\tlibfoo-dev\tamd64\t1.0\tii \t40\tuniverse/libdevel\toptional\tno\tno\tfoo headers
+init\tinit\tamd64\t1.66ubuntu1\tii \t29\tmetapackages\timportant\tno\tyes\tSystem-V-like init utilities - metapackage
+mawk\tmawk\tamd64\t1.3.4.20240123-1build1\tii \t207\tinterpreters\trequired\tno\t\tPattern scanning and text processing language
+linux-image-6.8.0-45-generic\tlinux-image-6.8.0-45-generic\tamd64\t6.8.0-45.45\tii \t15000\tkernel\toptional\tno\tno\tSigned kernel image generic
+linux-image-6.8.0-40-generic\tlinux-image-6.8.0-40-generic\tamd64\t6.8.0-40.40\tii \t15000\tkernel\toptional\tno\tno\tSigned kernel image generic
 ";
 
     const EXTENDED_STATES: &str = "\
@@ -331,7 +357,20 @@ Auto-Installed: 0
     fn lists_installed_packages_and_skips_removed_ones() {
         let packages = scan();
         let ids: Vec<_> = packages.iter().map(|p| p.id.as_str()).collect();
-        assert_eq!(ids, ["firefox", "libc6:amd64", "libc6:i386", "bash", "libfoo-dev"]);
+        assert_eq!(
+            ids,
+            [
+                "firefox",
+                "libc6:amd64",
+                "libc6:i386",
+                "bash",
+                "libfoo-dev",
+                "init",
+                "mawk",
+                "linux-image-6.8.0-45-generic",
+                "linux-image-6.8.0-40-generic"
+            ]
+        );
         let firefox = find(&packages, "firefox");
         assert_eq!(firefox.version.as_deref(), Some("1:1snap1-0ubuntu5"));
         assert_eq!(firefox.size_bytes, Some(260 * 1024));
@@ -349,10 +388,38 @@ Auto-Installed: 0
     }
 
     #[test]
-    fn essential_and_required_packages_are_protected() {
+    fn essential_protected_and_required_packages_are_protected_with_the_reason() {
         let packages = scan();
-        assert!(find(&packages, "bash").protected);
-        assert!(!find(&packages, "firefox").protected);
+        let why = |id: &str| find(&packages, id).protected.clone();
+        assert_eq!(why("bash").as_deref(), Some("dpkg marks it Essential"));
+        assert_eq!(why("init").as_deref(), Some("dpkg marks it Protected"));
+        assert!(
+            why("mawk").is_some_and(|why| why.contains("required")),
+            "older dpkg prints no Protected field"
+        );
+        assert_eq!(why("firefox"), None);
+    }
+
+    #[test]
+    fn the_running_kernel_is_protected_and_older_kernels_are_not() {
+        let fixture = Fixture::new();
+        fixture
+            .file("/proc/sys/kernel/osrelease", "6.8.0-45-generic\n")
+            .file("/boot/vmlinuz-6.8.0-45-generic", "");
+        let runner = FakeRunner::new()
+            .respond(&format!("dpkg-query --show {FORMAT}"), LISTING)
+            .respond(
+                "dpkg-query --search /boot/vmlinuz-6.8.0-45-generic",
+                "linux-image-6.8.0-45-generic: /boot/vmlinuz-6.8.0-45-generic\n",
+            );
+        let packages = DpkgSource::default()
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap();
+        assert_eq!(
+            find(&packages, "linux-image-6.8.0-45-generic").protected.as_deref(),
+            Some("it is the running kernel")
+        );
+        assert_eq!(find(&packages, "linux-image-6.8.0-40-generic").protected, None);
     }
 
     #[test]

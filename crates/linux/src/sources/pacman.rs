@@ -9,6 +9,7 @@ use housekeeper_core::{
     ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
+use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
 use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
@@ -22,10 +23,9 @@ const DEFAULT_DB_PATH: &str = "/var/lib/pacman/";
 /// Origin of packages no sync repository provides.
 const FOREIGN_ORIGIN: &str = "AUR or local build";
 
-/// Packages whose removal leaves the system unbootable or unmanageable.
+/// Packages whose removal leaves the system unbootable or unmanageable, even where `base` is not installed. Kernels
+/// are not listed: only the running one is protected, so older or alternative kernels can go.
 const CORE_PACKAGES: &[&str] = &[
-    // Metapackage defining a minimal Arch install; removing it orphans the base system.
-    "base",
     // C library every program links against.
     "glibc",
     // Init system and service manager.
@@ -37,14 +37,10 @@ const CORE_PACKAGES: &[&str] = &[
     "coreutils",
     // The package manager; without it nothing can be repaired.
     "pacman",
-    // Official kernels; the bootable kernel must stay.
-    "linux",
-    "linux-lts",
-    "linux-zen",
-    "linux-hardened",
-    "linux-rt",
-    "linux-rt-lts",
 ];
+
+/// The metapackage that defines a minimal Arch Linux system; it and what it depends on are protected.
+const BASE: &str = "base";
 
 /// Reads pacman's local database; removing goes through the system's package tool (pacman, decision D24).
 #[derive(Default)]
@@ -95,7 +91,7 @@ impl Source for PacmanSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
         let local = local_db(host)?;
         // Exits 1 when there are no foreign packages; either way, origins are optional.
         let foreign: HashSet<String> = host
@@ -109,9 +105,32 @@ impl Source for PacmanSource {
             })
             .unwrap_or_default();
         let mut packages = Vec::new();
+        let mut provided: Vec<Vec<String>> = Vec::new();
+        let mut base_needs: HashSet<String> = HashSet::new();
         for (desc_path, desc) in local_descs(host, &local)? {
-            packages.push(parse_desc(&desc, &foreign).map_err(|detail| entry_error(&desc_path, detail))?);
+            let entry = |detail| entry_error(&desc_path, detail);
+            let package = parse_desc(&desc, &foreign).map_err(entry)?;
+            let relations = relations(&desc).map_err(entry)?;
+            if package.name == BASE {
+                base_needs.extend(relations.depends);
+            }
+            provided.push(relations.provides);
+            packages.push(package);
         }
+        for (package, provides) in packages.iter_mut().zip(&provided) {
+            if package.protected.is_some() {
+                continue;
+            }
+            if package.name == BASE {
+                package.protected = Some("it defines the minimal Arch Linux system".into());
+            } else if base_needs.contains(&package.name) || provides.iter().any(|p| base_needs.contains(p)) {
+                package.protected = Some("the base metapackage needs it".into());
+            }
+        }
+        // pacman names owners by name, and only one version of a name is ever installed.
+        protect_running_kernel(host, scan, &mut packages, |images| {
+            Ok(self.owners(host, images)?.into_values().flatten().collect())
+        });
         Ok(packages)
     }
 
@@ -333,7 +352,9 @@ fn parse_desc(desc: &str, foreign: &HashSet<String>) -> Result<Package, String> 
     package.size_bytes = size;
     package.installed_at = installed_at;
     package.reason = reason;
-    package.protected = CORE_PACKAGES.contains(&name.as_str());
+    package.protected = CORE_PACKAGES
+        .contains(&name.as_str())
+        .then(|| "the system cannot start or be repaired without it".to_string());
     package.origin = foreign.contains(&name).then(|| FOREIGN_ORIGIN.to_string());
     // Multilib and split-library names; plain `lib*` also covers apps such as libreoffice.
     if name.starts_with("lib32-") || name.ends_with("-libs") {
@@ -556,14 +577,62 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
     }
 
     #[test]
-    fn core_packages_are_protected_and_multilib_is_library() {
+    fn core_and_base_packages_are_protected_and_multilib_is_library() {
         let fixture = Fixture::new();
         database(&fixture, DEFAULT_DB_PATH);
+        fixture.file(
+            &format!("{DEFAULT_DB_PATH}local/base-3-2/desc"),
+            "%NAME%\nbase\n\n%VERSION%\n3-2\n\n%DEPENDS%\nglibc\nsh\nyay>=12\n",
+        );
+        fixture.file(
+            &format!("{DEFAULT_DB_PATH}local/firefox-132.0.2-1/desc"),
+            format!("{FIREFOX}\n%PROVIDES%\nsh\n"),
+        );
         let packages = scan(&fixture);
-        assert!(find(&packages, "glibc").protected);
-        assert!(!find(&packages, "firefox").protected);
+        let why = |id: &str| find(&packages, id).protected.clone();
+        assert_eq!(
+            why("glibc").as_deref(),
+            Some("the system cannot start or be repaired without it")
+        );
+        assert_eq!(why("base").as_deref(), Some("it defines the minimal Arch Linux system"));
+        assert_eq!(why("yay").as_deref(), Some("the base metapackage needs it"));
+        assert_eq!(
+            why("firefox").as_deref(),
+            Some("the base metapackage needs it"),
+            "through what it provides"
+        );
+        assert_eq!(why("lib32-mesa"), None);
         assert_eq!(find(&packages, "lib32-mesa").kind, PackageKind::Library);
         assert_eq!(find(&packages, "firefox").kind, PackageKind::Unknown);
+    }
+
+    #[test]
+    fn only_the_running_kernel_is_protected() {
+        let fixture = Fixture::new();
+        database(&fixture, DEFAULT_DB_PATH);
+        fixture
+            .file(
+                &format!("{DEFAULT_DB_PATH}local/linux-6.12.1.arch1-1/desc"),
+                "%NAME%\nlinux\n\n%VERSION%\n6.12.1.arch1-1\n",
+            )
+            .file(
+                &format!("{DEFAULT_DB_PATH}local/linux-lts-6.6.63-1/desc"),
+                "%NAME%\nlinux-lts\n\n%VERSION%\n6.6.63-1\n",
+            )
+            .file("/proc/sys/kernel/osrelease", "6.12.1-arch1-1\n")
+            .file("/usr/lib/modules/6.12.1-arch1-1/vmlinuz", "");
+        let runner = FakeRunner::new().respond("pacman -Qmq", "").respond(
+            "pacman -Qo /usr/lib/modules/6.12.1-arch1-1/vmlinuz",
+            "/usr/lib/modules/6.12.1-arch1-1/vmlinuz is owned by linux 6.12.1.arch1-1\n",
+        );
+        let packages = PacmanSource::default()
+            .inventory(&fixture.host(runner), &ScanContext::default())
+            .unwrap();
+        assert_eq!(
+            find(&packages, "linux").protected.as_deref(),
+            Some("it is the running kernel")
+        );
+        assert_eq!(find(&packages, "linux-lts").protected, None);
     }
 
     #[test]

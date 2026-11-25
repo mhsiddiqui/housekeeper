@@ -11,6 +11,7 @@ use housekeeper_core::{
 use serde::Deserialize;
 
 use super::version_line;
+use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
 use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
@@ -28,7 +29,14 @@ const ZYPP_AUTO_INSTALLED: &str = "/var/lib/zypp/AutoInstalled";
 /// `dnf5,glob:/etc/dnf/protected.d/*.conf`) only the first.
 const PROTECTED_DIRS: [&str; 2] = ["/etc/dnf/protected.d", "/etc/yum/protected.d"];
 
-/// Packages whose removal leaves the system unbootable or unmanageable, whatever the distribution configured.
+/// dnf's configuration, whose `protected_packages` can name packages too.
+const DNF_CONF: &str = "/etc/dnf/dnf.conf";
+
+/// The package that owns a path, in the inventory's id parts, for telling one of several kernels from the others.
+const OWNER_ID_FORMAT: &str = "%{NAME}\\t%{EPOCH}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\n";
+
+/// Packages whose removal leaves the system unbootable or unmanageable, whatever the distribution configured. Kernels
+/// are not listed: only the running one is protected, as dnf does, so older kernels can go.
 const CORE_PACKAGES: &[&str] = &[
     // C library every program links against.
     "glibc",
@@ -40,9 +48,6 @@ const CORE_PACKAGES: &[&str] = &[
     // /bin/sh and the basic commands scripts rely on.
     "bash",
     "coreutils",
-    // The kernel itself: Fedora/RHEL and openSUSE names.
-    "kernel-core",
-    "kernel-default",
     // Package managers; without them nothing can be repaired.
     "rpm",
     "dnf",
@@ -145,18 +150,49 @@ impl Source for RpmSource {
         Availability::Available { version }
     }
 
-    fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
+    fn inventory(&self, host: &Host, scan: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
         let listing = host.run_ok(&Cmd::new("rpm").args(["-qa", "--queryformat", FORMAT]))?;
         let reasons = self.reasons(host)?;
-        let mut protected: HashSet<String> = CORE_PACKAGES.iter().map(|name| name.to_string()).collect();
+        let mut protected: HashMap<String, String> = HashMap::new();
         for dir in PROTECTED_DIRS {
             for entry in host.read_dir(dir)? {
                 if entry.name.ends_with(".conf") {
-                    protected.extend(names(&host.read_to_string(&entry.path)?));
+                    let why = format!("listed in dnf's protected packages ({})", entry.path.display());
+                    for name in names(&host.read_to_string(&entry.path)?) {
+                        protected.entry(name).or_insert_with(|| why.clone());
+                    }
                 }
             }
         }
-        parse_listing(&listing, &reasons, &protected)
+        if let Some(conf) = host.read_optional(DNF_CONF)? {
+            for name in dnf_protected_packages(&conf) {
+                protected
+                    .entry(name)
+                    .or_insert_with(|| format!("listed in dnf's protected_packages ({DNF_CONF})"));
+            }
+        }
+        for name in CORE_PACKAGES {
+            protected
+                .entry(name.to_string())
+                .or_insert_with(|| "the system cannot start or be repaired without it".to_string());
+        }
+        let mut packages = parse_listing(&listing, &reasons, &protected)?;
+        protect_running_kernel(host, scan, &mut packages, |images| {
+            // rpm names owners by name alone, which several installed kernels share; ask for the exact install.
+            let cmd = Cmd::new("rpm")
+                .args(["-qf", "--queryformat", OWNER_ID_FORMAT])
+                .args(args(images));
+            let output = host.run(&cmd)?;
+            Ok(output
+                .stdout
+                .lines()
+                .filter_map(|line| match line.split('\t').collect::<Vec<_>>()[..] {
+                    [name, epoch, version, release, arch] => Some(nevra(name, epoch, version, release, arch).1),
+                    _ => None,
+                })
+                .collect())
+        });
+        Ok(packages)
     }
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
@@ -299,6 +335,45 @@ fn names(text: &str) -> HashSet<String> {
         .collect()
 }
 
+/// The names in `protected_packages` of dnf.conf's `[main]` section (comma or space separated); `glob:` entries name
+/// files, which are the protected.d directories already read.
+fn dnf_protected_packages(conf: &str) -> Vec<String> {
+    let mut in_main = false;
+    let mut found = Vec::new();
+    for line in conf.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_main = line == "[main]";
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if in_main && key.trim() == "protected_packages" {
+            found = value
+                .split([',', ' ', '\t'])
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && !name.starts_with("glob:"))
+                .map(str::to_string)
+                .collect();
+        }
+    }
+    found
+}
+
+/// `(evr, id)`: the version with its epoch when there is one, and the full NEVRA that tells one install from others of
+/// the same name (several kernels side by side).
+fn nevra(name: &str, epoch: &str, version: &str, release: &str, arch: &str) -> (String, String) {
+    let evr = match epoch {
+        "(none)" | "" => format!("{version}-{release}"),
+        epoch => format!("{epoch}:{version}-{release}"),
+    };
+    let id = match arch {
+        "(none)" | "" => format!("{name}-{evr}"),
+        arch => format!("{name}-{evr}.{arch}"),
+    };
+    (evr, id)
+}
+
 #[derive(Deserialize)]
 struct OstreeStatus {
     deployments: Vec<Deployment>,
@@ -342,7 +417,11 @@ fn name_of_nevra(nevra: &str) -> Option<&str> {
     Some(name)
 }
 
-fn parse_listing(listing: &str, reasons: &Reasons, protected: &HashSet<String>) -> Result<Vec<Package>, SourceError> {
+fn parse_listing(
+    listing: &str,
+    reasons: &Reasons,
+    protected: &HashMap<String, String>,
+) -> Result<Vec<Package>, SourceError> {
     let mut packages = Vec::new();
     for line in listing.lines().filter(|line| !line.trim().is_empty()) {
         let fields: Vec<&str> = line.splitn(8, '\t').collect();
@@ -353,22 +432,14 @@ fn parse_listing(listing: &str, reasons: &Reasons, protected: &HashSet<String>) 
         if name == "gpg-pubkey" {
             continue;
         }
-        let evr = match epoch {
-            "(none)" | "" => format!("{version}-{release}"),
-            epoch => format!("{epoch}:{version}-{release}"),
-        };
-        // Full NEVRA: `name.arch` alone repeats for install-only packages (several kernels side by side).
-        let id = match arch {
-            "(none)" | "" => format!("{name}-{evr}"),
-            arch => format!("{name}-{evr}.{arch}"),
-        };
+        let (evr, id) = nevra(name, epoch, version, release, arch);
         let mut package = Package::new(ID, id, name, Scope::System);
         package.version = Some(evr);
         package.summary = Some(summary.to_string()).filter(|s| !s.is_empty() && s != "(none)");
         package.size_bytes = size.parse().ok();
         package.installed_at = install_time.parse().ok();
         package.reason = reasons.of(name);
-        package.protected = protected.contains(name);
+        package.protected = protected.get(name).cloned();
         if is_library(name) {
             package.kind = PackageKind::Library;
         }
@@ -555,16 +626,47 @@ vim-enhanced\t2\t9.1.825\t1.fc41\tx86_64\t4100000\t1731300100\tA version of the 
     }
 
     #[test]
-    fn core_and_dnf_protected_packages_are_protected() {
+    fn core_and_dnf_protected_packages_are_protected_with_the_reason() {
         let fixture = Fixture::new();
         fixture.file("/etc/dnf/protected.d/sudo.conf", "# keep root access\nsudo\n");
         fixture.file("/etc/dnf/protected.d/README", "firefox\n");
+        fixture.file(
+            "/etc/dnf/dnf.conf",
+            "[main]\ngpgcheck=True\nprotected_packages=dnf, NetworkManager glob:/etc/dnf/protected.d/*.conf\n",
+        );
         let packages = scan(&fixture, FakeRunner::new(), false);
-        assert!(find(&packages, "sudo-1.9.15-5.p5.fc41.x86_64").protected);
-        assert!(find(&packages, "glibc-2.40-9.fc41.i686").protected);
-        assert!(find(&packages, "kernel-core-6.11.6-300.fc41.x86_64").protected);
-        assert!(!find(&packages, "firefox-132.0.1-1.fc41.x86_64").protected);
-        assert!(!find(&packages, "vim-enhanced-2:9.1.825-1.fc41.x86_64").protected);
+        let why = |id: &str| find(&packages, id).protected.clone();
+        assert_eq!(
+            why("sudo-1.9.15-5.p5.fc41.x86_64").as_deref(),
+            Some("listed in dnf's protected packages (/etc/dnf/protected.d/sudo.conf)")
+        );
+        assert_eq!(
+            why("NetworkManager-1:1.50.0-1.fc41.x86_64").as_deref(),
+            Some("listed in dnf's protected_packages (/etc/dnf/dnf.conf)")
+        );
+        assert!(why("glibc-2.40-9.fc41.i686").is_some());
+        assert_eq!(why("firefox-132.0.1-1.fc41.x86_64"), None, "README is not a .conf file");
+        assert_eq!(why("vim-enhanced-2:9.1.825-1.fc41.x86_64"), None);
+    }
+
+    #[test]
+    fn only_the_running_kernel_is_protected() {
+        let fixture = Fixture::new();
+        fixture
+            .file("/proc/sys/kernel/osrelease", "6.11.8-300.fc41.x86_64\n")
+            .file("/usr/lib/modules/6.11.8-300.fc41.x86_64/vmlinuz", "");
+        let runner = FakeRunner::new().respond(
+            &format!("rpm -qf --queryformat {OWNER_ID_FORMAT} /usr/lib/modules/6.11.8-300.fc41.x86_64/vmlinuz"),
+            "kernel-core\t(none)\t6.11.8\t300.fc41\tx86_64\n",
+        );
+        let packages = scan(&fixture, runner, false);
+        assert_eq!(
+            find(&packages, "kernel-core-6.11.8-300.fc41.x86_64")
+                .protected
+                .as_deref(),
+            Some("it is the running kernel")
+        );
+        assert_eq!(find(&packages, "kernel-core-6.11.6-300.fc41.x86_64").protected, None);
     }
 
     #[test]
