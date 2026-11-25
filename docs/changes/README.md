@@ -51,3 +51,4 @@ links back.
 | [0035](0035-show-command.md) | `housekeeper show`: everything about one installed item | 2.4 | #25 |
 | [0036](0036-removal-plans.md) | Plan how every installed item is removed | 3.1 | #26 |
 | [0037](0037-protected-packages.md) | Protected packages block their removal, with the reason | 3.2 | #27 |
+| [0038](0038-removal-simulation.md) | Simulate removals without root, and block what would break | 3.3 | `feat/removal-simulation` |
