@@ -47,3 +47,4 @@ links back.
 | [0031](0031-release-0.1.0-published.md) | Release 0.1.0 published and checked | 0.4 | #21 |
 | [0032](0032-who-command.md) | `housekeeper who`: which source and package a command or file comes from | 2.3 | `feat/who-command` |
 | [0033](0033-desktop-entries.md) | Launchers and commands tell apps from components | 2.1 | #23 |
+| [0034](0034-group-apps.md) | Apps installed more than once are grouped | 2.2 | `feat/group-apps` |
