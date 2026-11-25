@@ -15,19 +15,67 @@ use crate::source::{Source, SourceError};
 pub trait Remover: Send + Sync {
     /// How `package` (one of this source's) would be removed. Reads only.
     fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError>;
+
+    /// "What else would go?", for removers whose package manager or database can tell without root (D33).
+    fn simulator(&self) -> Option<&dyn Simulator> {
+        None
+    }
 }
 
-/// How `package` (one of `source`'s) would be removed: the source's plan, or `Unknown` when it has no remover, blocked
-/// when the package is protected (D5) whatever the source planned.
-pub(crate) fn plan(source: &dyn Source, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
-    let plan = match source.remover() {
-        Some(remover) => remover.plan(host, package)?,
-        None => RemovalPlan::unknown(),
+/// Ability: tell what removing a package would take, as its package manager sees it, without changing anything.
+pub trait Simulator: Send + Sync {
+    fn simulate(&self, host: &Host, package: &Package) -> Result<Simulation, SourceError>;
+}
+
+/// How `package` (one of `source`'s) would be removed: the source's plan, or `Unknown` when it has no remover. A
+/// protected package's plan is blocked whatever the source planned (D5). Any other is simulated when the remover can,
+/// and blocked when the package manager refuses or would take a protected package of the scan (`installed`) with it.
+/// A simulation that fails leaves the plan without one and says why in `warnings`.
+pub(crate) fn plan(
+    source: &dyn Source,
+    host: &Host,
+    package: &Package,
+    installed: &[Package],
+    warnings: &mut Vec<String>,
+) -> Result<RemovalPlan, SourceError> {
+    let Some(remover) = source.remover() else {
+        return Ok(protect(RemovalPlan::unknown(), package));
     };
-    Ok(match &package.protected {
+    let mut plan = remover.plan(host, package)?;
+    if package.protected.is_some() {
+        return Ok(protect(plan, package));
+    }
+    let Some(simulator) = remover.simulator() else {
+        return Ok(plan);
+    };
+    match simulator.simulate(host, package) {
+        Ok(simulation) => {
+            for refusal in &simulation.refused {
+                plan.blockers.push(format!("the package manager refuses: {refusal}"));
+            }
+            for other in installed
+                .iter()
+                .filter(|p| p.source == package.source && p.id != package.id && simulation.removes.contains(&p.id))
+            {
+                if let Some(why) = &other.protected {
+                    plan.blockers.push(format!(
+                        "it would also remove {}, which is protected: {why}",
+                        other.display_name()
+                    ));
+                }
+            }
+            plan.simulation = Some(simulation);
+        }
+        Err(error) => warnings.push(format!("could not simulate the removal of {}: {error}", package.name)),
+    }
+    Ok(plan)
+}
+
+fn protect(plan: RemovalPlan, package: &Package) -> RemovalPlan {
+    match &package.protected {
         Some(why) => plan.blocked(format!("protected: {why}")),
         None => plan,
-    })
+    }
 }
 
 /// How an installed item would be removed.
@@ -37,12 +85,27 @@ pub struct RemovalPlan {
     /// What would be done, in order. Empty when nothing records how to remove it.
     pub steps: Vec<Step>,
     /// Why the plan must not be carried out (installed for every user by a tool that would need root, part of the
-    /// system image). A blocked plan is never carried out; its steps, if any, show what it would take.
+    /// system image, protected). A blocked plan is never carried out; its steps, if any, show what it would take.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,
     /// The change takes effect only after the computer restarts (image-based systems).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub restart: bool,
+    /// What the package manager says the removal takes; `None` when it was not asked or could not tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simulation: Option<Simulation>,
+}
+
+/// What removing a package would take, as its package manager or database tells (D33).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Simulation {
+    /// Who answered, for people: "`apt-get --simulate remove`", "the RPM database".
+    pub by: String,
+    /// The `Package::id`s of the source's packages that would be removed, the item itself first.
+    pub removes: Vec<String>,
+    /// Why the package manager would refuse, in its words; empty when it would go ahead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<String>,
 }
 
 impl RemovalPlan {
@@ -52,6 +115,7 @@ impl RemovalPlan {
             steps,
             blockers: Vec::new(),
             restart: false,
+            simulation: None,
         }
     }
 

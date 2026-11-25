@@ -13,6 +13,9 @@ const LABEL: usize = 12;
 /// How many packages `Needed by` names before it only counts the rest.
 const NEEDED_BY_SHOWN: usize = 10;
 
+/// How many other packages a simulation names before it only counts them (`--json` lists every one).
+const SIMULATED_SHOWN: usize = 10;
+
 /// The item, then one labelled line per thing known about it. `all_files` lists every file after the summary.
 pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::Result<()> {
     let package = &details.package;
@@ -171,7 +174,8 @@ fn shared(shared: &[Shared]) -> String {
     }
 }
 
-/// The plan's tier, then each step, then what stands in the way. Nothing is removed yet; this only says how.
+/// The plan's tier, each step, what the package manager says it takes, then what stands in the way. Nothing is
+/// removed yet; this only says how.
 fn removal(plan: &RemovalPlan) -> Vec<String> {
     let tier = match plan.tier {
         Tier::OwnUninstaller => "with its own uninstaller",
@@ -192,6 +196,25 @@ fn removal(plan: &RemovalPlan) -> Vec<String> {
             Action::Trash { path } => format!("move {} to the Trash", path.display()),
         };
         lines.push(format!("{by}: {what}"));
+    }
+    // A refusal is listed with the blockers; otherwise the item comes first and the rest is what goes with it.
+    if let Some(simulation) = plan.simulation.as_ref().filter(|s| s.refused.is_empty()) {
+        let others: Vec<&str> = simulation.removes.iter().skip(1).map(String::as_str).collect();
+        let text = if others.is_empty() {
+            format!("removes nothing else, says {}", simulation.by)
+        } else {
+            let mut names: Vec<&str> = others.iter().copied().take(SIMULATED_SHOWN).collect();
+            if others.len() > SIMULATED_SHOWN {
+                names.push("…");
+            }
+            format!(
+                "also removes {}: {}, says {}",
+                crate::count(others.len(), "package"),
+                names.join(", "),
+                simulation.by
+            )
+        };
+        lines.push(text);
     }
     if plan.restart {
         lines.push("takes effect after a restart".into());
@@ -218,7 +241,7 @@ fn command_line(argv: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use housekeeper_core::{Files, InstallReason, Scope, SourceId, SourceInfo, SourceKind};
+    use housekeeper_core::{Files, InstallReason, Scope, Simulation, SourceId, SourceInfo, SourceKind};
     use std::path::PathBuf;
 
     #[test]
@@ -253,14 +276,23 @@ mod tests {
                 size_bytes: 2_000_000,
             }),
             needed_by: Some(needed_by),
-            removal: Some(RemovalPlan::new(
-                Tier::PackageManager,
-                vec![housekeeper_core::Step::remove_packages(
-                    "apt",
-                    vec!["libc6:amd64".into()],
-                    ["apt-get", "remove", "--yes", "libc6:amd64"].map(String::from).to_vec(),
-                )],
-            )),
+            removal: Some(RemovalPlan {
+                simulation: Some(Simulation {
+                    by: "`apt-get --simulate remove`".into(),
+                    removes: std::iter::once("libc6:amd64".to_string())
+                        .chain((0..12).map(|i| format!("app{i}")))
+                        .collect(),
+                    refused: Vec::new(),
+                }),
+                ..RemovalPlan::new(
+                    Tier::PackageManager,
+                    vec![housekeeper_core::Step::remove_packages(
+                        "apt",
+                        vec!["libc6:amd64".into()],
+                        ["apt-get", "remove", "--yes", "libc6:amd64"].map(String::from).to_vec(),
+                    )],
+                )
+            }),
             warnings: Vec::new(),
         };
         let mut out = Vec::new();
@@ -289,6 +321,7 @@ Needed by:  app0 (dpkg:app0)
             … and 2 more (--json lists every one)
 Removal:    through its package manager
             as root, by Housekeeper's helper: apt-get remove --yes libc6:amd64
+            also removes 12 packages: app0, app1, app2, app3, app4, app5, app6, app7, app8, app9, …, says `apt-get --simulate remove`
 
 /usr/lib/libc.so.6
 /usr/share/doc/libc6

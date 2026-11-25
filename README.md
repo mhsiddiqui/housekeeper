@@ -171,8 +171,11 @@ Removal:    through its package manager
   package manager (apt, dnf, zypper, rpm-ostree or pacman for the system's packages; Flatpak, Snap, Homebrew, npm,
   pipx, uv, pip, cargo), its format's convention (an AppImage and the launchers that start it go to the Trash), or
   "not known" (hand installs). Each step says whether it would run as you or as root through Housekeeper's helper,
-  and what blocks it (a package of a Silverblue image, a system-wide npm install). Nothing is removed yet; that comes
-  with the helper.
+  and what blocks it (a package of a Silverblue image, a system-wide npm install). For system packages it also lists
+  what else would go: `apt-get --simulate remove` and `pacman --remove --print` answer on Debian, Ubuntu and Arch,
+  and on Fedora and openSUSE the RPM database names every package that needs it, directly or through others (dnf
+  and zypper remove those too, and their own simulation needs root). A refusal from the package manager, or a
+  protected package among what would go, blocks the removal. Nothing is removed yet; that comes with the helper.
 - **Protected** says why removing the item could break the system, and blocks its removal: dpkg's Essential and
   Protected marks and Priority required, dnf's protected packages (`/etc/dnf/protected.d`, `protected_packages` in
   `dnf.conf`), Arch's `base` metapackage and what it depends on, the C library, init system, shell, core commands and

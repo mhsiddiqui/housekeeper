@@ -12,6 +12,7 @@ mod kernel;
 mod owner;
 pub mod provider;
 mod python;
+mod rpmdb;
 pub mod sources;
 mod tools;
 mod xdg;

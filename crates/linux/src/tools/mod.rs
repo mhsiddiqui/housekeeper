@@ -4,7 +4,9 @@
 //! its `TOOL`. Each file must call `register_package_tool!(<Type>);` for its `impl LinuxTool for <Type>` (see
 //! [`crate::provider`]). Tools never import from each other; what they share is below.
 
-use housekeeper_core::{RemovalPlan, Step, Tier};
+use housekeeper_core::{Host, Package, RemovalPlan, Simulation, SourceError, Step, Tier};
+
+use crate::rpmdb::removal_closure;
 
 include!(concat!(env!("OUT_DIR"), "/tools.rs"));
 
@@ -15,4 +17,14 @@ pub(crate) fn removal(tool: &str, command: &[&str], package: &str) -> RemovalPla
         Tier::PackageManager,
         vec![Step::remove_packages(tool, vec![package.to_string()], argv)],
     )
+}
+
+/// What dnf and zypper would remove with `package`: it and every installed package that needs it, directly or through
+/// others, from the RPM database. Their own simulations need root on most releases (D33).
+pub(crate) fn rpm_simulation(host: &Host, package: &Package) -> Result<Simulation, SourceError> {
+    Ok(Simulation {
+        by: "the RPM database (what needs it, and what needs those)".to_string(),
+        removes: removal_closure(host, &package.id)?,
+        refused: Vec::new(),
+    })
 }

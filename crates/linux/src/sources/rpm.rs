@@ -14,6 +14,7 @@ use super::version_line;
 use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
 use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
+use crate::rpmdb::{ID_FORMAT, direct_dependants};
 
 pub const ID: SourceId = SourceId::new("rpm");
 
@@ -31,9 +32,6 @@ const PROTECTED_DIRS: [&str; 2] = ["/etc/dnf/protected.d", "/etc/yum/protected.d
 
 /// dnf's configuration, whose `protected_packages` can name packages too.
 const DNF_CONF: &str = "/etc/dnf/dnf.conf";
-
-/// The package that owns a path, in the inventory's id parts, for telling one of several kernels from the others.
-const OWNER_ID_FORMAT: &str = "%{NAME}\\t%{EPOCH}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}\\n";
 
 /// Packages whose removal leaves the system unbootable or unmanageable, whatever the distribution configured. Kernels
 /// are not listed: only the running one is protected, as dnf does, so older kernels can go.
@@ -180,16 +178,15 @@ impl Source for RpmSource {
         protect_running_kernel(host, scan, &mut packages, |images| {
             // rpm names owners by name alone, which several installed kernels share; ask for the exact install.
             let cmd = Cmd::new("rpm")
-                .args(["-qf", "--queryformat", OWNER_ID_FORMAT])
+                .args(["-qf", "--queryformat", ID_FORMAT])
                 .args(args(images));
-            let output = host.run(&cmd)?;
-            Ok(output
+            // "file … is not owned by any package" lines contain spaces; ids never do.
+            Ok(host
+                .run(&cmd)?
                 .stdout
                 .lines()
-                .filter_map(|line| match line.split('\t').collect::<Vec<_>>()[..] {
-                    [name, epoch, version, release, arch] => Some(nevra(name, epoch, version, release, arch).1),
-                    _ => None,
-                })
+                .filter(|line| !line.is_empty() && !line.contains(' '))
+                .map(str::to_string)
                 .collect())
         });
         Ok(packages)
@@ -224,45 +221,9 @@ impl FileList for RpmSource {
     }
 }
 
-/// The inventory's id (`name-[epoch:]version-release[.arch]`) of each package rpm lists.
-const ID_FORMAT: &str = "%{NAME}-%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}%|ARCH?{.%{ARCH}}|\\n";
-
 impl Dependants for RpmSource {
     fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
-        let provides = host.run_ok(&Cmd::new("rpm").args(["-q", "--provides", package.id.as_str()]))?;
-        let mut capabilities: Vec<&str> = provides
-            .lines()
-            .filter_map(|line| line.split_whitespace().next())
-            .collect();
-        capabilities.sort_unstable();
-        capabilities.dedup();
-        if capabilities.is_empty() {
-            return Ok(Vec::new());
-        }
-        // Limit: requirements on the package's files (`/bin/sh`) are not followed, only on what it provides.
-        let cmd = Cmd::new("rpm")
-            .args(["-q", "--whatrequires"])
-            .args(capabilities)
-            .args(["--queryformat", ID_FORMAT]);
-        let output = host.run(&cmd)?;
-        // rpm exits non-zero when some capability has no requirer; only a killed rpm is a failure.
-        if output.code.is_none() {
-            return Err(SourceError::CommandFailed {
-                command: cmd.to_string(),
-                code: output.code,
-                stderr: output.stderr.trim().to_string(),
-            });
-        }
-        // `no package requires <cap>` lines contain spaces; ids never do.
-        let mut ids: Vec<String> = output
-            .stdout
-            .lines()
-            .filter(|line| !line.is_empty() && !line.contains(' ') && *line != package.id)
-            .map(str::to_string)
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        Ok(ids)
+        Ok(direct_dependants(host, &[package.id.as_str()])?.into_iter().collect())
     }
 }
 
@@ -456,6 +417,7 @@ fn is_library(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rpmdb::OFFERS_FORMAT;
     use housekeeper_core::Output;
     use housekeeper_core::testing::{FakeRunner, Fixture};
 
@@ -656,8 +618,8 @@ vim-enhanced\t2\t9.1.825\t1.fc41\tx86_64\t4100000\t1731300100\tA version of the 
             .file("/proc/sys/kernel/osrelease", "6.11.8-300.fc41.x86_64\n")
             .file("/usr/lib/modules/6.11.8-300.fc41.x86_64/vmlinuz", "");
         let runner = FakeRunner::new().respond(
-            &format!("rpm -qf --queryformat {OWNER_ID_FORMAT} /usr/lib/modules/6.11.8-300.fc41.x86_64/vmlinuz"),
-            "kernel-core\t(none)\t6.11.8\t300.fc41\tx86_64\n",
+            &format!("rpm -qf --queryformat {ID_FORMAT} /usr/lib/modules/6.11.8-300.fc41.x86_64/vmlinuz"),
+            "kernel-core-6.11.8-300.fc41.x86_64\n",
         );
         let packages = scan(&fixture, runner, false);
         assert_eq!(
@@ -789,13 +751,15 @@ filesystem\t/usr/bin
     }
 
     #[test]
-    fn dependants_need_the_name_or_a_provided_capability() {
+    fn dependants_need_the_name_a_provided_capability_or_a_program() {
         let target = "glibc-2.40-9.fc41.x86_64";
-        let provides = "\
-config(glibc) = 2.40-9.fc41
-glibc = 2.40-9.fc41
-glibc(x86-64) = 2.40-9.fc41
+        let offers = "\
+config(glibc)
+glibc
+glibc(x86-64)
 libc.so.6()(64bit)
+/usr/lib64/libc.so.6
+/usr/sbin/ldconfig
 ";
         // The shape rpm prints: requirers per capability, in argument order, `no package requires` when none.
         let requirers = format!(
@@ -807,10 +771,11 @@ NetworkManager-1:1.50.0-1.fc41.x86_64\n\
 sudo-1.9.15-5.p5.fc41.x86_64\n"
         );
         let runner = FakeRunner::new()
-            .respond(&format!("rpm -q --provides {target}"), provides)
+            .respond(&format!("rpm -q --queryformat {OFFERS_FORMAT} {target}"), offers)
             .respond_with(
                 &format!(
-                    "rpm -q --whatrequires config(glibc) glibc glibc(x86-64) libc.so.6()(64bit) --queryformat {ID_FORMAT}"
+                    "rpm -q --whatrequires /usr/sbin/ldconfig config(glibc) glibc glibc(x86-64) libc.so.6()(64bit) \
+                     --queryformat {ID_FORMAT}"
                 ),
                 crate::owner::tests::exit(1, &requirers, ""),
             );
