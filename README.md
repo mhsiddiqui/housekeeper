@@ -69,6 +69,7 @@ housekeeper list                               # apps and commands someone insta
 housekeeper list --all                         # plus dependencies, libraries, runtimes, components and system packages
 housekeeper list --source flatpak --source snap  # only these sources (repeatable)
 housekeeper list --search godot                # name, title or summary contains this text
+housekeeper list --duplicates                  # apps installed more than once, grouped
 housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
 ```
@@ -113,6 +114,25 @@ Menu entries are the desktop entries in `applications/` under `$XDG_DATA_HOME` a
 your desktop's menu reads, so an entry a terminal session cannot see (Flatpak and Snap add their folders to
 `XDG_DATA_DIRS` at login) is missing from the list too.
 
+### Installed more than once
+`housekeeper list --duplicates` groups the apps installed more than once: from several sources (Sublime Merge as a
+`.deb` and as a snap), or twice from one (a tool installed with npm under two Node versions). The installs stay
+separate rows; `FROM` tells them apart:
+
+```text
+APP            NAME           VERSION  SOURCE  SIZE     FROM
+Sublime Merge  Sublime Merge  2136     dpkg    28.7 MB
+               Sublime Merge  2136     snap    82.4 MB  Snap Store, Snapcrafters (verified), latest/stable
+python-dotenv  python-dotenv  1.2.4    pip              pip, Python 3.14
+               python-dotenv  1.0.1    pip              pip, Python 3.8
+```
+
+Installs are grouped when they share an AppStream ID (from the app's catalog entry in `/usr/share/metainfo`, its
+Flatpak ID or its snap's `common-id`), a menu-entry ID, a name or title, or a command. Within one source only
+packages of the same name count as two installs, so `vim` and `vim-common` stay apart. A group shows when any of its
+installs passes the other filters, with all of its installs. The plain `list` says how many apps are installed
+more than once.
+
 ### Who installed this?
 `housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source
 and package it belongs to, with the evidence:
@@ -136,9 +156,11 @@ by hand or by a script, outside the folders Housekeeper reads), and 2 when there
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
 `state` `ok`, `unavailable` or `failed`, and any warnings), every package (`packages`: source, id, name, title,
 version, summary, kind (`app`, `runtime`, `library`, `component` or `unknown`), install reason, scope, size, install
-time, origin, location, commands, launchers with their id, name, icon, file and program, and icon) and problems that
-belong to no one source (`warnings`, left out when empty). The `schema` field is `1`; it changes when a field is
-removed or changes meaning. Filters apply to `packages` only.
+time, origin, location, commands, launchers with their id, name, icon, file and program, icon, and AppStream IDs as
+`app_ids`), the apps installed more than once (`groups`: name, the installs' `source:id` keys, and what they share)
+and problems that belong to no one source (`warnings`, left out when empty). The `schema` field is `1`; it changes
+when a field is removed or changes meaning. Filters apply to `packages` only, except with `--duplicates`, which keeps
+the groups it shows and their installs.
 
 ### When a source is missing or fails
 - **not available** in `housekeeper sources` means the tool is not on this machine (or, for Snap, snapd is not

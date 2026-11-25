@@ -14,6 +14,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   get their launchers, a title and an icon from them (`Visual Studio Code` for the `code` package). In `--json`:
   `launchers` and `icon` on each package, `warnings` for problems reading the menu.
 - Packages from dpkg, rpm and pacman now list the commands they put on the `PATH`.
+- `housekeeper list --duplicates`: apps installed more than once, from several sources (a `.deb` and a snap) or twice
+  from one (npm under two Node versions), grouped by a shared AppStream ID, menu-entry ID, name or command, with a
+  `FROM` column that tells the copies apart. The plain `list` says how many there are. In `--json`: `groups`, and
+  `app_ids` on each package (from AppStream metainfo, Flatpak IDs and snaps' `common-id`).
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
