@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use housekeeper_core::{
-    Availability, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    Availability, Dependants, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
@@ -29,7 +29,7 @@ register!(SnapSource);
 
 impl Source for SnapSource {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new("snap", "Snap", SourceKind::Universal)
+        SourceInfo::new("snap", "Snap", SourceKind::Universal).evidence("snapd's API (`/v2/snaps`)")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -50,6 +50,39 @@ impl Source for SnapSource {
         let snaps: Vec<Snap> = get(&host.real_path(SOCKET), "/v2/snaps")?;
         Ok(snaps.into_iter().map(Snap::into_package).collect())
     }
+
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        Some(self)
+    }
+}
+
+impl Dependants for SnapSource {
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        let socket = host.real_path(SOCKET);
+        let snaps: Vec<Snap> = get(&socket, "/v2/snaps")?;
+        let connections: Connections = get(&socket, "/v2/connections")?;
+        Ok(dependants_of(&package.name, &snaps, &connections))
+    }
+}
+
+/// The snaps that run on `target` as their base, or plug into a `content` slot it offers (GNOME/KDE runtimes,
+/// themes), sorted and without `target`.
+fn dependants_of(target: &str, snaps: &[Snap], connections: &Connections) -> Vec<String> {
+    let on_base = snaps.iter().filter(|snap| match snap.base.as_deref() {
+        Some(base) => base == target,
+        // App snaps that name no base run on `core`.
+        None => snap.snap_type == "app" && target == "core",
+    });
+    let plugged = connections
+        .established
+        .iter()
+        .filter(|connection| connection.interface == "content" && connection.slot.snap == target)
+        .map(|connection| connection.plug.snap.clone());
+    let mut names: Vec<String> = on_base.map(|snap| snap.name.clone()).chain(plugged).collect();
+    names.retain(|name| name != target);
+    names.sort();
+    names.dedup();
+    names
 }
 
 #[derive(Deserialize)]
@@ -81,6 +114,8 @@ struct Snap {
     publisher: Option<Publisher>,
     #[serde(default)]
     apps: Vec<App>,
+    /// The base snap this snap runs on; absent for bases, snapd and app snaps on the original `core`.
+    base: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +131,26 @@ struct App {
     /// The app's AppStream ID, when the snap declares one.
     #[serde(rename = "common-id")]
     common_id: Option<String>,
+}
+
+/// The `result` of `GET /v2/connections`: by default only the established connections are of interest.
+#[derive(Deserialize)]
+struct Connections {
+    #[serde(default)]
+    established: Vec<Connection>,
+}
+
+#[derive(Deserialize)]
+struct Connection {
+    interface: String,
+    slot: SnapRef,
+    plug: SnapRef,
+}
+
+/// The snap end of a plug or slot.
+#[derive(Deserialize)]
+struct SnapRef {
+    snap: String,
 }
 
 impl Snap {
@@ -236,7 +291,7 @@ mod tests {
     const SNAPS: &str = r#"{"type":"sync","status-code":200,"status":"OK","result":[
 {"name":"firefox","title":"firefox","summary":"Mozilla Firefox web browser","version":"159.0.1-1","revision":"9171",
  "channel":"latest/stable","tracking-channel":"latest/stable/ubuntu-24.04","installed-size":298881024,
- "install-date":"2026-11-09T11:47:23.930407791+05:00","type":"app",
+ "install-date":"2026-11-09T11:47:23.930407791+05:00","type":"app","base":"core24",
  "publisher":{"id":"OgeoZuqQpVvSr9eGKJzNCrFGSaKXpkey","username":"mozilla","display-name":"Mozilla","validation":"verified"},
  "apps":[{"snap":"firefox","name":"firefox","common-id":"org.mozilla.firefox"},{"snap":"firefox","name":"geckodriver"}],"confinement":"strict"},
 {"name":"core24","title":"Core 24 base snap","summary":"Snap runtime environment","version":"20260824","type":"base",
@@ -249,6 +304,15 @@ mod tests {
 {"name":"hello-world","summary":"","version":"6.4","type":"app","apps":[{"name":"hello-world"},{"name":"evil"}],
  "publisher":{"display-name":"Canonical Ltd.","validation":"unproven"},"tracking-channel":"latest/edge"}
 ]}"#;
+
+    const CONNECTIONS: &str = r#"{"type":"sync","status-code":200,"status":"OK","result":{"established":[
+{"slot":{"snap":"gtk-common-themes","slot":"gtk-3-themes"},"plug":{"snap":"firefox","plug":"gtk-3-themes"},
+ "interface":"content","plug-attrs":{"content":"gtk-3-themes","default-provider":"gtk-common-themes",
+ "target":"$SNAP/data-dir/themes"},"slot-attrs":{"content":"gtk-3-themes","source":{"read":["$SNAP/share/themes/Yaru"]}}},
+{"slot":{"snap":"snapd","slot":"network"},"plug":{"snap":"firefox","plug":"network"},"interface":"network"},
+{"slot":{"snap":"gtk-common-themes","slot":"icon-themes"},"plug":{"snap":"gtk-common-themes","plug":"icon-themes"},
+ "interface":"content"}
+],"plugs":[],"slots":[]}}"#;
 
     /// Serves one canned HTTP response on the fixture's snapd socket.
     fn serve(fixture: &Fixture, response: String) -> thread::JoinHandle<String> {
@@ -366,6 +430,26 @@ mod tests {
             }
         );
         assert!(server.join().unwrap().starts_with("GET /v2/system-info "));
+    }
+
+    #[test]
+    fn dependants_run_on_the_base_or_plug_into_its_content() {
+        let snaps: Envelope<Vec<Snap>> = serde_json::from_str(SNAPS).unwrap();
+        let connections: Envelope<Connections> = serde_json::from_str(CONNECTIONS).unwrap();
+        let dependants = |target: &str| dependants_of(target, &snaps.result, &connections.result);
+        assert_eq!(dependants("core24"), ["firefox"]);
+        assert_eq!(
+            dependants("gtk-common-themes"),
+            ["firefox"],
+            "a snap is not its own dependant"
+        );
+        assert_eq!(
+            dependants("core"),
+            ["gtk-common-themes", "hello-world"],
+            "no base means core"
+        );
+        assert!(dependants("snapd").is_empty(), "only content connections count");
+        assert!(dependants("firefox").is_empty());
     }
 
     #[test]

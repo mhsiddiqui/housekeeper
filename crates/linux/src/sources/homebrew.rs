@@ -34,6 +34,7 @@ register!(HomebrewSource);
 impl Source for HomebrewSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("homebrew", "Homebrew", SourceKind::Universal)
+            .evidence("Homebrew's install receipts in its Cellar and Caskroom")
     }
 
     fn probe(&self, host: &Host) -> Availability {

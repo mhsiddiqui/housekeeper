@@ -10,6 +10,7 @@ pub mod inventory;
 pub mod model;
 mod ownership;
 pub mod platform;
+pub mod show;
 pub mod source;
 #[cfg(test)]
 mod stub;
@@ -27,5 +28,6 @@ pub use model::{
     SystemInfo,
 };
 pub use platform::{Platform, path_dirs};
-pub use source::{OwnerLookup, ScanContext, Source, SourceError};
+pub use show::{Details, Files, FilesFrom, Lookup};
+pub use source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 pub use who::{Evidence, Found, Owner, Who};

@@ -50,6 +50,9 @@ pub struct SourceInfo {
     /// Human-readable name, e.g. "Debian packages".
     pub label: Cow<'static, str>,
     pub kind: SourceKind,
+    /// How the source knows what is installed, for people: "dpkg's database, through `dpkg-query --show`".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<Cow<'static, str>>,
 }
 
 impl SourceInfo {
@@ -58,7 +61,14 @@ impl SourceInfo {
             id: SourceId::new(id),
             label: Cow::Borrowed(label),
             kind,
+            evidence: None,
         }
+    }
+
+    /// Says how the source knows what is installed.
+    pub fn evidence(mut self, evidence: &'static str) -> Self {
+        self.evidence = Some(Cow::Borrowed(evidence));
+        self
     }
 }
 

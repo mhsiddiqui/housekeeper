@@ -59,24 +59,23 @@ fn describe(owner: &Owner, name: &str) -> String {
         text.push(' ');
         text.push_str(version);
     }
-    let details: Vec<&str> = reason(package)
-        .into_iter()
-        .chain(std::iter::once(match package.scope {
-            Scope::System => "for all users",
-            Scope::User => "for this user",
-        }))
-        .collect();
-    text.push_str(&format!(" ({})", details.join(", ")));
+    text.push_str(&format!(" ({})", circumstances(package)));
     text
 }
 
-fn reason(package: &Package) -> Option<&'static str> {
-    match package.reason {
+/// Why and for whom it is installed: `installed on purpose, for all users`.
+pub fn circumstances(package: &Package) -> String {
+    let reason = match package.reason {
         InstallReason::Explicit => Some("installed on purpose"),
         InstallReason::Dependency => Some("installed as a dependency"),
         InstallReason::System => Some("part of the system"),
         InstallReason::Unknown => None,
-    }
+    };
+    let scope = match package.scope {
+        Scope::System => "for all users",
+        Scope::User => "for this user",
+    };
+    reason.into_iter().chain([scope]).collect::<Vec<_>>().join(", ")
 }
 
 fn because(owner: &Owner) -> String {

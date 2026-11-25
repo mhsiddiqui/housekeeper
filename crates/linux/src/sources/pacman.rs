@@ -1,11 +1,11 @@
 //! Arch packages (Arch, Manjaro, EndeavourOS…), read from pacman's local database files.
 
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
+    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::owner::{OwnerQuery, args};
@@ -74,6 +74,7 @@ register!(PacmanSource);
 impl Source for PacmanSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("pacman", "Arch packages", SourceKind::System)
+            .evidence("pacman's local database (`local/` under its `DBPath`)")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -88,7 +89,7 @@ impl Source for PacmanSource {
     }
 
     fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
-        let local = db_path(host.read_optional(PACMAN_CONF)?.as_deref()).join("local");
+        let local = local_db(host)?;
         // Exits 1 when there are no foreign packages; either way, origins are optional.
         let foreign: HashSet<String> = host
             .run_ok(&Cmd::new("pacman").arg("-Qmq"))
@@ -101,18 +102,8 @@ impl Source for PacmanSource {
             })
             .unwrap_or_default();
         let mut packages = Vec::new();
-        for entry in host.read_dir(&local)? {
-            // `ALPM_DB_VERSION` is a plain file next to the package directories.
-            if !host.is_dir(&entry.path) {
-                continue;
-            }
-            let desc_path = entry.path.join("desc");
-            let desc = host
-                .read_optional(&desc_path)?
-                .ok_or_else(|| SourceError::parse("pacman database", format!("{} is missing", desc_path.display())))?;
-            packages.push(parse_desc(&desc, &foreign).map_err(|detail| {
-                SourceError::parse(format!("pacman database entry {}", desc_path.display()), detail)
-            })?);
+        for (desc_path, desc) in local_descs(host, &local)? {
+            packages.push(parse_desc(&desc, &foreign).map_err(|detail| entry_error(&desc_path, detail))?);
         }
         Ok(packages)
     }
@@ -120,6 +111,122 @@ impl Source for PacmanSource {
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
     }
+
+    fn file_list(&self) -> Option<&dyn FileList> {
+        Some(self)
+    }
+
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        Some(self)
+    }
+}
+
+impl FileList for PacmanSource {
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        let version = package
+            .version
+            .as_deref()
+            .ok_or_else(|| SourceError::parse("pacman database", format!("{} has no version", package.id)))?;
+        // Entries are `<name>-<version>` directories; the inventory's id is the name.
+        let files_path = local_db(host)?
+            .join(format!("{}-{version}", package.name))
+            .join("files");
+        let text = host
+            .read_optional(&files_path)?
+            .ok_or_else(|| SourceError::parse("pacman database", format!("{} is missing", files_path.display())))?;
+        let sections = sections(&text).map_err(|detail| entry_error(&files_path, detail))?;
+        Ok(sections
+            .into_iter()
+            .filter(|(name, _)| *name == "FILES")
+            .flat_map(|(_, values)| values)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(|path| PathBuf::from(format!("/{}", path.trim_end_matches('/'))))
+            .collect())
+    }
+}
+
+impl Dependants for PacmanSource {
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        let mut entries = Vec::new();
+        for (desc_path, desc) in local_descs(host, &local_db(host)?)? {
+            entries.push(relations(&desc).map_err(|detail| entry_error(&desc_path, detail))?);
+        }
+        let mut targets: HashSet<&str> = HashSet::from([package.name.as_str()]);
+        if let Some(target) = entries.iter().find(|entry| entry.name == package.name) {
+            targets.extend(target.provides.iter().map(String::as_str));
+        }
+        let found: BTreeSet<&str> = entries
+            .iter()
+            .filter(|entry| entry.name != package.name)
+            .filter(|entry| entry.depends.iter().any(|dep| targets.contains(dep.as_str())))
+            .map(|entry| entry.name.as_str())
+            .collect();
+        Ok(found.into_iter().map(str::to_string).collect())
+    }
+}
+
+/// The `local/` directory of pacman's database.
+fn local_db(host: &Host) -> Result<PathBuf, SourceError> {
+    Ok(db_path(host.read_optional(PACMAN_CONF)?.as_deref()).join("local"))
+}
+
+/// Every entry's `desc` path and text.
+fn local_descs(host: &Host, local: &Path) -> Result<Vec<(PathBuf, String)>, SourceError> {
+    let mut descs = Vec::new();
+    for entry in host.read_dir(local)? {
+        // `ALPM_DB_VERSION` is a plain file next to the package directories.
+        if !host.is_dir(&entry.path) {
+            continue;
+        }
+        let desc_path = entry.path.join("desc");
+        let desc = host
+            .read_optional(&desc_path)?
+            .ok_or_else(|| SourceError::parse("pacman database", format!("{} is missing", desc_path.display())))?;
+        descs.push((desc_path, desc));
+    }
+    Ok(descs)
+}
+
+fn entry_error(path: &Path, detail: String) -> SourceError {
+    SourceError::parse(format!("pacman database entry {}", path.display()), detail)
+}
+
+/// A package's name and the names in its `%PROVIDES%` and `%DEPENDS%`, without versions or descriptions.
+struct Relations {
+    name: String,
+    provides: Vec<String>,
+    depends: Vec<String>,
+}
+
+fn relations(desc: &str) -> Result<Relations, String> {
+    let (mut name, mut provides, mut depends) = (None, Vec::new(), Vec::new());
+    for (section, values) in sections(desc)? {
+        let names = || {
+            values
+                .iter()
+                .map(|v| bare_name(v))
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        };
+        match section {
+            "NAME" => name = values.first().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
+            "PROVIDES" => provides.extend(names()),
+            "DEPENDS" => depends.extend(names()),
+            _ => {}
+        }
+    }
+    Ok(Relations {
+        name: name.ok_or("no %NAME%")?,
+        provides,
+        depends,
+    })
+}
+
+/// `libfoo.so=1-64`, `python>=3.12` or `foo: why` → the bare name.
+fn bare_name(entry: &str) -> &str {
+    let entry = entry.split_once(':').map_or(entry, |(name, _)| name);
+    entry.split(['<', '>', '=']).next().unwrap_or_default().trim()
 }
 
 impl OwnerLookup for PacmanSource {
@@ -173,11 +280,10 @@ fn db_path(conf: Option<&str>) -> PathBuf {
     PathBuf::from(DEFAULT_DB_PATH)
 }
 
-/// One `desc` file: `%SECTION%` headers, each followed by value lines up to a blank line.
-fn parse_desc(desc: &str, foreign: &HashSet<String>) -> Result<Package, String> {
-    let (mut name, mut version, mut summary, mut size, mut installed_at, mut reason) =
-        (None, None, None, None, None, InstallReason::Explicit);
-    let mut lines = desc.lines();
+/// `%SECTION%` headers, each followed by value lines up to a blank line.
+fn sections(text: &str) -> Result<Vec<(&str, Vec<&str>)>, String> {
+    let mut sections = Vec::new();
+    let mut lines = text.lines();
     while let Some(header) = lines.next() {
         let header = header.trim();
         if header.is_empty() {
@@ -187,8 +293,18 @@ fn parse_desc(desc: &str, foreign: &HashSet<String>) -> Result<Package, String> 
             return Err(format!("expected a %SECTION% header, found {header:?}"));
         }
         let value: Vec<&str> = lines.by_ref().take_while(|line| !line.is_empty()).collect();
+        sections.push((&header[1..header.len() - 1], value));
+    }
+    Ok(sections)
+}
+
+/// One `desc` file.
+fn parse_desc(desc: &str, foreign: &HashSet<String>) -> Result<Package, String> {
+    let (mut name, mut version, mut summary, mut size, mut installed_at, mut reason) =
+        (None, None, None, None, None, InstallReason::Explicit);
+    for (section, value) in sections(desc)? {
         let first = value.first().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        match &header[1..header.len() - 1] {
+        match section {
             "NAME" => name = first,
             "VERSION" => version = first,
             "DESC" => summary = first,
@@ -478,5 +594,48 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
                 owned("/usr/local/bin/tool", &["tool-git"]),
             ]
         );
+    }
+
+    #[test]
+    fn files_are_absolute_without_directory_slashes() {
+        let fixture = Fixture::new();
+        database(&fixture, DEFAULT_DB_PATH);
+        fixture.file(
+            "/var/lib/pacman/local/lib32-mesa-1:24.2.7-1/files",
+            "%FILES%\nusr/\nusr/lib32/\nusr/lib32/libGL.so.1\n\n%BACKUP%\netc/drirc\tabc\n",
+        );
+        let packages = scan(&fixture);
+        let host = fixture.host(FakeRunner::new());
+        let files = PacmanSource.files(&host, find(&packages, "lib32-mesa")).unwrap();
+        let expected = ["/usr", "/usr/lib32", "/usr/lib32/libGL.so.1"].map(PathBuf::from);
+        assert_eq!(files, expected);
+    }
+
+    #[test]
+    fn dependants_through_name_and_provides_but_not_optdepends() {
+        let fixture = Fixture::new();
+        database(&fixture, DEFAULT_DB_PATH);
+        let local = "/var/lib/pacman/local";
+        fixture.file(
+            &format!("{local}/gtk3-1:3.24.43-4/desc"),
+            "%NAME%\ngtk3\n\n%VERSION%\n1:3.24.43-4\n\n%PROVIDES%\ngtk3-print-backends\nlibgtk-3.so=0-64\n\n\
+             %DEPENDS%\nglibc\n",
+        );
+        fixture.file(
+            &format!("{local}/zenity-4.0.2-1/desc"),
+            "%NAME%\nzenity\n\n%VERSION%\n4.0.2-1\n\n%DEPENDS%\ngtk3>=3.24\n",
+        );
+        fixture.file(
+            &format!("{local}/gimp-2.10.38-1/desc"),
+            "%NAME%\ngimp\n\n%VERSION%\n2.10.38-1\n\n%DEPENDS%\nlibgtk-3.so=0-64\n",
+        );
+        fixture.file(
+            &format!("{local}/vlc-3.0.21-1/desc"),
+            "%NAME%\nvlc\n\n%VERSION%\n3.0.21-1\n\n%OPTDEPENDS%\ngtk3: dialogs\n",
+        );
+        let packages = scan(&fixture);
+        let host = fixture.host(FakeRunner::new());
+        let dependants = PacmanSource.dependants(&host, find(&packages, "gtk3")).unwrap();
+        assert_eq!(dependants, ["firefox", "gimp", "zenity"]);
     }
 }

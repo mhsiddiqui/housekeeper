@@ -1,10 +1,10 @@
 //! Python packages installed with `pip install --user`, read from their `.dist-info` directories (PEP 376, PEP 566).
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Availability, FileList, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source,
+    SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::provider::{Context, LinuxSource, register};
@@ -24,6 +24,7 @@ register!(PipUserSource);
 impl Source for PipUserSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("pip", "pip (user)", SourceKind::Language)
+            .evidence("its `.dist-info` folder in the user site-packages")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -47,6 +48,67 @@ impl Source for PipUserSource {
         }
         Ok(packages)
     }
+
+    fn file_list(&self) -> Option<&dyn FileList> {
+        Some(self)
+    }
+}
+
+/// The paths in the package's `RECORD` (PEP 376), or the `.dist-info` directory alone when it has none.
+impl FileList for PipUserSource {
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        let Some(dist_info) = &package.location else {
+            return Ok(Vec::new());
+        };
+        let Some(record) = host.read_optional(dist_info.join("RECORD"))? else {
+            return Ok(vec![dist_info.clone()]);
+        };
+        let site = dist_info.parent().unwrap_or(dist_info);
+        Ok(record
+            .lines()
+            .filter_map(record_path)
+            .map(|path| resolve(site, &path))
+            .collect())
+    }
+}
+
+/// The path field of a `RECORD` line: CSV, with a path containing a comma double-quoted and `""` for a quote.
+fn record_path(line: &str) -> Option<String> {
+    let Some(quoted) = line.strip_prefix('"') else {
+        return line
+            .split(',')
+            .next()
+            .filter(|path| !path.is_empty())
+            .map(str::to_string);
+    };
+    let mut path = String::new();
+    let mut chars = quoted.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '"' {
+            path.push(c);
+        } else if chars.peek() == Some(&'"') {
+            chars.next();
+            path.push('"');
+        } else {
+            return Some(path).filter(|path| !path.is_empty());
+        }
+    }
+    None
+}
+
+/// `relative` joined onto `base` with `.` and `..` resolved logically, without touching the file system.
+fn resolve(base: &Path, relative: &str) -> PathBuf {
+    let mut path = PathBuf::new();
+    for component in base.join(relative).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                path.pop();
+            }
+            other => path.push(other),
+        }
+    }
+    path
 }
 
 /// `$PYTHONUSERBASE`, defaulting to `~/.local`.
@@ -268,5 +330,43 @@ cov = pytest_cov.plugin
             PipUserSource.probe(&fixture.host(FakeRunner::new())),
             Availability::Available { version: None }
         );
+    }
+
+    #[test]
+    fn files_come_from_record_relative_to_site_packages() {
+        let fixture = fixture();
+        fixture.file(
+            &format!("{SITE_312}/Mako-1.3.10.dist-info/RECORD"),
+            "\
+mako/__init__.py,sha256=abc,242
+\"mako/odd,name.py\",sha256=def,12
+\"mako/say \"\"hi\"\".txt\",,
+../../../bin/mako-render,sha256=ghi,220
+./mako/../Mako-1.3.10.dist-info/RECORD,,
+",
+        );
+        let host = fixture.host(FakeRunner::new());
+        let packages = PipUserSource.inventory(&host, &ScanContext::default()).unwrap();
+        let files = PipUserSource.files(&host, find(&packages, "python3.12/Mako")).unwrap();
+        let expected: Vec<PathBuf> = ["mako/__init__.py", "mako/odd,name.py", "mako/say \"hi\".txt"]
+            .iter()
+            .map(|path| Path::new(SITE_312).join(path))
+            .chain([
+                PathBuf::from("/home/user/.local/bin/mako-render"),
+                Path::new(SITE_312).join("Mako-1.3.10.dist-info/RECORD"),
+            ])
+            .collect();
+        assert_eq!(files, expected);
+    }
+
+    #[test]
+    fn files_without_record_are_the_dist_info_directory() {
+        let fixture = fixture();
+        let host = fixture.host(FakeRunner::new());
+        let packages = PipUserSource.inventory(&host, &ScanContext::default()).unwrap();
+        let files = PipUserSource
+            .files(&host, find(&packages, "python3.11/coverage"))
+            .unwrap();
+        assert_eq!(files, [Path::new(SITE_311).join("coverage-7.14.0.dist-info")]);
     }
 }

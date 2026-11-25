@@ -94,7 +94,7 @@ fn installs_of_one_app(a: &Package, b: &Package) -> bool {
 }
 
 /// What identifies an app across sources.
-fn keys(package: &Package) -> BTreeSet<Shared> {
+pub(crate) fn keys(package: &Package) -> BTreeSet<Shared> {
     let mut keys = BTreeSet::new();
     let ids = package
         .app_ids

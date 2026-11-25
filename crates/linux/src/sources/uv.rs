@@ -25,7 +25,7 @@ register!(UvToolSource);
 
 impl Source for UvToolSource {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new("uv", "uv tools", SourceKind::Language)
+        SourceInfo::new("uv", "uv tools", SourceKind::Language).evidence("its `uv-receipt.toml`")
     }
 
     fn probe(&self, host: &Host) -> Availability {

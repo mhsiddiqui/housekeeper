@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
+    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
@@ -120,6 +120,7 @@ impl RpmSource {
 impl Source for RpmSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("rpm", "RPM packages", SourceKind::System)
+            .evidence("the RPM database, through `rpm -qa` (and `rpm-ostree status` on image-based systems)")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -151,6 +152,68 @@ impl Source for RpmSource {
 
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
+    }
+
+    fn file_list(&self) -> Option<&dyn FileList> {
+        Some(self)
+    }
+
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        Some(self)
+    }
+}
+
+impl FileList for RpmSource {
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("rpm").args(["-ql", package.id.as_str()]))?;
+        // Empty packages print `(contains no files)`.
+        Ok(listing
+            .lines()
+            .filter(|line| line.starts_with('/'))
+            .map(PathBuf::from)
+            .collect())
+    }
+}
+
+/// The inventory's id (`name-[epoch:]version-release[.arch]`) of each package rpm lists.
+const ID_FORMAT: &str = "%{NAME}-%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}%|ARCH?{.%{ARCH}}|\\n";
+
+impl Dependants for RpmSource {
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        let provides = host.run_ok(&Cmd::new("rpm").args(["-q", "--provides", package.id.as_str()]))?;
+        let mut capabilities: Vec<&str> = provides
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .collect();
+        capabilities.sort_unstable();
+        capabilities.dedup();
+        if capabilities.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Limit: requirements on the package's files (`/bin/sh`) are not followed, only on what it provides.
+        let cmd = Cmd::new("rpm")
+            .args(["-q", "--whatrequires"])
+            .args(capabilities)
+            .args(["--queryformat", ID_FORMAT]);
+        let output = host.run(&cmd)?;
+        // rpm exits non-zero when some capability has no requirer; only a killed rpm is a failure.
+        if output.code.is_none() {
+            return Err(SourceError::CommandFailed {
+                command: cmd.to_string(),
+                code: output.code,
+                stderr: output.stderr.trim().to_string(),
+            });
+        }
+        // `no package requires <cap>` lines contain spaces; ids never do.
+        let mut ids: Vec<String> = output
+            .stdout
+            .lines()
+            .filter(|line| !line.is_empty() && !line.contains(' ') && *line != package.id)
+            .map(str::to_string)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        Ok(ids)
     }
 }
 
@@ -580,6 +643,71 @@ filesystem\t/usr/bin
         assert_eq!(
             sorted(owners),
             [owned("/usr/bin/bash", &["bash"]), owned("/usr/bin/ls", &["coreutils"])]
+        );
+    }
+
+    fn installed(id: &str, name: &str) -> Package {
+        Package::new(ID, id, name, Scope::System)
+    }
+
+    #[test]
+    fn files_skip_the_empty_package_marker() {
+        let runner = FakeRunner::new()
+            .respond(
+                "rpm -ql sudo-1.9.15-5.p5.fc41.x86_64",
+                "/etc/sudoers\n/usr/bin/sudo\n/usr/share/doc/sudo\n",
+            )
+            .respond("rpm -ql fedora-release-common-41-27.noarch", "(contains no files)\n");
+        let host = Fixture::new().host(runner);
+        let source = RpmSource::new(false);
+        let sudo = installed("sudo-1.9.15-5.p5.fc41.x86_64", "sudo");
+        assert_eq!(
+            source.files(&host, &sudo).unwrap(),
+            [
+                PathBuf::from("/etc/sudoers"),
+                PathBuf::from("/usr/bin/sudo"),
+                PathBuf::from("/usr/share/doc/sudo")
+            ]
+        );
+        let empty = installed("fedora-release-common-41-27.noarch", "fedora-release-common");
+        assert!(source.files(&host, &empty).unwrap().is_empty());
+    }
+
+    #[test]
+    fn dependants_need_the_name_or_a_provided_capability() {
+        let target = "glibc-2.40-9.fc41.x86_64";
+        let provides = "\
+config(glibc) = 2.40-9.fc41
+glibc = 2.40-9.fc41
+glibc(x86-64) = 2.40-9.fc41
+libc.so.6()(64bit)
+";
+        // The shape rpm prints: requirers per capability, in argument order, `no package requires` when none.
+        let requirers = format!(
+            "{target}\n\
+NetworkManager-1:1.50.0-1.fc41.x86_64\n\
+glibc-langpack-en-2.40-9.fc41.x86_64\n\
+no package requires glibc(x86-64)\n\
+NetworkManager-1:1.50.0-1.fc41.x86_64\n\
+sudo-1.9.15-5.p5.fc41.x86_64\n"
+        );
+        let runner = FakeRunner::new()
+            .respond(&format!("rpm -q --provides {target}"), provides)
+            .respond_with(
+                &format!(
+                    "rpm -q --whatrequires config(glibc) glibc glibc(x86-64) libc.so.6()(64bit) --queryformat {ID_FORMAT}"
+                ),
+                crate::owner::tests::exit(1, &requirers, ""),
+            );
+        let host = Fixture::new().host(runner);
+        let ids = Dependants::dependants(&RpmSource::new(false), &host, &installed(target, "glibc")).unwrap();
+        assert_eq!(
+            ids,
+            [
+                "NetworkManager-1:1.50.0-1.fc41.x86_64",
+                "glibc-langpack-en-2.40-9.fc41.x86_64",
+                "sudo-1.9.15-5.p5.fc41.x86_64"
+            ]
         );
     }
 }

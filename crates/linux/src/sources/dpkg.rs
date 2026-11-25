@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
+    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
@@ -17,6 +17,10 @@ pub const ID: SourceId = SourceId::new("dpkg");
 /// One line per package, tab-separated. `\t` and `\n` are expanded by dpkg-query itself.
 const FORMAT: &str = "--showformat=${binary:Package}\\t${Package}\\t${Architecture}\\t${Version}\\t${db:Status-Abbrev}\\t\
 ${Installed-Size}\\t${Section}\\t${Priority}\\t${Essential}\\t${binary:Summary}\\n";
+
+/// Per package: id, name, status, and the relations that make it need other packages, tab-separated.
+const RELATIONS_FORMAT: &str =
+    "--showformat=${binary:Package}\\t${Package}\\t${db:Status-Abbrev}\\t${Provides}\\t${Depends}\\t${Pre-Depends}\\n";
 
 /// Packages apt marked as installed automatically (as dependencies).
 const APT_EXTENDED_STATES: &str = "/var/lib/apt/extended_states";
@@ -55,6 +59,7 @@ register!(DpkgSource);
 impl Source for DpkgSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("dpkg", "Debian packages", SourceKind::System)
+            .evidence("dpkg's database, through `dpkg-query --show`")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -82,6 +87,91 @@ impl Source for DpkgSource {
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         Some(self)
     }
+
+    fn file_list(&self) -> Option<&dyn FileList> {
+        Some(self)
+    }
+
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        Some(self)
+    }
+}
+
+impl FileList for DpkgSource {
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        let stdout = host.run_ok(&Cmd::new("dpkg-query").args(["--listfiles", package.id.as_str()]))?;
+        Ok(listed_files(&stdout))
+    }
+}
+
+impl Dependants for DpkgSource {
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        let listing = host.run_ok(&Cmd::new("dpkg-query").args(["--show", RELATIONS_FORMAT]))?;
+        dependants_of(&listing, package)
+    }
+}
+
+/// Every absolute path dpkg lists, without the `/.` root entry and the diversion notes (`diverted by …`,
+/// `package diverts others to: …`, `locally diverted to: …`), which don't start with `/`.
+fn listed_files(stdout: &str) -> Vec<PathBuf> {
+    stdout
+        .lines()
+        .filter(|line| line.starts_with('/') && *line != "/.")
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Second letter of the abbreviated status: n = not installed, c = only config files left.
+fn is_installed(status: &str) -> bool {
+    !matches!(status.chars().nth(1), Some('n' | 'c') | None)
+}
+
+/// The package name a relation atom names: `libc6:any (>= 2.34) [amd64] <!nocheck>` → `libc6`.
+fn atom_name(atom: &str) -> &str {
+    let name = atom
+        .trim()
+        .split(|c: char| c.is_whitespace() || matches!(c, '(' | '[' | '<'))
+        .next()
+        .unwrap_or_default();
+    name.split(':').next().unwrap_or_default()
+}
+
+/// Every package name in a comma-separated relation field, alternatives (`a | b`) included.
+fn relation_names(field: &str) -> impl Iterator<Item = &str> {
+    field.split([',', '|']).map(atom_name).filter(|name| !name.is_empty())
+}
+
+fn dependants_of(listing: &str, target: &Package) -> Result<Vec<String>, SourceError> {
+    let mut rows = Vec::new();
+    for line in listing.lines().filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [id, _name, status, provides, depends, pre_depends] = fields[..] else {
+            return Err(SourceError::parse(
+                "dpkg-query output",
+                format!("expected 6 fields: {line:?}"),
+            ));
+        };
+        if is_installed(status) {
+            rows.push((id, provides, depends, pre_depends));
+        }
+    }
+    let mut names: HashSet<&str> = HashSet::from([target.name.as_str()]);
+    if let Some((_, provides, _, _)) = rows.iter().find(|(id, ..)| *id == target.id) {
+        names.extend(relation_names(provides));
+    }
+    let mut found: Vec<String> = rows
+        .iter()
+        .filter(|(id, ..)| *id != target.id)
+        .filter(|(_, _, depends, pre_depends)| {
+            relation_names(depends)
+                .chain(relation_names(pre_depends))
+                .any(|name| names.contains(name))
+        })
+        .map(|(id, ..)| id.to_string())
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found)
 }
 
 impl OwnerLookup for DpkgSource {
@@ -165,8 +255,7 @@ fn parse_listing(listing: &str, auto: &HashSet<(String, String)>) -> Result<Vec<
                 format!("expected 10 fields: {line:?}"),
             ));
         };
-        // Second letter of the abbreviated status: n = not installed, c = only config files left.
-        if matches!(status.chars().nth(1), Some('n' | 'c') | None) {
+        if !is_installed(status) {
             continue;
         }
         let mut package = Package::new(ID, id, name, Scope::System);
@@ -351,6 +440,74 @@ Auto-Installed: 0
                 DpkgSource.owners(&host, &paths(&["/opt/x"])),
                 Err(SourceError::CommandFailed { code: Some(2), .. })
             ));
+        }
+    }
+
+    mod show {
+        use super::*;
+
+        const RELATIONS: &str = "\
+libc6:amd64\tlibc6\tii \t\tlibgcc-s1\t
+libc6:i386\tlibc6\tii \t\tlibgcc-s1\t
+dpkg\tdpkg\tii \t\ttar (>= 1.28-1)\tlibbz2-1.0, libc6 (>= 2.34), liblzma5 (>= 5.4.0), zlib1g (>= 1:1.1.4)
+postfix\tpostfix\tii \tdefault-mta (= 3.8.6-1build2), mail-transport-agent\tlibc6 (>= 2.38), postfix-common\t
+bsd-mailx\tbsd-mailx\tii \t\tlibc6 (>= 2.34), liblockfile1 (>= 1.01), default-mta | mail-transport-agent\t
+logwatch\tlogwatch\tii \t\tperl:any, postfix:any (>= 3.0) [linux-any] <!nocheck>\t
+mailutils\tmailutils\tii \t\tlibc6 (>= 2.34), exim4-daemon-light | postfix\t
+mutt\tmutt\tii \t\tlibc6 (>= 2.38), libgpgme11t64 (>= 1.4.1)\t
+old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
+";
+
+        fn dependants(id: &str, name: &str) -> Vec<String> {
+            let runner = FakeRunner::new().respond(&format!("dpkg-query --show {RELATIONS_FORMAT}"), RELATIONS);
+            let host = Fixture::new().host(runner);
+            Dependants::dependants(&DpkgSource, &host, &Package::new(ID, id, name, Scope::System)).unwrap()
+        }
+
+        #[test]
+        fn file_list_drops_the_root_and_diversion_notes() {
+            let runner = FakeRunner::new().respond(
+                "dpkg-query --listfiles libc6:amd64",
+                "/.\n/etc\n/etc/ld.so.conf.d\n/usr/lib/x86_64-linux-gnu/libc.so.6\n\
+                 diverted by libc6-hack to: /usr/lib/x86_64-linux-gnu/libc.so.6.real\n\
+                 package diverts others to: /usr/bin/ldd.distrib\n\
+                 locally diverted to: /etc/ld.so.conf.d/local.conf\n\
+                 /usr/bin/ldd\n",
+            );
+            let host = Fixture::new().host(runner);
+            let package = Package::new(ID, "libc6:amd64", "libc6", Scope::System);
+            assert_eq!(
+                DpkgSource.files(&host, &package).unwrap(),
+                [
+                    "/etc",
+                    "/etc/ld.so.conf.d",
+                    "/usr/lib/x86_64-linux-gnu/libc.so.6",
+                    "/usr/bin/ldd"
+                ]
+                .map(PathBuf::from)
+            );
+        }
+
+        #[test]
+        fn dependants_through_the_name_with_versions_and_pre_depends() {
+            // libc6:i386 shares the name but does not depend on itself; old-mailer is only config files.
+            assert_eq!(
+                dependants("libc6:amd64", "libc6"),
+                ["bsd-mailx", "dpkg", "mailutils", "mutt", "postfix"]
+            );
+        }
+
+        #[test]
+        fn dependants_through_provides_alternatives_and_arch_qualifiers() {
+            // bsd-mailx needs `default-mta | mail-transport-agent`, both provided by postfix; mailutils names postfix
+            // as its second alternative; logwatch needs `postfix:any`. old-mailer is removed, and packages that merely
+            // recommend postfix (ubuntu-server, say) carry no Depends on it, so they never show up.
+            assert_eq!(dependants("postfix", "postfix"), ["bsd-mailx", "logwatch", "mailutils"]);
+        }
+
+        #[test]
+        fn a_package_nothing_needs_has_no_dependants() {
+            assert!(dependants("mutt", "mutt").is_empty());
         }
     }
 }

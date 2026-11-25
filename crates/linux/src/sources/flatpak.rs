@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Availability, Cmd, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
@@ -15,6 +15,9 @@ pub const ID: SourceId = SourceId::new("flatpak");
 
 /// One line per installed ref, tab-separated, in this column order.
 const COLUMNS: &str = "--columns=application,name,description,version,branch,arch,origin,installation,size,options";
+
+/// One line per installed app, tab-separated: enough to rebuild its id, plus the runtime it runs on.
+const APP_RUNTIME_COLUMNS: &str = "--columns=application,arch,branch,installation,runtime";
 
 /// Where the default system installation keeps its refs.
 const SYSTEM_DIR: &str = "/var/lib/flatpak";
@@ -30,7 +33,7 @@ register!(FlatpakSource);
 
 impl Source for FlatpakSource {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new("flatpak", "Flatpak", SourceKind::Universal)
+        SourceInfo::new("flatpak", "Flatpak", SourceKind::Universal).evidence("`flatpak list`")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -58,6 +61,46 @@ impl Source for FlatpakSource {
         let user_dir = host.data_home().join("flatpak");
         parse_listing(&listing, &user_dir)
     }
+
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        Some(self)
+    }
+}
+
+impl Dependants for FlatpakSource {
+    /// The apps that run on `package` when it is a runtime, in whichever installation they are (flatpak looks
+    /// runtimes up across installations). Limit: runtime extensions (GL drivers, locales, codecs) attach to a runtime
+    /// without any app naming them, so they are not followed.
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        let parts: Vec<&str> = package.id.split('/').collect();
+        let [_, "runtime", runtime, arch, branch] = parts[..] else {
+            // Nothing runs on an app.
+            return Ok(Vec::new());
+        };
+        let runtime_ref = format!("{runtime}/{arch}/{branch}");
+        let listing = host.run_ok(&Cmd::new("flatpak").args(["list", "--app", APP_RUNTIME_COLUMNS]))?;
+        apps_on_runtime(&listing, &runtime_ref)
+    }
+}
+
+/// The ids of the apps in `listing` (`APP_RUNTIME_COLUMNS` output) running on `runtime_ref` (`<id>/<arch>/<branch>`).
+fn apps_on_runtime(listing: &str, runtime_ref: &str) -> Result<Vec<String>, SourceError> {
+    let mut apps = Vec::new();
+    for line in listing.lines().filter(|line| !line.trim().is_empty()) {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [application, arch, branch, installation, runtime] = fields[..] else {
+            return Err(SourceError::parse(
+                "flatpak list --app output",
+                format!("expected 5 fields: {line:?}"),
+            ));
+        };
+        if runtime.trim() == runtime_ref {
+            apps.push(format!("{installation}/app/{application}/{arch}/{branch}"));
+        }
+    }
+    apps.sort();
+    apps.dedup();
+    Ok(apps)
 }
 
 /// `user_dir` is the logical path of the per-user installation.
@@ -255,6 +298,35 @@ org.mozilla.firefox\tFirefox\tFast, Private & Safe Web Browser\t145.0\tstable\ta
             FlatpakSource.inventory(&fixture.host(runner), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
+    }
+
+    #[test]
+    fn a_runtimes_dependants_are_the_apps_on_its_branch() {
+        let packages = scan_with(&[]);
+        let apps = "\
+org.godotengine.Godot\tx86_64\tstable\tsystem\torg.freedesktop.Platform/x86_64/25.08
+com.github.tchx84.Flatseal\tx86_64\tstable\tuser\torg.gnome.Platform/x86_64/48
+org.gnome.Builder\tx86_64\tstable\tsystem\torg.gnome.Platform/x86_64/47
+";
+        let fixture = Fixture::new();
+        let runner = FakeRunner::new().respond(&format!("flatpak list --app {APP_RUNTIME_COLUMNS}"), apps);
+        let gnome = find(&packages, "user/runtime/org.gnome.Platform/x86_64/48");
+        assert_eq!(
+            Dependants::dependants(&FlatpakSource, &fixture.host(runner), gnome).unwrap(),
+            ["user/app/com.github.tchx84.Flatseal/x86_64/stable"]
+        );
+    }
+
+    #[test]
+    fn apps_have_no_dependants() {
+        let packages = scan_with(&[]);
+        let fixture = Fixture::new();
+        let godot = find(&packages, "system/app/org.godotengine.Godot/x86_64/stable");
+        assert!(
+            Dependants::dependants(&FlatpakSource, &fixture.host(FakeRunner::new()), godot)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -11,8 +11,8 @@ use crate::model::{Availability, Package, SourceInfo};
 /// One way software gets installed: a package manager, an app format, a language tool, or manual installs.
 ///
 /// Sources only read. Abilities only some sources have are separate traits a source offers as optional components
-/// (`owner_lookup` today; removing, installing and updating in later phases), so a new ability never forces every
-/// source to implement or stub it.
+/// (`owner_lookup`, `file_list` and `dependant_lookup` today; removing, installing and updating in later phases), so a new
+/// ability never forces every source to implement or stub it.
 pub trait Source: Send + Sync {
     fn info(&self) -> SourceInfo;
 
@@ -24,6 +24,17 @@ pub trait Source: Send + Sync {
 
     /// "Which of these files did you install?", for sources that track individual files (package managers).
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
+        None
+    }
+
+    /// "Which files did this package install?", for sources that record them (package managers, pip's `RECORD`).
+    /// Without it, the files of a package are taken to be everything in its install location.
+    fn file_list(&self) -> Option<&dyn FileList> {
+        None
+    }
+
+    /// "Which installed packages need this one?", for sources that record dependencies.
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         None
     }
 
@@ -75,6 +86,21 @@ pub trait OwnerLookup: Send + Sync {
     /// owning package's `Package::id` or `Package::name` in this source's inventory. Exact matches only.
     /// Implementations ask about all paths in one call.
     fn owners(&self, host: &Host, paths: &[PathBuf]) -> Result<HashMap<PathBuf, Vec<String>>, SourceError>;
+}
+
+/// Ability: list the files a package installed.
+pub trait FileList: Send + Sync {
+    /// The files and directories `package` (one of this source's) installed, as logical absolute paths, in the
+    /// source's order. Paths that no longer exist on disk are included; callers check.
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError>;
+}
+
+/// Ability: tell which installed packages directly need a package.
+pub trait Dependants: Send + Sync {
+    /// The `Package::id`s of this source's installed packages that directly depend on `package` (one of this
+    /// source's), through its name or anything it provides, sorted and without repeats. Optional dependencies
+    /// (recommends, suggests) do not count.
+    fn dependants(&self, host: &Host, package: &Package) -> Result<Vec<String>, SourceError>;
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -38,6 +38,7 @@ register!(AppImageSource);
 impl Source for AppImageSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("appimage", "AppImage", SourceKind::Portable)
+            .evidence("an AppImage file (told by its ELF header) in a folder where AppImages are kept")
     }
 
     fn probe(&self, _host: &Host) -> Availability {

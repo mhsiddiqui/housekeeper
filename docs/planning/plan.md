@@ -35,13 +35,13 @@ source, without root and without changing anything.
 | 1.8 ✅ | CI smoke test inside Debian, Ubuntu, Fedora, openSUSE Tumbleweed and Arch containers |
 | 1.9 ✅ | Homebrew on Linux (formulae, taps, casks) and one-file providers: every file in `crates/linux/src/sources/` registers itself; native package managers declare their distributions |
 
-## Phase 2: Identity and ownership 🚧
+## Phase 2: Identity and ownership ✅
 | Chunk | Delivers |
 |---|---|
 | 2.1 ✅ | Desktop entries: map `.desktop` files to packages; app vs library/runtime/system; display names, icons. Commands found in the native package database too; packages with neither are components, hidden by default (change 0033) |
 | 2.2 ✅ | Group one app installed from several sources (AppStream ID, desktop ID, name) without merging the installs; also by command, and twice from one source; `housekeeper list --duplicates` (change 0034) |
 | 2.3 ✅ | Ownership: `OwnerLookup` names the owning packages on native sources (dpkg, rpm, pacman); `housekeeper who <command or path>` follows symlinks and names the source, package and evidence (change 0032) |
-| 2.4 | `housekeeper show <id>`: details, files, launchers, dependants |
+| 2.4 ✅ | `housekeeper show <id>`: details, files, launchers, dependants; how the source knows it is installed, other installs of the same app (change 0035) |
 
 ## Phase 3: Removal planning (no changes made) ⬜
 | Chunk | Delivers |

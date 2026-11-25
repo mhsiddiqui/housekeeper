@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use housekeeper_core::{
-    Availability, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    Availability, FileList, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
+    SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
@@ -30,6 +30,7 @@ register!(CargoSource);
 impl Source for CargoSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("cargo", "cargo install", SourceKind::Language)
+            .evidence("cargo's install tracking file (`.crates2.json`, or `.crates.toml`)")
     }
 
     fn probe(&self, host: &Host) -> Availability {
@@ -73,6 +74,18 @@ impl Source for CargoSource {
                 Ok(package)
             })
             .collect()
+    }
+
+    fn file_list(&self) -> Option<&dyn FileList> {
+        Some(self)
+    }
+}
+
+/// Every cargo package shares `<cargo home>/bin`, so its files are exactly its own binaries there.
+impl FileList for CargoSource {
+    fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        let bin = cargo_home(host).join("bin");
+        Ok(package.commands.iter().map(|command| bin.join(command)).collect())
     }
 }
 
@@ -251,5 +264,22 @@ mod tests {
             CargoSource.probe(&fixture.host(FakeRunner::new())),
             Availability::Available { version: None }
         );
+    }
+
+    #[test]
+    fn files_are_the_binaries_under_cargo_home() {
+        let fixture = Fixture::new();
+        fixture.file("/opt/cargo/.crates2.json", CRATES2);
+        let host = fixture.host_with_vars(FakeRunner::new(), &[("CARGO_HOME", "/opt/cargo")]);
+        let packages = CargoSource.inventory(&host, &ScanContext::default()).unwrap();
+        let files = CargoSource.files(&host, find(&packages, "rmux")).unwrap();
+        assert_eq!(
+            files,
+            [
+                PathBuf::from("/opt/cargo/bin/rmux"),
+                PathBuf::from("/opt/cargo/bin/rmux-daemon")
+            ]
+        );
+        assert!(CargoSource.file_list().is_some());
     }
 }
