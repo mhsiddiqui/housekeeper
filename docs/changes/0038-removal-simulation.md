@@ -1,9 +1,9 @@
 # 0038: Simulate removals without root, and block what would break
 
 - **Date:** 2026-11-25
-- **Branch / PR:** `feat/removal-simulation`, PR not opened yet
+- **Branch / PR:** `feat/removal-simulation`, #28
 - **Plan chunks:** 3.3 (simulation through the package manager), done
-- **Commits:** ebc1b60, 8a160d2
+- **Commits:** ebc1b60, 8a160d2, ad4d147
 
 ## What changed
 - **Core**:
