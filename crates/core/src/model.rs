@@ -133,6 +133,9 @@ pub struct Package {
     pub launchers: Vec<Launcher>,
     /// Icon of its main launcher: a name in the icon theme (`firefox`) or an absolute path.
     pub icon: Option<String>,
+    /// AppStream component IDs (`org.mozilla.firefox`): the app's name in software catalogs, the same whichever source
+    /// installed it.
+    pub app_ids: Vec<String>,
     /// Removing it could break the system.
     pub protected: bool,
 }
@@ -157,6 +160,17 @@ pub struct Launcher {
     pub hidden: bool,
 }
 
+/// An app's catalog entry installed on disk (AppStream metainfo on Linux).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Metainfo {
+    /// The AppStream component ID (`org.gnome.Papers`).
+    pub id: String,
+    /// The file (logical path).
+    pub path: PathBuf,
+    /// Ids of the launchers that start the app (`org.gnome.Papers.desktop`).
+    pub launchables: Vec<String>,
+}
+
 impl Package {
     pub fn new(source: SourceId, id: impl Into<String>, name: impl Into<String>, scope: Scope) -> Self {
         Self {
@@ -176,6 +190,7 @@ impl Package {
             commands: Vec::new(),
             launchers: Vec::new(),
             icon: None,
+            app_ids: Vec::new(),
             protected: false,
         }
     }

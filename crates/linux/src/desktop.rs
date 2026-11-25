@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::{FileType, Host, Launcher, ScanContext};
 
-/// `$XDG_DATA_DIRS` when it is not set.
-const DEFAULT_DATA_DIRS: &str = "/usr/local/share/:/usr/share/";
+use crate::xdg::data_dirs;
 
 /// How deep subfolders of `applications/` are read (`kde4/`, `wine/Programs/…`).
 const MAX_DEPTH: usize = 4;
@@ -20,7 +19,7 @@ const MAX_DEPTH: usize = 4;
 pub(crate) fn launchers(host: &Host, command_dirs: &[PathBuf], scan: &ScanContext<'_>) -> Vec<Launcher> {
     let mut files: Vec<(String, Vec<PathBuf>)> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
-    for dir in application_dirs(host) {
+    for dir in data_dirs(host).into_iter().map(|dir| dir.join("applications")) {
         let mut found = Vec::new();
         desktop_files(host, &dir, "", 0, &mut found, scan);
         for (id, path) in found {
@@ -62,22 +61,6 @@ pub(crate) fn launchers(host: &Host, command_dirs: &[PathBuf], scan: &ScanContex
         });
     }
     launchers
-}
-
-/// `applications/` under `$XDG_DATA_HOME`, then under each `$XDG_DATA_DIRS` entry, without repeats.
-fn application_dirs(host: &Host) -> Vec<PathBuf> {
-    let data_dirs = host.var("XDG_DATA_DIRS").unwrap_or(DEFAULT_DATA_DIRS);
-    let mut dirs: Vec<PathBuf> = vec![host.data_home()];
-    for dir in data_dirs
-        .split(':')
-        .filter(|dir| dir.starts_with('/'))
-        .map(PathBuf::from)
-    {
-        if !dirs.contains(&dir) {
-            dirs.push(dir);
-        }
-    }
-    dirs.into_iter().map(|dir| dir.join("applications")).collect()
 }
 
 /// `(id, path)` of every `.desktop` file below `dir`, whose id starts with `prefix`.

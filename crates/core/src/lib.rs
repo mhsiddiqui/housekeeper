@@ -3,6 +3,7 @@
 //! See `docs/architecture/README.md` for how platforms, sources and the host fit together.
 
 pub mod command;
+pub mod group;
 pub mod host;
 mod identity;
 pub mod inventory;
@@ -18,10 +19,12 @@ pub mod text;
 pub mod who;
 
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
+pub use group::{AppGroup, Shared};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
 pub use model::{
-    Availability, InstallReason, Launcher, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind, SystemInfo,
+    Availability, InstallReason, Launcher, Metainfo, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind,
+    SystemInfo,
 };
 pub use platform::{Platform, path_dirs};
 pub use source::{OwnerLookup, ScanContext, Source, SourceError};

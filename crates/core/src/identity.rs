@@ -1,32 +1,36 @@
-//! What each package is to a person: the launchers and commands it provides, and from them its kind, title and icon.
+//! What each package is to a person: the launchers, commands and catalog entries it provides, and from them its
+//! kind, title, icon and AppStream IDs.
 //!
-//! Launchers and commands are attached with the same evidence `who` uses ([`Ownership`]), so no source is named here
-//! and a new source is covered as soon as it reports install locations or install folders.
+//! They are attached with the same evidence `who` uses ([`Ownership`]), so no source is named here and a new source
+//! is covered as soon as it reports install locations or install folders.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::host::{FileType, Host};
 use crate::inventory::{SourceReport, SourceStatus};
-use crate::model::{Launcher, Package, PackageKind, SourceId, SourceInfo};
+use crate::model::{Launcher, Metainfo, Package, PackageKind, SourceId, SourceInfo};
 use crate::ownership::{Ownership, all_paths, chain};
 use crate::platform::Platform;
 use crate::source::{ScanContext, Source, SourceError};
 use crate::who::{Evidence, Owner};
 
-/// Launchers and commands, with what the package databases said about their files. Gathering needs no packages, so
-/// it runs while the sources are being read.
+/// Launchers, commands and catalog entries, with what the package databases said about their files. Gathering needs
+/// no packages, so it runs while the sources are being read.
 pub(crate) struct Gathered<'a> {
     /// Each launcher with the chains that may tell its owner, in order: its file, the files it hides, its program.
     launchers: Vec<(Launcher, Vec<Vec<PathBuf>>)>,
     /// Each command's name and chain.
     commands: Vec<(String, Vec<PathBuf>)>,
+    /// Each catalog entry and the chain of its file.
+    metainfo: Vec<(Metainfo, Vec<PathBuf>)>,
     ownership: Ownership<'a>,
     failures: Vec<(SourceInfo, SourceError)>,
     warnings: Vec<String>,
 }
 
-/// Reads the launchers and the commands, and asks the package databases of the `selected` sources who owns them.
+/// Reads the launchers, commands and catalog entries, and asks the package databases of the `selected` sources who
+/// owns them.
 pub(crate) fn gather<'a>(host: &Host, platform: &'a dyn Platform, selected: &[&'a dyn Source]) -> Gathered<'a> {
     let context = ScanContext::new(platform.sources());
     let launchers: Vec<(Launcher, Vec<Vec<PathBuf>>)> = platform
@@ -39,6 +43,14 @@ pub(crate) fn gather<'a>(host: &Host, platform: &'a dyn Platform, selected: &[&'
                 .map(|path| chain(host, path))
                 .collect();
             (launcher, chains)
+        })
+        .collect();
+    let metainfo: Vec<(Metainfo, Vec<PathBuf>)> = platform
+        .metainfo(host, &context)
+        .into_iter()
+        .map(|entry| {
+            let hops = chain(host, &entry.path);
+            (entry, hops)
         })
         .collect();
     let databases: Vec<&dyn Source> = selected
@@ -56,13 +68,15 @@ pub(crate) fn gather<'a>(host: &Host, platform: &'a dyn Platform, selected: &[&'
         launchers
             .iter()
             .flat_map(|(_, chains)| chains)
-            .chain(commands.iter().map(|(_, hops)| hops)),
+            .chain(commands.iter().map(|(_, hops)| hops))
+            .chain(metainfo.iter().map(|(_, hops)| hops)),
     );
     let mut failures = Vec::new();
     let ownership = Ownership::ask(host, platform.sources(), &databases, &paths, &mut failures);
     Gathered {
         launchers,
         commands,
+        metainfo,
         ownership,
         failures,
         warnings: context.into_warnings(),
@@ -97,8 +111,8 @@ fn commands(host: &Host, platform: &dyn Platform, context: &ScanContext<'_>) -> 
 }
 
 impl Gathered<'_> {
-    /// Attaches launchers and commands to `packages` and derives kinds, titles and icons. A package database that
-    /// could not answer becomes a warning of its source; problems reading launchers go to `warnings`.
+    /// Attaches launchers, commands and catalog entries to `packages` and derives kinds, titles and icons. A package
+    /// database that could not answer becomes a warning of its source; problems reading files go to `warnings`.
     pub fn apply(self, packages: &mut [Package], reports: &mut [SourceReport], warnings: &mut Vec<String>) {
         warnings.extend(self.warnings);
         for (info, error) in self.failures {
@@ -108,7 +122,7 @@ impl Gathered<'_> {
                 .map(|report| &mut report.status);
             if let Some(SourceStatus::Ok { warnings, .. }) = status {
                 warnings.push(format!(
-                    "could not tell which packages provide launchers and commands: {error}"
+                    "could not tell which packages provide launchers, commands and catalog entries: {error}"
                 ));
             }
         }
@@ -147,6 +161,29 @@ impl Gathered<'_> {
                 commands.entry(i).or_default().push(name);
             }
         }
+        // A catalog entry belongs to the package that accounts for its file, or else to the one whose launcher it
+        // names (an entry copied by hand next to a packaged launcher).
+        let by_launcher: HashMap<&str, usize> = launchers
+            .iter()
+            .flat_map(|(&i, found)| found.iter().map(move |launcher| (launcher.id.as_str(), i)))
+            .collect();
+        let mut app_ids: HashMap<usize, Vec<String>> = HashMap::new();
+        for (entry, hops) in self.metainfo {
+            let owner = self
+                .ownership
+                .owner(&hops, packages)
+                .and_then(|owner| owner.package)
+                .and_then(|package| index.get(&(&package.source, package.id.as_str())).copied())
+                .or_else(|| {
+                    entry
+                        .launchables
+                        .iter()
+                        .find_map(|id| by_launcher.get(id.as_str()).copied())
+                });
+            if let Some(i) = owner {
+                app_ids.entry(i).or_default().push(entry.id);
+            }
+        }
 
         let files_known: Vec<bool> = packages
             .iter()
@@ -161,6 +198,11 @@ impl Gathered<'_> {
                 package.commands.extend(found);
                 package.commands.sort();
                 package.commands.dedup();
+            }
+            if let Some(found) = app_ids.remove(&i) {
+                package.app_ids.extend(found);
+                package.app_ids.sort();
+                package.app_ids.dedup();
             }
             describe(package, files_known[i]);
         }
@@ -201,7 +243,7 @@ fn describe(package: &mut Package, files_known: bool) {
 mod tests {
     use super::*;
     use crate::inventory::{Scan, Selection};
-    use crate::stub::{Stub, housekeeper_with_launchers, package};
+    use crate::stub::{Stub, housekeeper_with, package};
     use crate::testing::{Fixture, HOME};
 
     fn launcher(id: &str, name: &str, path: &str, program: Option<&str>) -> Launcher {
@@ -287,7 +329,7 @@ mod tests {
                 Some("/opt/brave.com/brave/brave-browser"),
             ),
         ];
-        let hk = housekeeper_with_launchers(&fixture, "/usr/bin:/bin", vec![dpkg, broken], launchers);
+        let hk = housekeeper_with(&fixture, "/usr/bin:/bin", vec![dpkg, broken], launchers, Vec::new());
         let scan = hk.scan(&Selection::All);
 
         let gimp = find(&scan, "dpkg", "gimp");
@@ -392,7 +434,13 @@ mod tests {
             godot_launcher,
             launcher("pinta_pinta.desktop", "Pinta", snap_entry, Some("/snap/bin/pinta")),
         ];
-        let hk = housekeeper_with_launchers(&fixture, "/snap/bin:/usr/bin", vec![dpkg, flatpak, snap], launchers);
+        let hk = housekeeper_with(
+            &fixture,
+            "/snap/bin:/usr/bin",
+            vec![dpkg, flatpak, snap],
+            launchers,
+            Vec::new(),
+        );
         let scan = hk.scan(&Selection::All);
 
         let godot = find(&scan, "flatpak", "org.godotengine.Godot");

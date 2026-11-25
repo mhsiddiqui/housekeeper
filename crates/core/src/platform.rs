@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::host::Host;
-use crate::model::{Launcher, SystemInfo};
+use crate::model::{Launcher, Metainfo, SystemInfo};
 use crate::source::{ScanContext, Source};
 
 /// Implemented once per operating system (`LinuxPlatform`, later macOS and Windows).
@@ -18,6 +18,12 @@ pub trait Platform: Send + Sync {
     /// Every entry of the application menu, as the menu sees it: one per id, the one that takes precedence.
     /// Entries that could not be read are reported through `scan.warn` and left out.
     fn launchers(&self, _host: &Host, _scan: &ScanContext<'_>) -> Vec<Launcher> {
+        Vec::new()
+    }
+
+    /// Every app catalog entry installed on disk. Entries that could not be read are reported through `scan.warn`
+    /// and left out.
+    fn metainfo(&self, _host: &Host, _scan: &ScanContext<'_>) -> Vec<Metainfo> {
         Vec::new()
     }
 

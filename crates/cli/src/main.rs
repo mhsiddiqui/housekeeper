@@ -4,15 +4,16 @@ mod filter;
 mod table;
 mod who;
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use housekeeper_core::{Availability, Host, Housekeeper, Selection, SourceStatus};
+use housekeeper_core::{Availability, Host, Housekeeper, Package, Selection, SourceStatus};
 use serde::Serialize;
 
-use crate::filter::Filter;
+use crate::filter::{Filter, View, keep_duplicates};
 use crate::table::{Table, human_size};
 
 #[derive(Parser)]
@@ -41,6 +42,9 @@ enum Command {
         /// Only show items whose name, title or summary contains this text (case-insensitive).
         #[arg(long)]
         search: Option<String>,
+        /// Only show apps installed more than once (from several sources, or twice from one), grouped.
+        #[arg(long)]
+        duplicates: bool,
         /// Print the scan as JSON (schema version in the `schema` field).
         #[arg(long)]
         json: bool,
@@ -68,10 +72,14 @@ fn main() -> Result<ExitCode> {
             all,
             sources,
             search,
+            duplicates,
             json,
         } => {
-            let filter = Filter { all, search };
-            list(&housekeeper, &sources, &filter, json, &mut out).map(|()| ExitCode::SUCCESS)
+            let view = View {
+                filter: Filter { all, search },
+                duplicates,
+            };
+            list(&housekeeper, &sources, &view, json, &mut out).map(|()| ExitCode::SUCCESS)
         }
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
     };
@@ -124,7 +132,7 @@ fn sources(housekeeper: &Housekeeper, json: bool, out: &mut impl Write) -> Resul
     Ok(())
 }
 
-fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool, out: &mut impl Write) -> Result<()> {
+fn list(housekeeper: &Housekeeper, only: &[String], view: &View, json: bool, out: &mut impl Write) -> Result<()> {
     let known: Vec<String> = housekeeper.sources().map(|info| info.id.to_string()).collect();
     if let Some(unknown) = only.iter().find(|id| !known.contains(id)) {
         bail!("unknown source `{unknown}`; available: {}", known.join(", "));
@@ -134,9 +142,14 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
     } else {
         Selection::Only(only)
     };
+    let filter = &view.filter;
     let mut scan = housekeeper.scan(&selection);
     let scanned = scan.packages.len();
-    scan.packages.retain(|package| filter.keeps(package));
+    if view.duplicates {
+        keep_duplicates(&mut scan, filter);
+    } else {
+        scan.packages.retain(|package| filter.keeps(package));
+    }
 
     if json {
         serde_json::to_writer_pretty(&mut *out, &scan)?;
@@ -144,29 +157,65 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
         return Ok(());
     }
 
-    let mut table = Table::new(["NAME", "VERSION", "SOURCE", "SIZE"]);
-    for package in &scan.packages {
-        table.row([
-            package.display_name().to_string(),
-            package.version.clone().unwrap_or_default(),
-            package.source.to_string(),
-            package.size_bytes.map(human_size).unwrap_or_default(),
-        ]);
-    }
-    table.write(out)?;
-
     let mut err = io::stderr().lock();
-    writeln!(
-        err,
-        "\n{} shown of {} found{}.",
-        scan.packages.len(),
-        scanned,
-        if filter.all {
-            ""
-        } else {
-            " (use --all to include dependencies, libraries, runtimes and components)"
+    if view.duplicates {
+        let by_key: HashMap<String, &Package> = scan.packages.iter().map(|package| (package.key(), package)).collect();
+        // FROM tells the copies apart: the repository or Node/Python version, or else where the install is.
+        let mut table = Table::new(["APP", "NAME", "VERSION", "SOURCE", "SIZE", "FROM"]);
+        for group in &scan.groups {
+            let installs = group.packages.iter().filter_map(|key| by_key.get(key));
+            for (n, package) in installs.enumerate() {
+                let from = package
+                    .origin
+                    .clone()
+                    .or_else(|| package.location.as_ref().map(|path| path.display().to_string()));
+                table.row([
+                    if n == 0 { group.name.clone() } else { String::new() },
+                    package.display_name().to_string(),
+                    package.version.clone().unwrap_or_default(),
+                    package.source.to_string(),
+                    package.size_bytes.map(human_size).unwrap_or_default(),
+                    from.unwrap_or_default(),
+                ]);
+            }
         }
-    )?;
+        table.write(out)?;
+        writeln!(
+            err,
+            "\n{} installed more than once, {} installs.",
+            count(scan.groups.len(), "app"),
+            scan.packages.len()
+        )?;
+    } else {
+        let mut table = Table::new(["NAME", "VERSION", "SOURCE", "SIZE"]);
+        for package in &scan.packages {
+            table.row([
+                package.display_name().to_string(),
+                package.version.clone().unwrap_or_default(),
+                package.source.to_string(),
+                package.size_bytes.map(human_size).unwrap_or_default(),
+            ]);
+        }
+        table.write(out)?;
+        writeln!(
+            err,
+            "\n{} shown of {} found{}.",
+            scan.packages.len(),
+            scanned,
+            if filter.all {
+                ""
+            } else {
+                " (use --all to include dependencies, libraries, runtimes and components)"
+            }
+        )?;
+        if !scan.groups.is_empty() {
+            writeln!(
+                err,
+                "{} installed more than once; `housekeeper list --duplicates` shows which.",
+                count(scan.groups.len(), "app")
+            )?;
+        }
+    }
     for report in &scan.sources {
         match &report.status {
             SourceStatus::Failed { error } => writeln!(err, "warning: could not read {}: {error}", report.info.label)?,
@@ -182,6 +231,15 @@ fn list(housekeeper: &Housekeeper, only: &[String], filter: &Filter, json: bool,
         writeln!(err, "warning: {warning}")?;
     }
     Ok(())
+}
+
+/// `1 app`, `3 apps`.
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
 }
 
 fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write) -> Result<ExitCode> {

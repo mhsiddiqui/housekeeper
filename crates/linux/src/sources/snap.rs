@@ -93,6 +93,9 @@ struct Publisher {
 #[derive(Deserialize)]
 struct App {
     name: String,
+    /// The app's AppStream ID, when the snap declares one.
+    #[serde(rename = "common-id")]
+    common_id: Option<String>,
 }
 
 impl Snap {
@@ -117,6 +120,10 @@ impl Snap {
                 }
             })
             .collect();
+        package.app_ids = self.apps.iter().filter_map(|app| app.common_id.clone()).collect();
+        package.app_ids.retain(|id| !id.is_empty());
+        package.app_ids.sort();
+        package.app_ids.dedup();
         (package.kind, package.reason, package.protected) = match self.snap_type.as_str() {
             "snapd" | "os" | "kernel" | "gadget" => (PackageKind::Runtime, InstallReason::System, true),
             "base" => (PackageKind::Runtime, InstallReason::Dependency, false),
@@ -231,7 +238,7 @@ mod tests {
  "channel":"latest/stable","tracking-channel":"latest/stable/ubuntu-24.04","installed-size":298881024,
  "install-date":"2026-11-09T11:47:23.930407791+05:00","type":"app",
  "publisher":{"id":"OgeoZuqQpVvSr9eGKJzNCrFGSaKXpkey","username":"mozilla","display-name":"Mozilla","validation":"verified"},
- "apps":[{"snap":"firefox","name":"firefox"},{"snap":"firefox","name":"geckodriver"}],"confinement":"strict"},
+ "apps":[{"snap":"firefox","name":"firefox","common-id":"org.mozilla.firefox"},{"snap":"firefox","name":"geckodriver"}],"confinement":"strict"},
 {"name":"core24","title":"Core 24 base snap","summary":"Snap runtime environment","version":"20260824","type":"base",
  "installed-size":70033408,"install-date":"2026-09-18T19:59:40.40037538+05:00","tracking-channel":"latest/stable",
  "publisher":{"display-name":"Canonical","validation":"verified"}},
@@ -294,6 +301,7 @@ mod tests {
         assert_eq!(firefox.size_bytes, Some(298_881_024));
         assert_eq!(firefox.installed_at, Some(1_794_206_843));
         assert_eq!(firefox.commands, ["firefox", "firefox.geckodriver"]);
+        assert_eq!(firefox.app_ids, ["org.mozilla.firefox"]);
         assert_eq!(
             firefox.origin.as_deref(),
             Some("Snap Store, Mozilla (verified), latest/stable/ubuntu-24.04")
