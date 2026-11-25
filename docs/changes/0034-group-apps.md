@@ -1,7 +1,7 @@
 # 0034: Apps installed more than once are grouped
 
 - **Date:** 2026-11-25
-- **Branch / PR:** `feat/group-apps`
+- **Branch / PR:** `feat/group-apps`, #24
 - **Plan chunks:** 2.2 (group one app installed from several sources), done
 - **Commits:** c720b7f, 48c9eac
 
