@@ -173,6 +173,11 @@ Removal:    through its package manager
   "not known" (hand installs). Each step says whether it would run as you or as root through Housekeeper's helper,
   and what blocks it (a package of a Silverblue image, a system-wide npm install). Nothing is removed yet; that comes
   with the helper.
+- **Protected** says why removing the item could break the system, and blocks its removal: dpkg's Essential and
+  Protected marks and Priority required, dnf's protected packages (`/etc/dnf/protected.d`, `protected_packages` in
+  `dnf.conf`), Arch's `base` metapackage and what it depends on, the C library, init system, shell, core commands and
+  package managers, snapd and the system's own snaps, and the running kernel (older kernels next to it are not
+  protected).
 - When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
   matches, it exits with 2. `--json` prints the same as a document.
 
@@ -199,11 +204,12 @@ by hand or by a script, outside the folders Housekeeper reads), and 2 when there
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
 `state` `ok`, `unavailable` or `failed`, and any warnings), every package (`packages`: source, id, name, title,
 version, summary, kind (`app`, `runtime`, `library`, `component` or `unknown`), install reason, scope, size, install
-time, origin, location, commands, launchers with their id, name, icon, file and program, icon, and AppStream IDs as
-`app_ids`), the apps installed more than once (`groups`: name, the installs' `source:id` keys, and what they share)
-and problems that belong to no one source (`warnings`, left out when empty). The `schema` field is `1`; it changes
-when a field is removed or changes meaning. Filters apply to `packages` only, except with `--duplicates`, which keeps
-the groups it shows and their installs.
+time, origin, location, commands, launchers with their id, name, icon, file and program, icon, AppStream IDs as
+`app_ids`, and `protected`: why removing it could break the system, or `null`), the apps installed more than once
+(`groups`: name, the installs' `source:id` keys, and what they share) and problems that belong to no one source
+(`warnings`, left out when empty). The `schema` field is `2` (it was `1` while `protected` was `true` or `false`); it
+changes when a field is removed or changes meaning. Filters apply to `packages` only, except with `--duplicates`,
+which keeps the groups it shows and their installs.
 
 ### When a source is missing or fails
 - **not available** in `housekeeper sources` means the tool is not on this machine (or, for Snap, snapd is not
