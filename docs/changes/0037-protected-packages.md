@@ -1,9 +1,9 @@
 # 0037: Block the removal of protected packages, and say why they are protected
 
 - **Date:** 2026-11-25
-- **Branch / PR:** `feat/protected-packages`, PR not opened yet
+- **Branch / PR:** `feat/protected-packages`, #27
 - **Plan chunks:** 3.2 (protected packages), done
-- **Commits:** 607dec0, d1ccf40
+- **Commits:** 607dec0, d1ccf40, 4cd1aa5
 
 ## What changed
 - **`Package::protected` is now the reason** (`Option<String>`) instead of a boolean: `dpkg marks it Essential`,
