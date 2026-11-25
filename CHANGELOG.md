@@ -32,6 +32,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   Protected mark (newly read; `init` and `libgcc-s1` are Protected on Debian and Ubuntu) or Priority required, dnf's
   protected packages (now also `protected_packages` in `/etc/dnf/dnf.conf`), Arch's `base` and everything it depends
   on (new), the core packages, snapd and the system's snaps, and the running kernel (new, on every distribution).
+- `housekeeper show` lists what else a system package's removal would take, without root: `apt-get --simulate`
+  (Debian, Ubuntu), `pacman --remove --print` (Arch), and on Fedora and openSUSE every package that needs it in the
+  RPM database, directly or through others. A refusal, or a protected package among what would go (removing
+  `libsemanage2` takes `passwd`), blocks the removal. `--json` has it as `removal.simulation`.
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
@@ -41,6 +45,8 @@ the project uses [Semantic Versioning](https://semver.org/).
   the scan's `schema` is `2`.
 - Kernels other than the running one are no longer protected on Fedora, openSUSE and Arch, so older kernels can be
   removed; the running kernel is protected instead.
+- `housekeeper show`'s "Needed by" on RPM systems also counts packages that require one of the package's programs
+  (`/usr/bin/sed`), not only what it provides.
 
 ### Fixed
 - `housekeeper who` named the wrong snap for a snap command when a later file on its symlink chain had another
