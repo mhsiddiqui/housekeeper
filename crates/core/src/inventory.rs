@@ -14,8 +14,9 @@ use crate::model::{Availability, Package, SourceInfo, SystemInfo};
 use crate::platform::Platform;
 use crate::source::{ScanContext, Source};
 
-/// Version of the JSON document produced from a `Scan`. Bumped on incompatible changes.
-pub const SCAN_SCHEMA: u32 = 1;
+/// Version of the JSON document produced from a `Scan`. Bumped on incompatible changes: 2 made `protected` the reason
+/// a package is protected (a string, or `null`) instead of a boolean.
+pub const SCAN_SCHEMA: u32 = 2;
 
 /// Outcome of one source in a scan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

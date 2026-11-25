@@ -8,6 +8,7 @@ mod appstream;
 mod desktop;
 pub mod distro;
 mod files;
+mod kernel;
 mod owner;
 pub mod provider;
 mod python;

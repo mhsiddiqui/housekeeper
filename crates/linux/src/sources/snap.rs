@@ -194,11 +194,20 @@ impl Snap {
         package.app_ids.sort();
         package.app_ids.dedup();
         (package.kind, package.reason, package.protected) = match self.snap_type.as_str() {
-            "snapd" | "os" | "kernel" | "gadget" => (PackageKind::Runtime, InstallReason::System, true),
-            "base" => (PackageKind::Runtime, InstallReason::Dependency, false),
+            "snapd" => (
+                PackageKind::Runtime,
+                InstallReason::System,
+                Some("it runs every snap".to_string()),
+            ),
+            kind @ ("os" | "kernel" | "gadget") => (
+                PackageKind::Runtime,
+                InstallReason::System,
+                Some(format!("the system runs on its {kind} snap")),
+            ),
+            "base" => (PackageKind::Runtime, InstallReason::Dependency, None),
             // App snaps without commands are content providers (themes, GNOME/KDE runtimes) other snaps plug into.
-            "app" if self.apps.is_empty() => (PackageKind::Runtime, InstallReason::Dependency, false),
-            _ => (PackageKind::App, InstallReason::Explicit, false),
+            "app" if self.apps.is_empty() => (PackageKind::Runtime, InstallReason::Dependency, None),
+            _ => (PackageKind::App, InstallReason::Explicit, None),
         };
         package
     }
@@ -419,8 +428,8 @@ mod tests {
         );
         let snapd = find(&packages, "snapd");
         assert_eq!(snapd.reason, InstallReason::System);
-        assert!(snapd.protected);
-        assert!(!core.protected);
+        assert_eq!(snapd.protected.as_deref(), Some("it runs every snap"));
+        assert_eq!(core.protected, None);
     }
 
     #[test]
