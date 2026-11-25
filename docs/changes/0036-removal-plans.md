@@ -1,7 +1,7 @@
 # 0036: Plan how every installed item is removed
 
 - **Date:** 2026-11-25
-- **Branch / PR:** `feat/removal-planning`, PR not opened yet
+- **Branch / PR:** `feat/removal-planning`, #26
 - **Plan chunks:** 3.1 (package tools, `Remover`, tiers 1–6, who runs each step), done; Phase 3 started
 - **Commits:** 7869817, a7334bb, 0119707
 

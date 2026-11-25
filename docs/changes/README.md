@@ -49,4 +49,4 @@ links back.
 | [0033](0033-desktop-entries.md) | Launchers and commands tell apps from components | 2.1 | #23 |
 | [0034](0034-group-apps.md) | Apps installed more than once are grouped | 2.2 | #24 |
 | [0035](0035-show-command.md) | `housekeeper show`: everything about one installed item | 2.4 | #25 |
-| [0036](0036-removal-plans.md) | Plan how every installed item is removed | 3.1 | `feat/removal-planning` |
+| [0036](0036-removal-plans.md) | Plan how every installed item is removed | 3.1 | #26 |
