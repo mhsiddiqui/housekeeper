@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::host::Host;
 use crate::inventory::Housekeeper;
-use crate::model::{Availability, Launcher, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
+use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
 use crate::platform::Platform;
 use crate::source::{OwnerLookup, ScanContext, Source, SourceError};
 use crate::testing::{FakeRunner, Fixture};
@@ -64,6 +64,7 @@ struct TestPlatform {
     system: SystemInfo,
     sources: Vec<Arc<dyn Source>>,
     launchers: Vec<Launcher>,
+    metainfo: Vec<Metainfo>,
 }
 
 impl Platform for TestPlatform {
@@ -76,18 +77,23 @@ impl Platform for TestPlatform {
     fn launchers(&self, _: &Host, _: &ScanContext<'_>) -> Vec<Launcher> {
         self.launchers.clone()
     }
+    fn metainfo(&self, _: &Host, _: &ScanContext<'_>) -> Vec<Metainfo> {
+        self.metainfo.clone()
+    }
 }
 
 /// `path` is the `PATH`, which is also where commands are looked for.
 pub fn housekeeper(fixture: &Fixture, path: &str, sources: Vec<Stub>) -> Housekeeper {
-    housekeeper_with_launchers(fixture, path, sources, Vec::new())
+    housekeeper_with(fixture, path, sources, Vec::new(), Vec::new())
 }
 
-pub fn housekeeper_with_launchers(
+/// Like [`housekeeper`], with a menu and catalog entries.
+pub fn housekeeper_with(
     fixture: &Fixture,
     path: &str,
     sources: Vec<Stub>,
     launchers: Vec<Launcher>,
+    metainfo: Vec<Metainfo>,
 ) -> Housekeeper {
     let system = SystemInfo {
         os: "linux".into(),
@@ -105,6 +111,7 @@ pub fn housekeeper_with_launchers(
             system,
             sources,
             launchers,
+            metainfo,
         }),
         host,
     )

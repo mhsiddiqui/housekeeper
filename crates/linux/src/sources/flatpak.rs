@@ -101,6 +101,8 @@ fn parse_listing(listing: &str, user_dir: &Path) -> Result<Vec<Package>, SourceE
         (package.kind, package.reason) = if runtime {
             (PackageKind::Runtime, InstallReason::Dependency)
         } else {
+            // An app's Flatpak ID is its AppStream ID.
+            package.app_ids = vec![application.to_string()];
             (PackageKind::App, InstallReason::Explicit)
         };
         let installation_dir = match installation {

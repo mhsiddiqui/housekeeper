@@ -3,6 +3,7 @@
 //! Sources live in `src/sources/`, one file each, and register themselves (see [`provider`]). This file only picks
 //! the native package manager for the running distribution and assembles everything; it never names a source.
 
+mod appstream;
 mod desktop;
 pub mod distro;
 mod files;
@@ -10,11 +11,12 @@ mod owner;
 pub mod provider;
 mod python;
 pub mod sources;
+mod xdg;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use housekeeper_core::{Host, Launcher, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs};
+use housekeeper_core::{Host, Launcher, Metainfo, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs};
 
 use crate::distro::Distro;
 use crate::provider::{Context, Provider};
@@ -79,6 +81,10 @@ impl Platform for LinuxPlatform {
 
     fn launchers(&self, host: &Host, scan: &ScanContext<'_>) -> Vec<Launcher> {
         desktop::launchers(host, &self.command_dirs(host), scan)
+    }
+
+    fn metainfo(&self, host: &Host, scan: &ScanContext<'_>) -> Vec<Metainfo> {
+        appstream::metainfo(host, scan)
     }
 
     fn command_dirs(&self, host: &Host) -> Vec<PathBuf> {

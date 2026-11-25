@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use crate::group::{AppGroup, group};
 use crate::host::Host;
 use crate::identity;
 use crate::model::{Availability, Package, SourceInfo, SystemInfo};
@@ -50,6 +51,9 @@ pub struct Scan {
     pub sources: Vec<SourceReport>,
     /// Sorted by display name, then source.
     pub packages: Vec<Package>,
+    /// Apps installed more than once (from several sources, or twice from one), in list order.
+    #[serde(default)]
+    pub groups: Vec<AppGroup>,
     /// Problems outside any one source (an unreadable launcher folder); the scan is still complete otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
@@ -98,9 +102,9 @@ impl Housekeeper {
             .collect()
     }
 
-    /// Reads every selected source in parallel, then attaches each launcher of the application menu and each command
-    /// a package database lists to its package, and derives kinds, titles and icons from them. A source that fails
-    /// or panics is reported, not fatal.
+    /// Reads every selected source in parallel, then attaches each launcher of the application menu, each command a
+    /// package database lists and each catalog entry to its package, derives kinds, titles, icons and AppStream IDs
+    /// from them, and groups the apps installed more than once. A source that fails or panics is reported, not fatal.
     pub fn scan(&self, selection: &Selection<'_>) -> Scan {
         self.scan_with(selection, |_, _| {})
     }
@@ -188,11 +192,13 @@ impl Housekeeper {
                 .then_with(|| a.source.cmp(&b.source))
                 .then_with(|| a.id.cmp(&b.id))
         });
+        let groups = if identify { group(&packages) } else { Vec::new() };
         Scan {
             schema: SCAN_SCHEMA,
             system: self.platform.system().clone(),
             sources,
             packages,
+            groups,
             warnings,
         }
     }

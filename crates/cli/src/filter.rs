@@ -1,6 +1,14 @@
 //! Which packages `housekeeper list` shows.
 
-use housekeeper_core::{InstallReason, Package, PackageKind};
+use std::collections::{HashMap, HashSet};
+
+use housekeeper_core::{InstallReason, Package, PackageKind, Scan};
+
+/// What `housekeeper list` shows: the filtered packages, or only the apps installed more than once.
+pub struct View {
+    pub filter: Filter,
+    pub duplicates: bool,
+}
 
 pub struct Filter {
     /// Show everything, not just what someone installed on purpose.
@@ -33,10 +41,41 @@ fn is_users_choice(package: &Package) -> bool {
         )
 }
 
+/// Keeps the groups with at least one install the filter keeps, and all of their installs (the point is to see every
+/// copy), in group order. Packages in no such group are dropped.
+pub fn keep_duplicates(scan: &mut Scan, filter: &Filter) {
+    let kept: HashSet<String> = scan
+        .packages
+        .iter()
+        .filter(|package| filter.keeps(package))
+        .map(Package::key)
+        .collect();
+    scan.groups
+        .retain(|group| group.packages.iter().any(|key| kept.contains(key)));
+    let place: HashMap<&str, (usize, usize)> = scan
+        .groups
+        .iter()
+        .enumerate()
+        .flat_map(|(g, group)| {
+            group
+                .packages
+                .iter()
+                .enumerate()
+                .map(move |(m, key)| (key.as_str(), (g, m)))
+        })
+        .collect();
+    let mut packages: Vec<((usize, usize), Package)> = std::mem::take(&mut scan.packages)
+        .into_iter()
+        .filter_map(|package| place.get(package.key().as_str()).map(|&at| (at, package)))
+        .collect();
+    packages.sort_by_key(|(at, _)| *at);
+    scan.packages = packages.into_iter().map(|(_, package)| package).collect();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use housekeeper_core::{Scope, SourceId};
+    use housekeeper_core::{AppGroup, Scope, SourceId, SystemInfo};
 
     fn package(name: &str, reason: InstallReason, kind: PackageKind) -> Package {
         let mut package = Package::new(SourceId::new("test"), name, name, Scope::System);
@@ -87,5 +126,57 @@ mod tests {
         assert!(search("GAME").keeps(&godot));
         assert!(search("godotengine").keeps(&godot));
         assert!(!search("blender").keeps(&godot));
+    }
+
+    #[test]
+    fn duplicates_show_every_install_of_a_group_any_install_matches_in_group_order() {
+        let mut cups_snap = package("cups", InstallReason::Explicit, PackageKind::App);
+        cups_snap.source = SourceId::new("snap");
+        let cups_deb = package("cups", InstallReason::Dependency, PackageKind::App);
+        let mut tsc_old = package("typescript", InstallReason::Explicit, PackageKind::App);
+        tsc_old.id = "v20/typescript".into();
+        let mut tsc_new = tsc_old.clone();
+        tsc_new.id = "v22/typescript".into();
+        let group = |name: &str, members: &[&Package]| AppGroup {
+            name: name.into(),
+            packages: members.iter().map(|p| p.key()).collect(),
+            shared: Vec::new(),
+        };
+        let groups = vec![
+            group("CUPS", &[&cups_deb, &cups_snap]),
+            group("typescript", &[&tsc_old, &tsc_new]),
+        ];
+        let mut scan = Scan {
+            schema: 1,
+            system: SystemInfo {
+                os: "linux".into(),
+                name: "Test".into(),
+                id: "test".into(),
+                version: None,
+                family: "test".into(),
+                image_based: false,
+                arch: "x86_64".into(),
+            },
+            sources: Vec::new(),
+            packages: vec![
+                tsc_new.clone(),
+                cups_snap.clone(),
+                package("gimp", InstallReason::Explicit, PackageKind::App),
+                cups_deb.clone(),
+                tsc_old.clone(),
+            ],
+            groups,
+            warnings: Vec::new(),
+        };
+        let filter = Filter {
+            all: false,
+            search: Some("cups".into()),
+        };
+        keep_duplicates(&mut scan, &filter);
+
+        let keys: Vec<String> = scan.packages.iter().map(Package::key).collect();
+        // The .deb is a dependency the default view hides, but it is still a copy of CUPS.
+        assert_eq!(keys, [cups_deb.key(), cups_snap.key()]);
+        assert_eq!(scan.groups.len(), 1);
     }
 }
