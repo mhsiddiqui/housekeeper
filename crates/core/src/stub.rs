@@ -8,7 +8,7 @@ use crate::host::Host;
 use crate::inventory::Housekeeper;
 use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
 use crate::platform::Platform;
-use crate::remove::{RemovalPlan, Remover};
+use crate::remove::{RemovalPlan, Remover, Simulation, Simulator};
 use crate::source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 use crate::testing::{FakeRunner, Fixture};
 
@@ -29,6 +29,11 @@ pub struct Stub {
     pub plan: Option<RemovalPlan>,
     /// Its remover cannot make a plan.
     pub plan_fails: bool,
+    /// What its remover's simulation answers for every package; `None` with `simulation_fails` false means it cannot
+    /// simulate.
+    pub simulation: Option<Simulation>,
+    /// Its simulation fails.
+    pub simulation_fails: bool,
 }
 
 impl Source for Stub {
@@ -104,6 +109,18 @@ impl Remover for Stub {
         match (&self.plan, self.plan_fails) {
             (Some(plan), false) => Ok(plan.clone()),
             _ => Err(SourceError::parse("removal plan", "garbage")),
+        }
+    }
+    fn simulator(&self) -> Option<&dyn Simulator> {
+        (self.simulation.is_some() || self.simulation_fails).then_some(self as &dyn Simulator)
+    }
+}
+
+impl Simulator for Stub {
+    fn simulate(&self, _: &Host, _: &Package) -> Result<Simulation, SourceError> {
+        match (&self.simulation, self.simulation_fails) {
+            (Some(simulation), false) => Ok(simulation.clone()),
+            _ => Err(SourceError::parse("simulation", "garbage")),
         }
     }
 }

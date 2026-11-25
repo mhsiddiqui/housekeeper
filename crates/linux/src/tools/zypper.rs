@@ -1,8 +1,8 @@
 //! zypper, which changes the RPM database on openSUSE and SUSE Linux Enterprise.
 
-use housekeeper_core::{Host, Package, RemovalPlan, Remover, SourceError};
+use housekeeper_core::{Host, Package, RemovalPlan, Remover, Simulation, Simulator, SourceError};
 
-use super::removal;
+use super::{removal, rpm_simulation};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Zypper;
@@ -34,5 +34,16 @@ impl Remover for Zypper {
             &["zypper", "--non-interactive", "remove"],
             &package.id,
         ))
+    }
+
+    fn simulator(&self) -> Option<&dyn Simulator> {
+        Some(self)
+    }
+}
+
+/// zypper removes what needs a package along with it; its `--dry-run` needs root, so the RPM database answers.
+impl Simulator for Zypper {
+    fn simulate(&self, host: &Host, package: &Package) -> Result<Simulation, SourceError> {
+        rpm_simulation(host, package)
     }
 }

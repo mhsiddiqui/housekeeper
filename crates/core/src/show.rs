@@ -170,7 +170,7 @@ impl Housekeeper {
                     }
                 });
 
-        let removal = match remove::plan(source.as_ref(), &self.host, &package) {
+        let removal = match remove::plan(source.as_ref(), &self.host, &package, &scan.packages, &mut warnings) {
             Ok(plan) => Some(plan),
             Err(error) => {
                 warnings.push(format!(
@@ -250,7 +250,7 @@ fn walk(host: &Host, location: &Path) -> (Vec<PathBuf>, usize) {
 mod tests {
     use super::*;
     use crate::model::PackageKind;
-    use crate::remove::{Actor, Step, Tier};
+    use crate::remove::{Actor, Simulation, Step, Tier};
     use crate::stub::{Stub, housekeeper, package};
     use crate::testing::{Fixture, HOME};
 
@@ -512,6 +512,92 @@ mod tests {
         assert_eq!(
             found(hk.show("manual:tool")).removal.map(|plan| plan.blockers),
             Some(vec!["protected: dpkg marks it Protected".to_string()])
+        );
+    }
+
+    #[test]
+    fn the_simulation_is_attached_and_blocks_when_refused_or_taking_a_protected_package() {
+        let fixture = Fixture::new();
+        let apt = RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::Helper, ["apt-get", "remove", "--yes", "x"])],
+        );
+        let simulation = |removes: &[&str], refused: &[&str]| Simulation {
+            by: "`apt-get --simulate remove`".into(),
+            removes: removes.iter().map(|id| id.to_string()).collect(),
+            refused: refused.iter().map(|line| line.to_string()).collect(),
+        };
+        let mut passwd = package("dpkg", "passwd", None, &[]);
+        passwd.protected = Some("its priority is required".into());
+        let stub = |packages: Vec<Package>, simulation: Option<Simulation>, simulation_fails| Stub {
+            id: "dpkg",
+            packages,
+            plan: Some(apt.clone()),
+            simulation,
+            simulation_fails,
+            ..Stub::default()
+        };
+        let show = |stub: Stub, query: &str| found(housekeeper(&fixture, "/usr/bin", vec![stub]).show(query));
+
+        let leaf = show(
+            stub(
+                vec![package("dpkg", "leaf", None, &[])],
+                Some(simulation(&["leaf"], &[])),
+                false,
+            ),
+            "leaf",
+        );
+        let plan = leaf.removal.unwrap();
+        assert!(plan.blockers.is_empty());
+        assert_eq!(plan.simulation, Some(simulation(&["leaf"], &[])));
+
+        let semanage = show(
+            stub(
+                vec![package("dpkg", "libsemanage2", None, &[]), passwd.clone()],
+                Some(simulation(&["libsemanage2", "passwd"], &[])),
+                false,
+            ),
+            "libsemanage2",
+        );
+        assert_eq!(
+            semanage.removal.unwrap().blockers,
+            ["it would also remove passwd, which is protected: its priority is required"]
+        );
+
+        let refused = show(
+            stub(
+                vec![package("dpkg", "gzip", None, &[])],
+                Some(simulation(
+                    &[],
+                    &["removing gzip breaks dependency 'gzip' required by base"],
+                )),
+                false,
+            ),
+            "gzip",
+        );
+        assert_eq!(
+            refused.removal.unwrap().blockers,
+            ["the package manager refuses: removing gzip breaks dependency 'gzip' required by base"]
+        );
+
+        let protected = show(stub(vec![passwd], None, true), "passwd");
+        assert_eq!(
+            protected.removal.unwrap().simulation,
+            None,
+            "a protected package is not simulated, so its failing simulation is never run"
+        );
+        assert!(protected.warnings.is_empty(), "{:?}", protected.warnings);
+
+        let failing = show(stub(vec![package("dpkg", "leaf", None, &[])], None, true), "leaf");
+        let plan = failing.removal.unwrap();
+        assert_eq!((plan.simulation, plan.blockers.len()), (None, 0));
+        assert!(
+            failing
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not simulate the removal of leaf")),
+            "{:?}",
+            failing.warnings
         );
     }
 }

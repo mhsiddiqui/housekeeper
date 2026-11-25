@@ -97,6 +97,9 @@ if [ "$installed" = yes ]; then
   # The removal plan goes through this distribution's own package tool, run by the root helper.
   grep -q "as root, by Housekeeper's helper: $planned" /tmp/show.txt \
     || { cat /tmp/show.txt >&2; fail "housekeeper show did not plan its removal with: $planned"; }
+  # The package manager (or the RPM database) was asked what else would go: nothing needs housekeeper.
+  grep -q '^ *removes nothing else, says ' /tmp/show.txt \
+    || { cat /tmp/show.txt >&2; fail "housekeeper show did not simulate its own removal"; }
   remove
   # Check the file itself: the shell may still remember where the command was.
   [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"

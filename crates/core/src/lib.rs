@@ -29,7 +29,7 @@ pub use model::{
     SystemInfo,
 };
 pub use platform::{Platform, path_dirs};
-pub use remove::{Action, Actor, RemovalPlan, Remover, Step, Tier};
+pub use remove::{Action, Actor, RemovalPlan, Remover, Simulation, Simulator, Step, Tier};
 pub use show::{Details, Files, FilesFrom, Lookup};
 pub use source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 pub use who::{Evidence, Found, Owner, Who};
