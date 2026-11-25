@@ -72,7 +72,7 @@ housekeeper list --search godot                # name, title or summary contains
 housekeeper list --duplicates                  # apps installed more than once, grouped
 housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
-housekeeper show code                          # everything about one installed item: files, launchers, what needs it
+housekeeper show code                          # everything about one item: files, what needs it, how it is removed
 ```
 
 `housekeeper sources` shows what was detected:
@@ -156,6 +156,8 @@ Also as:    Sublime Merge 2136 (snap:sublime-merge)
 Same app:   shares the name sublimemerge
 Files:      72 files, 28.7 MB, as the source records them (--files lists them)
 Needed by:  nothing installed
+Removal:    through its package manager
+            as root, by Housekeeper's helper: apt-get remove --yes sublime-merge
 ```
 
 - **Files** come from the package database (`dpkg-query --listfiles`, `rpm -ql`, pacman's database) or pip's `RECORD`
@@ -165,6 +167,12 @@ Needed by:  nothing installed
   dependencies, Flatpak apps on a runtime, snaps on a base or using its content), up to 10; `--json` has all of them.
   Optional dependencies (Recommends, optdepends) do not count. "not known" means the source does not record
   dependencies.
+- **Removal** is how the item would be removed the way its installer intended: its own uninstaller (rustup), its
+  package manager (apt, dnf, zypper, rpm-ostree or pacman for the system's packages; Flatpak, Snap, Homebrew, npm,
+  pipx, uv, pip, cargo), its format's convention (an AppImage and the launchers that start it go to the Trash), or
+  "not known" (hand installs). Each step says whether it would run as you or as root through Housekeeper's helper,
+  and what blocks it (a package of a Silverblue image, a system-wide npm install). Nothing is removed yet; that comes
+  with the helper.
 - When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
   matches, it exits with 2. `--json` prints the same as a document.
 

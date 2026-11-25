@@ -22,6 +22,12 @@ the project uses [Semantic Versioning](https://semver.org/).
   installed, commands, launchers, AppStream IDs, its other installs, its files (from the package database or pip's
   `RECORD`, otherwise its install folder; `--files` lists them) and the packages that directly need it. `--json` for
   scripts. `housekeeper sources --json` now says how each source knows what is installed (`evidence`).
+- `housekeeper show` says how the item would be removed the way its installer intended, without removing anything:
+  through the distribution's own tool for system packages (apt, dnf, zypper, rpm-ostree, pacman), through Flatpak,
+  Snap, Homebrew, npm (with the npm of the Node version it is under), pipx, uv, pip or cargo for theirs, by trashing
+  an AppImage and the launchers that start it, or with rustup's own uninstaller. Each step says whether it would run
+  as you or as root, and what blocks it (a package that is part of a Silverblue image, an npm or cargo install
+  outside your home folder). `--json` has the plan as `removal`.
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command

@@ -43,6 +43,8 @@ Rust has no class inheritance; Housekeeper is assembled from small objects behin
 | `OwnerLookup` | Optional ability: which installed packages own each of a set of paths | `DpkgSource`, `RpmSource`, `PacmanSource` |
 | `FileList` | Optional ability: the files one package installed, as the source records them | `DpkgSource`, `RpmSource`, `PacmanSource`, `PipSource` (`RECORD`), `CargoSource` (its binaries) |
 | `Dependants` | Optional ability: which installed packages of the same source directly need one package | `DpkgSource`, `RpmSource`, `PacmanSource`, `FlatpakSource` (apps on a runtime), `SnapSource` (base and content snaps) |
+| `Remover` | Optional ability: how one package would be removed, as a `RemovalPlan` (D31). Plans only until Phase 4 | Native sources through their package tool; Flatpak, Snap, Homebrew, npm, pipx, uv, pip, cargo; AppImage (its format's convention); manual (rustup's own uninstaller) |
+| `PackageTool` | The program a distribution changes its packages with (D24); offers abilities to its native source | `Apt`, `Dnf`, `Zypper`, `RpmOstree`, `Pacman` |
 | `CommandRunner` | Runs a program (argv only, never a shell) with a timeout | `SystemRunner`, `FakeRunner` (tests) |
 
 Abilities that only some sources have are separate traits, exposed by a source as optional components rather than
@@ -56,9 +58,9 @@ trait Source {
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> { None }      // native package managers
     fn file_list(&self) -> Option<&dyn FileList> { None }            // package managers, pip, cargo
     fn dependant_lookup(&self) -> Option<&dyn Dependants> { None }   // package managers, Flatpak, Snap
+    fn remover(&self) -> Option<&dyn Remover> { None }               // how a package is removed (plans only)
     fn install_roots(&self, host: &Host) -> Vec<PathBuf> { vec![] }  // where its programs live (pipx, npm…)
     // Added in later phases, each defaulting to None:
-    // fn remover(&self) -> Option<&dyn Remover> { None }             // Phase 3
     // fn file_installer(&self) -> Option<&dyn FileInstaller> { None } // Phase 5
     // fn updater(&self) -> Option<&dyn Updater> { None }             // Phase 7
 }
@@ -127,6 +129,29 @@ name or a command. Packages stay separate; a group only lists them and what they
 source's `file_list()` when the source records them, otherwise everything in its install location; the packages of
 the same source that directly need it, from `dependant_lookup()`; and its other installs from the scan's groups.
 
+`housekeeper show` also asks the source's `remover()` for a `RemovalPlan` (D31): the tier it comes from (own
+uninstaller, package manager, format convention, recipe, tracked manifest, unknown; D8), the steps in order, each
+marked as run by the user or by the root helper (D25), what blocks the plan, and whether a restart is needed. A source
+without a remover gives an `Unknown` plan. Nothing is carried out before Phase 4.
+
+### Package tools
+
+A native source only reads its package database. What changes it is the distribution's **package tool** (D24): one
+file per tool in `crates/linux/src/tools/`, registered like a source with `register_package_tool!(<Type>);`, that
+declares the families it serves and whether it is the tool of their image-based systems:
+
+```rust
+impl LinuxTool for RpmOstree {
+    const SERVES: Serves = Serves { families: &["fedora"], image_based: true };
+    fn create() -> Self { Self }
+}
+```
+
+`LinuxPlatform` takes the family the native source was picked for and creates the first tool that serves it (dnf on
+Fedora, rpm-ostree on Silverblue, zypper on openSUSE), and hands it to the native source in its `Context`. The native
+source's `remover()` is the tool's. A distribution that no family claims gets no tool, so nothing guesses how to change
+its packages.
+
 ### The Host
 
 Sources never touch `std::fs` paths or `std::process` directly. They go through `Host`:
@@ -175,3 +200,4 @@ Each challenge raised during design review, and the decision taken.
 | D28 | Telling apps from the rest of a native package database: dpkg, rpm and pacman say nothing about which packages a person launches, so every package someone marked as installed on purpose was listed (448 on an Ubuntu desktop: fonts, firmware, Python modules, data) | A package is an `App` when it has a launcher shown in the application menu or a command a package database lists in the command folders, and a `Component` (hidden without `--all`) when its package database answered and it has neither. The platform lists launchers (`Platform::launchers`: desktop entries on Linux, read as the freedesktop.org specification says, one per desktop ID, the one that takes precedence) and command folders (`Platform::command_dirs`: the `PATH` plus the standard program folders); core attaches both with `who`'s evidence (D23), in one batched ownership query per package database that runs while the sources are read. A launcher goes to the first of its file, the files it hides, and its `Exec` program that a source accounts for, so a user's copy of a Flatpak entry stays with the Flatpak app rather than the `flatpak` package its command line runs. Each source reporting its own launchers was rejected: the evidence chain would be repeated in every source and a desktop file in `~/.local` names no source. Classifying by package section or name (`fonts-*`, `Section: libs`) was rejected: it differs per distribution and misses data packages with ordinary names. rpm lists every installed file once (`rpm -qa`) instead of `rpm -qf` when more than 64 paths are asked, because `rpm -qf` prints an owning package's whole file list once per path. |
 | D29 | The same app installed more than once (a `.deb` and a snap, npm under two Node versions) shows as unrelated rows, but merging them would hide which copy runs and how each is removed | Packages stay separate; `Scan::groups` lists the installs of one app and what they share. Two packages are linked when they share an AppStream ID (catalog entries attached like launchers, a Flatpak's ID, a snap's `common-id`), a launcher ID (compared with AppStream IDs, without `.desktop` or case), a name or title (lowercase letters and digits), or a command, and links are followed transitively. Only `App` packages take part: libraries and components of one name are parts, not installs. Within one source only packages of the same name are linked, because a package database splits one install into parts that share a title (`vim` and `vim-common`). Matching on AppStream IDs alone was rejected: on an Ubuntu desktop no two installs shared one, while names, titles and commands found all four real duplicates. A name match can join unrelated software that shares a name; the group lists what was shared so the evidence is visible. |
 | D30 | `housekeeper show` needs a package's files and what depends on it, which only some sources record, and an install location is not always the package's alone (every `cargo install` shares `~/.cargo/bin`; a pip package's location is its `.dist-info` folder) | Two optional abilities, `FileList` (`file_list()`) and `Dependants` (`dependant_lookup()`), offered by the sources that record them: dpkg (`dpkg-query --listfiles`, Depends/Pre-Depends against the package's name and Provides), rpm (`rpm -ql`, `--whatrequires` on what it provides), pacman (its local database's `files` and `%DEPENDS%`/`%PROVIDES%`), pip (`RECORD`), cargo (its binaries), Flatpak (apps on a runtime) and Snap (snaps on a base or using its content). Without `FileList`, a package's files are everything in its install location, symlinked folders listed but not entered. Dependants are direct only and within one source: the full set a removal would take is the package manager's simulation (plan 3.3). Optional dependencies (Recommends, optdepends) do not count. The text shows the first 10 dependants and the full list is in `--json`; the file list is printed only with `--files`. The accessor is `dependant_lookup()`, not `dependants()`, so it does not clash with the trait's own method. |
+| D31 | A removal plan must be reviewable now and carried out later (Phase 4) without being rebuilt, and the root helper must never take a command line from an unprivileged process | `Source::remover()` offers a `Remover` that makes a `RemovalPlan`: its tier (D8), its steps in order, each marked as run by the user or by the root helper (D25), what blocks it, and whether a restart is needed. Steps are typed: run a program (argv), move a path to the Trash, or remove packages through the package tool; the last carries the tool and the package names, which is all the helper will be given (it builds the command itself), plus the command for review. Native sources get their remover from the package tool (D24), picked by the family the native source serves and whether the system is image-based; a distribution no family claims gets none. Language package managers installed outside the home folder (a system npm prefix, a system cargo root) are blocked rather than run as root, because the helper only runs the system's package tool and npm runs package scripts. rpm-ostree only uninstalls what the user layered; the image's own packages are blocked (hiding them with `override remove` is not removing what the user installed). An AppImage's file and the launchers that start it are trashed, by the helper when outside the home folder, like D25's recipe actions on system paths; launcher files they hide are left alone. Hand installs and script installers other than rustup stay `Unknown` until recipes (plan 3.4). |
