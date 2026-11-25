@@ -2,14 +2,15 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
-    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, Remover,
+    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native, register};
+use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
 pub const ID: SourceId = SourceId::new("pacman");
 
@@ -45,7 +46,11 @@ const CORE_PACKAGES: &[&str] = &[
     "linux-rt-lts",
 ];
 
-pub struct PacmanSource;
+/// Reads pacman's local database; removing goes through the system's package tool (pacman, decision D24).
+#[derive(Default)]
+pub struct PacmanSource {
+    tool: Option<Arc<dyn PackageTool>>,
+}
 
 impl LinuxSource for PacmanSource {
     const NATIVE: Option<Native> = Some(Native {
@@ -65,8 +70,10 @@ impl LinuxSource for PacmanSource {
         program: "pacman",
     });
 
-    fn create(_: &Context<'_>) -> Self {
-        Self
+    fn create(context: &Context<'_>) -> Self {
+        Self {
+            tool: context.tool.cloned(),
+        }
     }
 }
 register!(PacmanSource);
@@ -118,6 +125,10 @@ impl Source for PacmanSource {
 
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         Some(self)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        self.tool.as_deref().and_then(PackageTool::remover)
     }
 }
 
@@ -450,7 +461,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
 
     fn scan(fixture: &Fixture) -> Vec<Package> {
         let runner = FakeRunner::new().respond("pacman -Qmq", "yay\n");
-        PacmanSource
+        PacmanSource::default()
             .inventory(&fixture.host(runner), &ScanContext::default())
             .unwrap()
     }
@@ -498,7 +509,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
                 ..Output::default()
             },
         );
-        let packages = PacmanSource
+        let packages = PacmanSource::default()
             .inventory(&fixture.host(runner), &ScanContext::default())
             .unwrap();
         assert_eq!(packages.len(), 4);
@@ -538,7 +549,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
         fixture.file("/var/lib/pacman/local/broken-1-1/desc", "%VERSION%\n1-1\n");
         let runner = FakeRunner::new().respond("pacman -Qmq", "");
         assert!(matches!(
-            PacmanSource.inventory(&fixture.host(runner), &ScanContext::default()),
+            PacmanSource::default().inventory(&fixture.host(runner), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
         assert!(parse_desc("garbage\n", &HashSet::new()).is_err());
@@ -561,7 +572,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
                       / _.-' .-.  .-.  .-.   Copyright (C) 2006-2024 Pacman Development Team\n";
         let runner = FakeRunner::new().respond("pacman --version", output);
         assert_eq!(
-            PacmanSource.probe(&Fixture::new().host(runner)),
+            PacmanSource::default().probe(&Fixture::new().host(runner)),
             Availability::Available {
                 version: Some("7.0.0".into())
             }
@@ -581,7 +592,7 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
             ),
         );
         let host = Fixture::new().host(runner);
-        let owners = PacmanSource
+        let owners = PacmanSource::default()
             .owners(
                 &host,
                 &paths(&["/opt/visual-studio-code", "/usr/local/bin/tool", "/opt/manual"]),
@@ -606,7 +617,9 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
         );
         let packages = scan(&fixture);
         let host = fixture.host(FakeRunner::new());
-        let files = PacmanSource.files(&host, find(&packages, "lib32-mesa")).unwrap();
+        let files = PacmanSource::default()
+            .files(&host, find(&packages, "lib32-mesa"))
+            .unwrap();
         let expected = ["/usr", "/usr/lib32", "/usr/lib32/libGL.so.1"].map(PathBuf::from);
         assert_eq!(files, expected);
     }
@@ -635,7 +648,9 @@ Yet another yogurt. Pacman wrapper and AUR helper written in go.
         );
         let packages = scan(&fixture);
         let host = fixture.host(FakeRunner::new());
-        let dependants = PacmanSource.dependants(&host, find(&packages, "gtk3")).unwrap();
+        let dependants = PacmanSource::default()
+            .dependants(&host, find(&packages, "gtk3"))
+            .unwrap();
         assert_eq!(dependants, ["firefox", "gimp", "zenity"]);
     }
 }

@@ -2,16 +2,17 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
-    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, Remover,
+    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native, register};
+use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
 pub const ID: SourceId = SourceId::new("rpm");
 
@@ -52,8 +53,10 @@ const CORE_PACKAGES: &[&str] = &[
 ];
 
 /// Reads RPM packages. On image-based systems (Silverblue and friends) the install reason comes from `rpm-ostree`.
+/// Removing goes through the system's package tool (dnf, zypper or rpm-ostree, decision D24).
 pub struct RpmSource {
     image_based: bool,
+    tool: Option<Arc<dyn PackageTool>>,
 }
 
 impl LinuxSource for RpmSource {
@@ -91,14 +94,20 @@ impl LinuxSource for RpmSource {
     });
 
     fn create(context: &Context<'_>) -> Self {
-        Self::new(context.distro.image_based)
+        Self {
+            tool: context.tool.cloned(),
+            ..Self::new(context.distro.image_based)
+        }
     }
 }
 register!(RpmSource);
 
 impl RpmSource {
     pub fn new(image_based: bool) -> Self {
-        Self { image_based }
+        Self {
+            image_based,
+            tool: None,
+        }
     }
 
     fn reasons(&self, host: &Host) -> Result<Reasons, SourceError> {
@@ -160,6 +169,10 @@ impl Source for RpmSource {
 
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         Some(self)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        self.tool.as_deref().and_then(PackageTool::remover)
     }
 }
 

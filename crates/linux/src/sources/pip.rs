@@ -3,8 +3,8 @@
 use std::path::{Component, Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileList, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source,
-    SourceError, SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileList, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
+    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use crate::provider::{Context, LinuxSource, register};
@@ -52,6 +52,10 @@ impl Source for PipUserSource {
     fn file_list(&self) -> Option<&dyn FileList> {
         Some(self)
     }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
 }
 
 /// The paths in the package's `RECORD` (PEP 376), or the `.dist-info` directory alone when it has none.
@@ -70,6 +74,47 @@ impl FileList for PipUserSource {
             .map(|path| resolve(site, &path))
             .collect())
     }
+}
+
+/// `pip uninstall` run by the Python whose user site holds the package (the `pythonX.Y` its id starts with).
+impl Remover for PipUserSource {
+    fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        let Some((python, _)) = package.id.split_once('/') else {
+            return Ok(RemovalPlan::unknown());
+        };
+        let (program, stdlib) = interpreter(host, python);
+        let mut argv = vec![
+            program,
+            "-m".to_string(),
+            "pip".to_string(),
+            "uninstall".to_string(),
+            "--yes".to_string(),
+        ];
+        // PEP 668: pip refuses to change anything, the user site included, for an interpreter whose standard
+        // library holds `EXTERNALLY-MANAGED`. Removing a package from the user's own site does not touch what the
+        // distribution installed, so overriding the refusal here is safe.
+        if stdlib.is_some_and(|dir| host.exists(dir.join("EXTERNALLY-MANAGED"))) {
+            argv.push("--break-system-packages".to_string());
+        }
+        argv.push(package.name.clone());
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, argv)],
+        ))
+    }
+}
+
+/// The interpreter for `python` (`python3.12`) and its standard library: from the first of `/usr/local` and `/usr`
+/// that has it, the order of the standard `PATH`, else the bare name with no known standard library.
+fn interpreter(host: &Host, python: &str) -> (String, Option<PathBuf>) {
+    for prefix in ["/usr/local", "/usr"] {
+        let prefix = Path::new(prefix);
+        let program = prefix.join("bin").join(python);
+        if host.exists(&program) {
+            return (program.display().to_string(), Some(prefix.join("lib").join(python)));
+        }
+    }
+    (python.to_string(), None)
 }
 
 /// The path field of a `RECORD` line: CSV, with a path containing a comma double-quoted and `""` for a quote.
@@ -368,5 +413,54 @@ mako/__init__.py,sha256=abc,242
             .files(&host, find(&packages, "python3.11/coverage"))
             .unwrap();
         assert_eq!(files, [Path::new(SITE_311).join("coverage-7.14.0.dist-info")]);
+    }
+
+    #[test]
+    fn removal_breaks_system_packages_only_when_python_is_externally_managed() {
+        let fixture = fixture();
+        fixture
+            .executable("/usr/bin/python3.12", "")
+            .file("/usr/lib/python3.12/EXTERNALLY-MANAGED", "[externally-managed]\n")
+            .executable("/usr/local/bin/python3.11", "")
+            .file("/usr/lib/python3.11/EXTERNALLY-MANAGED", "[externally-managed]\n");
+        let host = fixture.host(FakeRunner::new());
+        let packages = PipUserSource.inventory(&host, &ScanContext::default()).unwrap();
+
+        let mako = PipUserSource.plan(&host, find(&packages, "python3.12/Mako")).unwrap();
+        assert_eq!(mako.tier, Tier::PackageManager);
+        assert_eq!(
+            mako.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "/usr/bin/python3.12",
+                    "-m",
+                    "pip",
+                    "uninstall",
+                    "--yes",
+                    "--break-system-packages",
+                    "Mako"
+                ]
+            )]
+        );
+
+        let coverage = PipUserSource
+            .plan(&host, find(&packages, "python3.11/coverage"))
+            .unwrap();
+        assert_eq!(
+            coverage.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "/usr/local/bin/python3.11",
+                    "-m",
+                    "pip",
+                    "uninstall",
+                    "--yes",
+                    "coverage"
+                ]
+            )]
+        );
+        assert!(PipUserSource.remover().is_some());
     }
 }

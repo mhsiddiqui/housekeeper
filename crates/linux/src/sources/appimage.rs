@@ -5,8 +5,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Source, SourceError, SourceId,
-    SourceInfo, SourceKind,
+    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
@@ -78,6 +78,37 @@ impl Source for AppImageSource {
             }
         }
         Ok(packages)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+/// An AppImage is removed by its convention: the file itself, then the launchers made for it (those that start it,
+/// directly or through a symlink). Launcher files they hide are left alone: they were not made for this file and may
+/// belong to a package.
+impl Remover for AppImageSource {
+    fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        let file = package.location.clone().unwrap_or_else(|| PathBuf::from(&package.id));
+        let by = |path: &Path| {
+            if path.starts_with(host.home()) {
+                Actor::User
+            } else {
+                Actor::Helper
+            }
+        };
+        let mut steps = vec![Step::trash(by(&file), &file)];
+        let launchers = package.launchers.iter().filter(|launcher| {
+            launcher
+                .program
+                .as_deref()
+                .is_some_and(|program| program == file || resolve_symlinks(host, program) == file)
+        });
+        for launcher in launchers {
+            steps.push(Step::trash(by(&launcher.path), &launcher.path));
+        }
+        Ok(RemovalPlan::new(Tier::FormatConvention, steps))
     }
 }
 
@@ -273,5 +304,63 @@ mod tests {
     #[test]
     fn nothing_installed_is_empty() {
         assert!(scan(&Fixture::new()).is_empty());
+    }
+
+    fn launcher(path: &str, program: &str) -> housekeeper_core::Launcher {
+        housekeeper_core::Launcher {
+            id: "app.desktop".into(),
+            name: "App".into(),
+            icon: None,
+            path: path.into(),
+            shadows: Vec::new(),
+            program: Some(program.into()),
+            hidden: false,
+        }
+    }
+
+    #[test]
+    fn home_appimage_trashes_its_file_and_its_own_launchers_as_the_user() {
+        let fixture = Fixture::new();
+        let file = format!("{HOME}/Applications/Obsidian-1.6.7.AppImage");
+        fixture.executable(&file, TYPE2);
+        fixture.symlink(&format!("{HOME}/.local/bin/obsidian"), &file);
+        let host = fixture.host(FakeRunner::new());
+        let mut package = package(&host, Path::new(&file));
+        let mut own = launcher(&format!("{HOME}/.local/share/applications/obsidian.desktop"), &file);
+        own.shadows = vec![PathBuf::from("/usr/share/applications/obsidian.desktop")];
+        package.launchers = vec![
+            own,
+            launcher(
+                &format!("{HOME}/.local/share/applications/cli.desktop"),
+                &format!("{HOME}/.local/bin/obsidian"),
+            ),
+            launcher(
+                &format!("{HOME}/.local/share/applications/other.desktop"),
+                "/usr/bin/other",
+            ),
+        ];
+        let plan = AppImageSource.plan(&host, &package).unwrap();
+        assert_eq!(plan.tier, Tier::FormatConvention);
+        assert_eq!(
+            plan.steps,
+            [
+                Step::trash(Actor::User, &file),
+                Step::trash(
+                    Actor::User,
+                    format!("{HOME}/.local/share/applications/obsidian.desktop")
+                ),
+                Step::trash(Actor::User, format!("{HOME}/.local/share/applications/cli.desktop")),
+            ]
+        );
+    }
+
+    #[test]
+    fn opt_appimage_is_trashed_by_the_helper() {
+        let fixture = Fixture::new();
+        fixture.executable("/opt/Tool.AppImage", TYPE2);
+        let host = fixture.host(FakeRunner::new());
+        let package = package(&host, Path::new("/opt/Tool.AppImage"));
+        let plan = AppImageSource.plan(&host, &package).unwrap();
+        assert_eq!(plan.steps, [Step::trash(Actor::Helper, "/opt/Tool.AppImage")]);
     }
 }

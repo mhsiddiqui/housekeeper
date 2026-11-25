@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use housekeeper_core::{
-    Availability, FileList, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileList, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -79,6 +79,10 @@ impl Source for CargoSource {
     fn file_list(&self) -> Option<&dyn FileList> {
         Some(self)
     }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
 }
 
 /// Every cargo package shares `<cargo home>/bin`, so its files are exactly its own binaries there.
@@ -86,6 +90,37 @@ impl FileList for CargoSource {
     fn files(&self, host: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
         let bin = cargo_home(host).join("bin");
         Ok(package.commands.iter().map(|command| bin.join(command)).collect())
+    }
+}
+
+/// `cargo uninstall --root <cargo home>`, run by the cargo in that home when it has one (rustup puts it there).
+impl Remover for CargoSource {
+    fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        let home = cargo_home(host);
+        if package.scope == Scope::System {
+            return Ok(RemovalPlan::new(Tier::PackageManager, Vec::new()).blocked(format!(
+                "installed under {}, outside your home folder; removing it needs root, which Housekeeper's helper \
+                 only uses for the system's package tool (D25)",
+                home.display()
+            )));
+        }
+        let own_cargo = home.join("bin/cargo");
+        let cargo = if host.exists(&own_cargo) {
+            own_cargo.display().to_string()
+        } else {
+            "cargo".to_string()
+        };
+        let argv = [
+            cargo,
+            "uninstall".to_string(),
+            "--root".to_string(),
+            home.display().to_string(),
+            package.name.clone(),
+        ];
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, argv)],
+        ))
     }
 }
 
@@ -281,5 +316,45 @@ mod tests {
             ]
         );
         assert!(CargoSource.file_list().is_some());
+    }
+
+    #[test]
+    fn user_install_is_removed_with_cargo_uninstall() {
+        let fixture = Fixture::new();
+        fixture
+            .file("/home/user/.cargo/.crates2.json", CRATES2)
+            .executable("/home/user/.cargo/bin/cargo", "");
+        let host = fixture.host(FakeRunner::new());
+        let packages = CargoSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = CargoSource.plan(&host, find(&packages, "rmux")).unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert!(plan.blockers.is_empty());
+        assert_eq!(
+            plan.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "/home/user/.cargo/bin/cargo",
+                    "uninstall",
+                    "--root",
+                    "/home/user/.cargo",
+                    "rmux"
+                ]
+            )]
+        );
+        assert!(CargoSource.remover().is_some());
+    }
+
+    #[test]
+    fn system_install_is_blocked() {
+        let fixture = Fixture::new();
+        fixture.file("/opt/cargo/.crates.toml", CRATES_V1);
+        let host = fixture.host_with_vars(FakeRunner::new(), &[("CARGO_HOME", "/opt/cargo")]);
+        let packages = CargoSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = CargoSource.plan(&host, find(&packages, "rmux")).unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert!(plan.steps.is_empty());
+        assert_eq!(plan.blockers.len(), 1);
+        assert!(plan.blockers[0].contains("under /opt/cargo"));
     }
 }

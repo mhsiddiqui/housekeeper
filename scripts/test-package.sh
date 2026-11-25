@@ -32,6 +32,7 @@ elif command -v apt-get >/dev/null; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get install -y -qq "$pkg" >/dev/null
   remove() { apt-get remove -y -qq housekeeper >/dev/null; }
+  planned='apt-get remove --yes housekeeper'
 elif command -v zypper >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
@@ -39,16 +40,19 @@ elif command -v zypper >/dev/null; then
   # flaky mirror fails the install with exit code 106 although the local package needs nothing from them.
   zypper --non-interactive --no-remote install --allow-unsigned-rpm "$pkg"
   remove() { zypper --non-interactive --no-remote remove housekeeper; }
+  planned='zypper --non-interactive remove housekeeper-'
 elif command -v dnf >/dev/null; then
   native=rpm
   pkg=$(one "$dist/*.rpm")
   dnf install -y --disablerepo='*' "$pkg"
   remove() { dnf remove -y --disablerepo='*' housekeeper; }
+  planned='dnf remove --assumeyes housekeeper-'
 elif command -v pacman >/dev/null; then
   native=pacman
   pkg=$(one "$dist/*.pkg.tar.zst")
   pacman -U --noconfirm "$pkg"
   remove() { pacman -R --noconfirm housekeeper; }
+  planned='pacman --remove --noconfirm housekeeper'
 else
   fail "no supported package manager"
 fi
@@ -90,6 +94,9 @@ if [ "$installed" = yes ]; then
     || { cat /tmp/show.txt >&2; fail "housekeeper show did not list /usr/bin/housekeeper among its files"; }
   grep -q '^Needed by: *nothing installed$' /tmp/show.txt \
     || { cat /tmp/show.txt >&2; fail "housekeeper show could not tell what needs it"; }
+  # The removal plan goes through this distribution's own package tool, run by the root helper.
+  grep -q "as root, by Housekeeper's helper: $planned" /tmp/show.txt \
+    || { cat /tmp/show.txt >&2; fail "housekeeper show did not plan its removal with: $planned"; }
   remove
   # Check the file itself: the shell may still remember where the command was.
   [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"

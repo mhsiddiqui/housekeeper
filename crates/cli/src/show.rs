@@ -2,7 +2,7 @@
 
 use std::io::{self, Write};
 
-use housekeeper_core::{Details, FilesFrom, Package, PackageKind, Shared};
+use housekeeper_core::{Action, Actor, Details, FilesFrom, Package, PackageKind, RemovalPlan, Shared, Tier};
 
 use crate::table::{Table, human_size};
 use crate::who::circumstances;
@@ -104,6 +104,14 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
         }
         None => line("Needed by", "not known")?,
     }
+    match &details.removal {
+        Some(plan) => {
+            for (n, text) in removal(plan).iter().enumerate() {
+                line(if n == 0 { "Removal" } else { "" }, text)?;
+            }
+        }
+        None => line("Removal", "could not be planned")?,
+    }
 
     if all_files {
         if let Some(files) = &details.files {
@@ -163,6 +171,50 @@ fn shared(shared: &[Shared]) -> String {
     }
 }
 
+/// The plan's tier, then each step, then what stands in the way. Nothing is removed yet; this only says how.
+fn removal(plan: &RemovalPlan) -> Vec<String> {
+    let tier = match plan.tier {
+        Tier::OwnUninstaller => "with its own uninstaller",
+        Tier::PackageManager => "through its package manager",
+        Tier::FormatConvention => "as its format's convention says (the file and what was made for it)",
+        Tier::Recipe => "with a reviewed recipe",
+        Tier::Manifest => "from the record made when it was installed",
+        Tier::Unknown => "not known: nothing records how it was installed",
+    };
+    let mut lines = vec![tier.to_string()];
+    for step in &plan.steps {
+        let by = match step.by {
+            Actor::User => "as you",
+            Actor::Helper => "as root, by Housekeeper's helper",
+        };
+        let what = match &step.action {
+            Action::Run { argv } | Action::RemovePackages { argv, .. } => command_line(argv),
+            Action::Trash { path } => format!("move {} to the Trash", path.display()),
+        };
+        lines.push(format!("{by}: {what}"));
+    }
+    if plan.restart {
+        lines.push("takes effect after a restart".into());
+    }
+    lines.extend(plan.blockers.iter().map(|blocker| format!("blocked: {blocker}")));
+    lines
+}
+
+/// `argv` as one line, quoting arguments that are empty or hold spaces or quotes so the line reads unambiguously.
+fn command_line(argv: &[String]) -> String {
+    let quoted: Vec<String> = argv
+        .iter()
+        .map(|arg| {
+            if arg.is_empty() || arg.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"') {
+                format!("'{}'", arg.replace('\'', r"'\''"))
+            } else {
+                arg.clone()
+            }
+        })
+        .collect();
+    quoted.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,6 +253,14 @@ mod tests {
                 size_bytes: 2_000_000,
             }),
             needed_by: Some(needed_by),
+            removal: Some(RemovalPlan::new(
+                Tier::PackageManager,
+                vec![housekeeper_core::Step::remove_packages(
+                    "apt",
+                    vec!["libc6:amd64".into()],
+                    ["apt-get", "remove", "--yes", "libc6:amd64"].map(String::from).to_vec(),
+                )],
+            )),
             warnings: Vec::new(),
         };
         let mut out = Vec::new();
@@ -227,6 +287,8 @@ Needed by:  app0 (dpkg:app0)
             app8 (dpkg:app8)
             app9 (dpkg:app9)
             … and 2 more (--json lists every one)
+Removal:    through its package manager
+            as root, by Housekeeper's helper: apt-get remove --yes libc6:amd64
 
 /usr/lib/libc.so.6
 /usr/share/doc/libc6

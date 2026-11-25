@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -67,6 +67,40 @@ impl Source for HomebrewSource {
             packages.extend(casks(host, prefix, scope, &id)?);
         }
         Ok(packages)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+impl Remover for HomebrewSource {
+    /// `<prefix>/bin/brew uninstall [--cask] <name>` with the `brew` of the prefix the package is in, as the user.
+    /// The prefix comes from the package's location: `<prefix>/Cellar/<name>/<version>` or `<prefix>/Caskroom/<name>`.
+    fn plan(&self, _host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        // Ids are `<kind>/<name>`, with `<prefix>:` in front when several prefixes exist.
+        let kind_and_name = package
+            .id
+            .rsplit_once(':')
+            .map_or(package.id.as_str(), |(_, rest)| rest);
+        let cask = kind_and_name.starts_with("cask/");
+        let levels_up = if cask { 2 } else { 3 };
+        let Some(prefix) = package
+            .location
+            .as_deref()
+            .and_then(|location| location.ancestors().nth(levels_up))
+        else {
+            return Ok(RemovalPlan::unknown());
+        };
+        let mut argv = vec![prefix.join("bin/brew").display().to_string(), "uninstall".to_string()];
+        if cask {
+            argv.push("--cask".to_string());
+        }
+        argv.push(package.name.clone());
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, argv)],
+        ))
     }
 }
 
@@ -377,6 +411,37 @@ mod tests {
         let mine = find(&packages, &format!("{home_prefix}:formula/hello"));
         assert_eq!(mine.scope, Scope::User);
         assert_eq!(find(&packages, "/opt/brew:formula/hello").scope, Scope::System);
+    }
+
+    #[test]
+    fn removal_uses_the_brew_of_the_packages_prefix() {
+        let fixture = Fixture::new();
+        brew(&fixture, PREFIX);
+        brew(&fixture, "/opt/brew");
+        fixture
+            .dir(&format!("{PREFIX}/Cellar/hello/2.12.1"))
+            .dir("/opt/brew/Cellar/hello/2.12.1")
+            .dir("/opt/brew/Caskroom/font-fira-code/6.2");
+        let host = fixture.host_with_vars(FakeRunner::new(), &[("HOMEBREW_PREFIX", "/opt/brew")]);
+        let packages = HomebrewSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = |id: &str| HomebrewSource.plan(&host, find(&packages, id)).unwrap();
+        assert_eq!(
+            plan("/opt/brew:formula/hello"),
+            RemovalPlan::new(
+                Tier::PackageManager,
+                vec![Step::run(Actor::User, ["/opt/brew/bin/brew", "uninstall", "hello"])]
+            )
+        );
+        assert_eq!(
+            plan("/opt/brew:cask/font-fira-code"),
+            RemovalPlan::new(
+                Tier::PackageManager,
+                vec![Step::run(
+                    Actor::User,
+                    ["/opt/brew/bin/brew", "uninstall", "--cask", "font-fira-code"]
+                )]
+            )
+        );
     }
 
     #[test]

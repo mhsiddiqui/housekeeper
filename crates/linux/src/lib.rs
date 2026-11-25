@@ -1,7 +1,8 @@
 //! Linux platform for Housekeeper.
 //!
-//! Sources live in `src/sources/`, one file each, and register themselves (see [`provider`]). This file only picks
-//! the native package manager for the running distribution and assembles everything; it never names a source.
+//! Sources live in `src/sources/` and package tools in `src/tools/`, one file each, and register themselves (see
+//! [`provider`]). This file only picks the native package manager and its tool for the running distribution and
+//! assembles everything; it never names a source or a tool.
 
 mod appstream;
 mod desktop;
@@ -11,6 +12,7 @@ mod owner;
 pub mod provider;
 mod python;
 pub mod sources;
+mod tools;
 mod xdg;
 
 use std::path::PathBuf;
@@ -19,8 +21,9 @@ use std::sync::Arc;
 use housekeeper_core::{Host, Launcher, Metainfo, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs};
 
 use crate::distro::Distro;
-use crate::provider::{Context, Provider};
+use crate::provider::{Context, PackageTool, Provider, ToolProvider};
 use crate::sources::PROVIDERS;
+use crate::tools::TOOLS;
 
 /// A Linux system and the sources that apply to it.
 pub struct LinuxPlatform {
@@ -31,13 +34,17 @@ pub struct LinuxPlatform {
 
 impl LinuxPlatform {
     pub fn detect(host: &Host) -> Self {
-        Self::assemble(Distro::detect(host), host, PROVIDERS)
+        Self::assemble(Distro::detect(host), host, PROVIDERS, TOOLS)
     }
 
-    fn assemble(distro: Distro, host: &Host, providers: &[Provider]) -> Self {
+    fn assemble(distro: Distro, host: &Host, providers: &[Provider], tools: &[ToolProvider]) -> Self {
         let native = native_provider(&distro, host, providers);
         let family = native.map_or("unknown", |(_, family)| family);
-        let context = Context { distro: &distro };
+        let tool = package_tool(family, distro.image_based, tools);
+        let context = Context {
+            distro: &distro,
+            tool: tool.as_ref(),
+        };
         let mut sources: Vec<Arc<dyn Source>> = native
             .map(|(provider, _)| provider)
             .into_iter()
@@ -142,6 +149,16 @@ fn native_provider<'p>(
         })
 }
 
+/// The tool that changes the native package database (decision D24): the first whose families include the one the
+/// native source was picked for, and that serves image-based systems exactly when this is one. A distribution no
+/// family claims has none, so nothing guesses how to change its packages.
+fn package_tool(family: &str, image_based: bool, tools: &[ToolProvider]) -> Option<Arc<dyn PackageTool>> {
+    tools
+        .iter()
+        .find(|tool| tool.serves.image_based == image_based && tool.serves.families.contains(&family))
+        .map(ToolProvider::create)
+}
+
 /// Display order: the system's own packages first, scripts and hand installs last.
 fn kind_order(kind: SourceKind) -> u8 {
     match kind {
@@ -157,6 +174,7 @@ fn kind_order(kind: SourceKind) -> u8 {
 mod tests {
     use super::*;
     use housekeeper_core::testing::{FakeRunner, Fixture};
+    use housekeeper_core::{Action, InstallReason, Package, Scope};
 
     fn platform(os_release: &str, runner: FakeRunner) -> LinuxPlatform {
         let fixture = Fixture::new();
@@ -212,5 +230,60 @@ mod tests {
         assert_eq!(ids.last().map(String::as_str), Some("manual"));
         let kinds: Vec<u8> = platform.sources().iter().map(|s| kind_order(s.info().kind)).collect();
         assert!(kinds.is_sorted(), "{ids:?}");
+    }
+
+    /// The command the native source plans for removing a package it explicitly installed, if any.
+    fn removal_command(os_release: &str, image_based: bool) -> Option<String> {
+        let fixture = Fixture::new();
+        fixture.file("/etc/os-release", os_release);
+        if image_based {
+            fixture.file("/run/ostree-booted", "");
+        }
+        let host = fixture.host(FakeRunner::new().program("dpkg-query").program("rpm"));
+        let platform = LinuxPlatform::detect(&host);
+        let native = platform
+            .sources()
+            .first()
+            .filter(|s| s.info().kind == SourceKind::System)?;
+        let mut package = Package::new(native.info().id, "htop-3.3.0-1.x86_64", "htop", Scope::System);
+        package.reason = InstallReason::Explicit;
+        let plan = native.remover()?.plan(&host, &package).ok()?;
+        match &plan.steps.first()?.action {
+            Action::RemovePackages { argv, .. } => Some(argv[..argv.len() - 1].join(" ")),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn native_packages_are_removed_with_the_distributions_own_tool() {
+        let cases = [
+            ("ID=ubuntu\nID_LIKE=debian\n", false, Some("apt-get remove --yes")),
+            ("ID=fedora\n", false, Some("dnf remove --assumeyes")),
+            (
+                "ID=almalinux\nID_LIKE=\"rhel centos fedora\"\n",
+                false,
+                Some("dnf remove --assumeyes"),
+            ),
+            ("ID=fedora\nVARIANT_ID=silverblue\n", true, Some("rpm-ostree uninstall")),
+            (
+                "ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n",
+                false,
+                Some("zypper --non-interactive remove"),
+            ),
+            (
+                "ID=endeavouros\nID_LIKE=arch\n",
+                false,
+                Some("pacman --remove --noconfirm"),
+            ),
+            // A package manager found on a distribution no family claims: nothing guesses which tool changes it.
+            ("ID=nixos\n", false, None),
+        ];
+        for (os_release, image_based, expected) in cases {
+            assert_eq!(
+                removal_command(os_release, image_based).as_deref(),
+                expected,
+                "{os_release:?}"
+            );
+        }
     }
 }

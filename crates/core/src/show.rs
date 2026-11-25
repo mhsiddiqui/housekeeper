@@ -465,7 +465,10 @@ mod tests {
         let broken = found(hk.show("dpkg:broken"));
         assert_eq!(broken.removal, None);
         assert!(
-            broken.warnings.iter().any(|w| w.contains("could not plan the removal of broken")),
+            broken
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not plan the removal of broken")),
             "{:?}",
             broken.warnings
         );
