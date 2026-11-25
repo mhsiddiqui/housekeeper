@@ -10,7 +10,7 @@ command).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D30. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D31. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.
@@ -49,9 +49,11 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
   implements `Source` and `LinuxSource` and a `register!(<Type>);` line; `build.rs` lists it, so no list is edited
   (D20). Sources never import from each other; shared code lives outside `sources/`. A new distribution is the
   same: its native package manager's file declares `LinuxSource::NATIVE` (families and `os-release` IDs) and
-  implements `OwnerLookup` (see the [guide](docs/architecture/guide.html#new-distro)). A new operating system is a new
-  crate implementing `Platform`, registered in `housekeeper-platform` (D27). Core never mentions an OS, distribution
-  or package manager, and must build on every OS (Unix-only code behind `cfg(unix)`).
+  implements `OwnerLookup` (see the [guide](docs/architecture/guide.html#new-distro)). A distribution's package tool
+  (apt, dnf…) is one file in `crates/linux/src/tools/` implementing `PackageTool` and `LinuxTool`, with
+  `register_package_tool!(<Type>);` (D24). A new operating system is a new crate implementing `Platform`, registered
+  in `housekeeper-platform` (D27). Core never mentions an OS, distribution or package manager, and must build on
+  every OS (Unix-only code behind `cfg(unix)`).
 - **Optional abilities** (owner lookup, removal, install, update) are separate traits returned as
   `Option<&dyn …>` from a source, never methods every source must stub.
 - **All machine access goes through `Host`**: logical absolute paths (`host.read_to_string`, `host.read_dir`, …) and

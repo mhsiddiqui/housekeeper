@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::key_values;
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -48,6 +48,20 @@ impl Source for UvToolSource {
             }
         }
         Ok(packages)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+/// `uv tool uninstall` with the tool's name, which is the name of its directory and the package's id.
+impl Remover for UvToolSource {
+    fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, ["uv", "tool", "uninstall", package.id.as_str()])],
+        ))
     }
 }
 
@@ -273,5 +287,19 @@ implementation = CPython\nuv = 0.11.9\nversion_info = 3.13.13\ninclude-system-si
             UvToolSource.probe(&fixture().host(FakeRunner::new())),
             Availability::Available { version: None }
         );
+    }
+
+    #[test]
+    fn removal_uninstalls_the_tool_by_its_directory_name() {
+        let fixture = fixture();
+        let host = fixture.host(FakeRunner::new());
+        let packages = UvToolSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = UvToolSource.plan(&host, &packages[1]).unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert_eq!(
+            plan.steps,
+            [Step::run(Actor::User, ["uv", "tool", "uninstall", "ruamel-yaml-cmd"])]
+        );
+        assert!(UvToolSource.remover().is_some());
     }
 }

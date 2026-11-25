@@ -1,4 +1,4 @@
-//! How Linux sources are discovered and assembled.
+//! How Linux sources and package tools are discovered and assembled.
 //!
 //! **To add a provider, create one file in `src/sources/` with a type that implements [`Source`] and
 //! [`LinuxSource`], and call `register!(<Type>);` next to the `impl LinuxSource`.** The build script declares every
@@ -6,11 +6,14 @@
 //! changes. A file without `register!` fails to compile. A distribution's own package manager additionally declares
 //! [`LinuxSource::NATIVE`], which is how a new distribution gets supported.
 //!
+//! **A package tool (apt, dnf…) is the same: one file in `src/tools/` with a type that implements [`PackageTool`]
+//! and [`LinuxTool`], and `register_package_tool!(<Type>);`** (decision D24).
+//!
 //! Sources never import from each other; code two sources share lives in a module outside `src/sources/`.
 
 use std::sync::Arc;
 
-use housekeeper_core::Source;
+use housekeeper_core::{Remover, Source};
 
 use crate::distro::Distro;
 
@@ -33,6 +36,8 @@ pub struct Native {
 /// through `housekeeper_core::ScanContext`, not here.
 pub struct Context<'a> {
     pub distro: &'a Distro,
+    /// The tool that changes the native package database on this system (D24). Only the native source uses it.
+    pub tool: Option<&'a Arc<dyn PackageTool>>,
 }
 
 /// Implemented, next to [`Source`], by every Linux source.
@@ -73,4 +78,60 @@ impl Provider {
 
 fn create<T: LinuxSource>(context: &Context<'_>) -> Arc<dyn Source> {
     Arc::new(T::create(context))
+}
+
+/// The program a distribution changes its packages with: apt, dnf, zypper, rpm-ostree, pacman (decision D24). The
+/// native source reads the package database; what changes it comes from the tool, offered like a source's optional
+/// abilities.
+pub trait PackageTool: Send + Sync {
+    fn remover(&self) -> Option<&dyn Remover> {
+        None
+    }
+}
+
+/// Which systems a package tool serves.
+pub struct Serves {
+    /// Names of the families of the native source it changes (`debian`, `fedora`…; see [`Family`]).
+    pub families: &'static [&'static str],
+    /// Whether it is the tool of the image-based systems of those families (rpm-ostree) or of the others.
+    pub image_based: bool,
+}
+
+/// Implemented, next to [`PackageTool`], by every package tool.
+pub trait LinuxTool: PackageTool + Sized + 'static {
+    const SERVES: Serves;
+
+    fn create() -> Self;
+}
+
+/// One registered package tool. Each file in `src/tools/` defines one with `register_package_tool!`.
+pub struct ToolProvider {
+    pub serves: Serves,
+    create: fn() -> Arc<dyn PackageTool>,
+}
+
+/// Registers a package tool type: `register_package_tool!(MyTool);` defines the file's `TOOL`, which the build script
+/// lists. (`register_tool` is taken by a built-in attribute.)
+macro_rules! register_package_tool {
+    ($ty:ty) => {
+        pub(crate) const TOOL: crate::provider::ToolProvider = crate::provider::ToolProvider::of::<$ty>();
+    };
+}
+pub(crate) use register_package_tool;
+
+impl ToolProvider {
+    pub const fn of<T: LinuxTool>() -> Self {
+        Self {
+            serves: T::SERVES,
+            create: create_tool::<T>,
+        }
+    }
+
+    pub fn create(&self) -> Arc<dyn PackageTool> {
+        (self.create)()
+    }
+}
+
+fn create_tool<T: LinuxTool>() -> Arc<dyn PackageTool> {
+    Arc::new(T::create())
 }

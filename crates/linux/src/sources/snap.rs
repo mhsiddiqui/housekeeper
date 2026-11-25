@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use housekeeper_core::{
-    Availability, Dependants, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, Dependants, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
+    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -53,6 +53,20 @@ impl Source for SnapSource {
 
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         Some(self)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+impl Remover for SnapSource {
+    /// `snap remove <name>`, as the user: snapd asks for authorisation itself.
+    fn plan(&self, _host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, ["snap", "remove", package.name.as_str()])],
+        ))
     }
 }
 
@@ -350,6 +364,22 @@ mod tests {
 
     fn find<'a>(packages: &'a [Package], id: &str) -> &'a Package {
         packages.iter().find(|p| p.id == id).unwrap()
+    }
+
+    #[test]
+    fn removal_runs_snap_remove_as_the_user() {
+        let packages = scan();
+        let fixture = Fixture::new();
+        let plan = SnapSource
+            .plan(&fixture.host(FakeRunner::new()), find(&packages, "firefox"))
+            .unwrap();
+        assert_eq!(
+            plan,
+            RemovalPlan::new(
+                Tier::PackageManager,
+                vec![Step::run(Actor::User, ["snap", "remove", "firefox"])]
+            )
+        );
     }
 
     #[test]

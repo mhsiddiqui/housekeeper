@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde_json::Value;
 
@@ -64,6 +64,54 @@ impl Source for NpmSource {
         }
         Ok(packages)
     }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+/// `npm uninstall --global` run by the npm of the Node installation the package is in, so it acts on that
+/// installation's `node_modules` and not on whichever Node is first on the `PATH`.
+impl Remover for NpmSource {
+    fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        let Some(prefix) = package.location.as_deref().and_then(install_prefix) else {
+            return Ok(RemovalPlan::unknown());
+        };
+        if package.scope == Scope::System {
+            return Ok(RemovalPlan::new(Tier::PackageManager, Vec::new()).blocked(format!(
+                "installed for every user under {}; removing it needs root, which Housekeeper's helper only uses for \
+                 the system's package tool (D25)",
+                prefix.display()
+            )));
+        }
+        let own_npm = prefix.join("bin/npm");
+        let npm = if host.exists(&own_npm) {
+            own_npm.display().to_string()
+        } else {
+            "npm".to_string()
+        };
+        let argv = [
+            npm,
+            "uninstall".to_string(),
+            "--global".to_string(),
+            "--prefix".to_string(),
+            prefix.display().to_string(),
+            package.name.clone(),
+        ];
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, argv)],
+        ))
+    }
+}
+
+/// The Node installation prefix a package directory is in: the folder holding its `lib/node_modules`.
+fn install_prefix(location: &Path) -> Option<&Path> {
+    location
+        .ancestors()
+        .find(|dir| dir.ends_with("lib/node_modules"))?
+        .parent()?
+        .parent()
 }
 
 /// A global `node_modules` directory and the Node installation it belongs to.
@@ -429,5 +477,66 @@ mod tests {
             NpmSource.probe(&nvm_fixture().host(FakeRunner::new())),
             Availability::Available { version: None }
         );
+    }
+
+    #[test]
+    fn removal_uses_the_npm_of_the_packages_own_node() {
+        let fixture = nvm_fixture();
+        fixture.executable(&format!("{NVM}/v22.18.0/bin/npm"), "");
+        let host = fixture.host(FakeRunner::new());
+        let packages = NpmSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = NpmSource
+            .plan(&host, find(&packages, "nvm-v22.18.0/@anthropic-ai/claude-code"))
+            .unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert!(plan.blockers.is_empty());
+        assert_eq!(
+            plan.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "/home/user/.nvm/versions/node/v22.18.0/bin/npm",
+                    "uninstall",
+                    "--global",
+                    "--prefix",
+                    "/home/user/.nvm/versions/node/v22.18.0",
+                    "@anthropic-ai/claude-code",
+                ]
+            )]
+        );
+        let lodash = NpmSource.plan(&host, find(&packages, "nvm-v24.4.1/lodash")).unwrap();
+        assert_eq!(
+            lodash.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "npm",
+                    "uninstall",
+                    "--global",
+                    "--prefix",
+                    "/home/user/.nvm/versions/node/v24.4.1",
+                    "lodash"
+                ]
+            )]
+        );
+    }
+
+    #[test]
+    fn removing_a_system_package_is_blocked() {
+        let fixture = Fixture::new();
+        fixture
+            .file(
+                "/usr/lib/node_modules/yarn/package.json",
+                manifest("yarn", "1.22.22", r#"{"yarn": "bin/yarn.js"}"#),
+            )
+            .executable("/usr/bin/npm", "");
+        let host = fixture.host(FakeRunner::new());
+        let packages = NpmSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = NpmSource.plan(&host, find(&packages, "system/yarn")).unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert!(plan.steps.is_empty());
+        assert_eq!(plan.blockers.len(), 1);
+        assert!(plan.blockers[0].contains("under /usr"));
+        assert!(NpmSource.remover().is_some());
     }
 }

@@ -43,10 +43,10 @@ source, without root and without changing anything.
 | 2.3 ✅ | Ownership: `OwnerLookup` names the owning packages on native sources (dpkg, rpm, pacman); `housekeeper who <command or path>` follows symlinks and names the source, package and evidence (change 0032) |
 | 2.4 ✅ | `housekeeper show <id>`: details, files, launchers, dependants; how the source knows it is installed, other installs of the same app (change 0035) |
 
-## Phase 3: Removal planning (no changes made) ⬜
+## Phase 3: Removal planning (no changes made) 🚧
 | Chunk | Delivers |
 |---|---|
-| 3.1 | Package tools separate from the package databases (apt, dnf, zypper, rpm-ostree, pacman; decision D24); `Remover` capability and removal tiers 1–6 (own uninstaller → package manager → format convention → recipe → tracked manifest → unknown), each plan step marked as run by the user or by the root helper (D25) |
+| 3.1 ✅ | Package tools separate from the package databases (apt, dnf, zypper, rpm-ostree, pacman; decision D24); `Remover` capability and removal tiers 1–6 (own uninstaller → package manager → format convention → recipe → tracked manifest → unknown), each plan step marked as run by the user or by the root helper (D25); plans shown by `housekeeper show` (change 0036) |
 | 3.2 | Protected packages (dpkg Essential/Priority required, pacman `base`, dnf `protected_packages`) |
 | 3.3 | Simulation through the package manager (`apt-get -s`, `dnf --assumeno`, `pacman -Rp`, `zypper -D`) to list everything that would go |
 | 3.4 | Recipe format (TOML) with an allowlisted action vocabulary, holding both detection and removal of a script-installed tool (D26); the manual source's installer list moves into the first recipes |

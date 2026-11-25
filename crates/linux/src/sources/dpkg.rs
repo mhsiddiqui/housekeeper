@@ -2,15 +2,16 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, ScanContext,
-    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, Remover,
+    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native, register};
+use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
 
 pub const ID: SourceId = SourceId::new("dpkg");
 
@@ -25,7 +26,11 @@ const RELATIONS_FORMAT: &str =
 /// Packages apt marked as installed automatically (as dependencies).
 const APT_EXTENDED_STATES: &str = "/var/lib/apt/extended_states";
 
-pub struct DpkgSource;
+/// Reads the dpkg database; removing goes through the system's package tool (apt, decision D24).
+#[derive(Default)]
+pub struct DpkgSource {
+    tool: Option<Arc<dyn PackageTool>>,
+}
 
 impl LinuxSource for DpkgSource {
     const NATIVE: Option<Native> = Some(Native {
@@ -50,8 +55,10 @@ impl LinuxSource for DpkgSource {
         program: "dpkg-query",
     });
 
-    fn create(_: &Context<'_>) -> Self {
-        Self
+    fn create(context: &Context<'_>) -> Self {
+        Self {
+            tool: context.tool.cloned(),
+        }
     }
 }
 register!(DpkgSource);
@@ -94,6 +101,10 @@ impl Source for DpkgSource {
 
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         Some(self)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        self.tool.as_deref().and_then(PackageTool::remover)
     }
 }
 
@@ -307,7 +318,7 @@ Auto-Installed: 0
         let fixture = Fixture::new();
         fixture.file(APT_EXTENDED_STATES, EXTENDED_STATES);
         let runner = FakeRunner::new().respond(&format!("dpkg-query --show {FORMAT}"), LISTING);
-        DpkgSource
+        DpkgSource::default()
             .inventory(&fixture.host(runner), &ScanContext::default())
             .unwrap()
     }
@@ -356,7 +367,7 @@ Auto-Installed: 0
     fn works_without_apt() {
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("dpkg-query --show {FORMAT}"), LISTING);
-        let packages = DpkgSource
+        let packages = DpkgSource::default()
             .inventory(&fixture.host(runner), &ScanContext::default())
             .unwrap();
         assert_eq!(find(&packages, "libc6:i386").reason, InstallReason::Explicit);
@@ -367,7 +378,7 @@ Auto-Installed: 0
         let fixture = Fixture::new();
         let runner = FakeRunner::new().respond(&format!("dpkg-query --show {FORMAT}"), "garbage\n");
         assert!(matches!(
-            DpkgSource.inventory(&fixture.host(runner), &ScanContext::default()),
+            DpkgSource::default().inventory(&fixture.host(runner), &ScanContext::default()),
             Err(SourceError::Parse { .. })
         ));
     }
@@ -380,7 +391,7 @@ Auto-Installed: 0
             "Debian dpkg-query package management program version 1.22.6 (amd64).\n",
         );
         assert_eq!(
-            DpkgSource.probe(&fixture.host(runner)),
+            DpkgSource::default().probe(&fixture.host(runner)),
             Availability::Available {
                 version: Some("1.22.6".into())
             }
@@ -415,7 +426,7 @@ Auto-Installed: 0
                 "/usr/local/bin/words",
             ]);
             assert_eq!(
-                sorted(DpkgSource.owners(&host, &asked).unwrap()),
+                sorted(DpkgSource::default().owners(&host, &asked).unwrap()),
                 [
                     owned("/opt", &["t3code", "freelens", "zoom"]),
                     owned("/opt/brave.com", &["brave-browser"]),
@@ -437,7 +448,7 @@ Auto-Installed: 0
             );
             let host = Fixture::new().host(runner);
             assert!(matches!(
-                DpkgSource.owners(&host, &paths(&["/opt/x"])),
+                DpkgSource::default().owners(&host, &paths(&["/opt/x"])),
                 Err(SourceError::CommandFailed { code: Some(2), .. })
             ));
         }
@@ -461,7 +472,12 @@ old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
         fn dependants(id: &str, name: &str) -> Vec<String> {
             let runner = FakeRunner::new().respond(&format!("dpkg-query --show {RELATIONS_FORMAT}"), RELATIONS);
             let host = Fixture::new().host(runner);
-            Dependants::dependants(&DpkgSource, &host, &Package::new(ID, id, name, Scope::System)).unwrap()
+            Dependants::dependants(
+                &DpkgSource::default(),
+                &host,
+                &Package::new(ID, id, name, Scope::System),
+            )
+            .unwrap()
         }
 
         #[test]
@@ -477,7 +493,7 @@ old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
             let host = Fixture::new().host(runner);
             let package = Package::new(ID, "libc6:amd64", "libc6", Scope::System);
             assert_eq!(
-                DpkgSource.files(&host, &package).unwrap(),
+                DpkgSource::default().files(&host, &package).unwrap(),
                 [
                     "/etc",
                     "/etc/ld.so.conf.d",

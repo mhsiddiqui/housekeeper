@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -50,6 +50,20 @@ impl Source for PipxSource {
             packages.push(to_package(&entry.name, &entry.path, metadata));
         }
         Ok(packages)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+/// `pipx uninstall` with the venv name, which is the package's id.
+impl Remover for PipxSource {
+    fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, ["pipx", "uninstall", package.id.as_str()])],
+        ))
     }
 }
 
@@ -250,5 +264,17 @@ mod tests {
             PipxSource.probe(&fixture.host(FakeRunner::new())),
             Availability::Available { version: None }
         );
+    }
+
+    #[test]
+    fn removal_uninstalls_the_venv_by_name() {
+        let fixture = Fixture::new();
+        fixture.file(&format!("{VENVS}/black@24/pipx_metadata.json"), BLACK_SUFFIXED);
+        let host = fixture.host(FakeRunner::new());
+        let packages = PipxSource.inventory(&host, &ScanContext::default()).unwrap();
+        let plan = PipxSource.plan(&host, find(&packages, "black@24")).unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert_eq!(plan.steps, [Step::run(Actor::User, ["pipx", "uninstall", "black@24"])]);
+        assert!(PipxSource.remover().is_some());
     }
 }

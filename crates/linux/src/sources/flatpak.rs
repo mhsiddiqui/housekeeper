@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Availability, Cmd, Dependants, Host, InstallReason, Package, PackageKind, ScanContext, Scope, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, Cmd, Dependants, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
+    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use super::version_line;
@@ -64,6 +64,41 @@ impl Source for FlatpakSource {
 
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         Some(self)
+    }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+impl Remover for FlatpakSource {
+    /// `flatpak uninstall` of the exact installed ref in its installation, as the user: flatpak's system helper asks
+    /// for authorisation itself. Runtimes are planned the same way.
+    fn plan(&self, _host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        let Some((installation, flatpak_ref)) = package.id.split_once('/') else {
+            return Err(SourceError::parse(
+                "flatpak package id",
+                format!("no installation: {:?}", package.id),
+            ));
+        };
+        let installation_flag = match installation {
+            "user" => "--user".to_string(),
+            "system" => "--system".to_string(),
+            name => format!("--installation={name}"),
+        };
+        Ok(RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(
+                Actor::User,
+                [
+                    "flatpak".to_string(),
+                    "uninstall".to_string(),
+                    "--noninteractive".to_string(),
+                    installation_flag,
+                    flatpak_ref.to_string(),
+                ],
+            )],
+        ))
     }
 }
 
@@ -326,6 +361,60 @@ org.gnome.Builder\tx86_64\tstable\tsystem\torg.gnome.Platform/x86_64/47
             Dependants::dependants(&FlatpakSource, &fixture.host(FakeRunner::new()), godot)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    fn removal_argv(id: &str) -> Vec<Step> {
+        let packages = scan_with(&[]);
+        let fixture = Fixture::new();
+        let plan = FlatpakSource
+            .plan(&fixture.host(FakeRunner::new()), find(&packages, id))
+            .unwrap();
+        assert_eq!(plan.tier, Tier::PackageManager);
+        assert!(plan.blockers.is_empty());
+        plan.steps
+    }
+
+    #[test]
+    fn removal_uninstalls_the_exact_ref_from_its_installation() {
+        assert_eq!(
+            removal_argv("user/app/com.github.tchx84.Flatseal/x86_64/stable"),
+            [Step::run(
+                Actor::User,
+                [
+                    "flatpak",
+                    "uninstall",
+                    "--noninteractive",
+                    "--user",
+                    "app/com.github.tchx84.Flatseal/x86_64/stable"
+                ]
+            )]
+        );
+        assert_eq!(
+            removal_argv("system/runtime/org.freedesktop.Platform.GL.default/x86_64/25.08-extra"),
+            [Step::run(
+                Actor::User,
+                [
+                    "flatpak",
+                    "uninstall",
+                    "--noninteractive",
+                    "--system",
+                    "runtime/org.freedesktop.Platform.GL.default/x86_64/25.08-extra"
+                ]
+            )]
+        );
+        assert_eq!(
+            removal_argv("extra-disk/app/org.mozilla.firefox/aarch64/stable"),
+            [Step::run(
+                Actor::User,
+                [
+                    "flatpak",
+                    "uninstall",
+                    "--noninteractive",
+                    "--installation=extra-disk",
+                    "app/org.mozilla.firefox/aarch64/stable"
+                ]
+            )]
         );
     }
 

@@ -6,8 +6,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, ScanContext, Source, SourceError,
-    SourceId, SourceInfo, SourceKind,
+    Actor, Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
+    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
@@ -261,6 +261,31 @@ impl Source for ManualSource {
         }
         Ok(packages)
     }
+
+    fn remover(&self) -> Option<&dyn Remover> {
+        Some(self)
+    }
+}
+
+/// Only rustup has its own uninstaller; every other script install and hand install has nothing recording how to
+/// remove it.
+impl Remover for ManualSource {
+    fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
+        if package.id != "installer/rustup" {
+            return Ok(RemovalPlan::unknown());
+        }
+        let rustup = Root::Var("CARGO_HOME", ".cargo").path(host).join("bin/rustup");
+        let argv = [
+            rustup.to_string_lossy().into_owned(),
+            "self".into(),
+            "uninstall".into(),
+            "-y".into(),
+        ];
+        Ok(RemovalPlan::new(
+            Tier::OwnUninstaller,
+            vec![Step::run(Actor::User, argv)],
+        ))
+    }
 }
 
 /// Directories in `/opt` the user can list, with whether they hold a program at the top or in `bin/`. Unlistable
@@ -502,7 +527,7 @@ if __name__ == \"__main__\":
                 stderr: "dpkg-query: no path found matching pattern /opt/sdk\n".into(),
             },
         );
-        let packages = scan(&fixture, runner, vec![Arc::new(DpkgSource)]);
+        let packages = scan(&fixture, runner, vec![Arc::new(DpkgSource::default())]);
         assert_eq!(
             ids(&packages),
             [
@@ -544,7 +569,7 @@ if __name__ == \"__main__\":
             "dpkg-query --search /opt/brave.com /usr/local/bin/ngrok",
             "did not finish within 60 s",
         );
-        let (packages, warnings) = scan_with(&fixture.host(runner), vec![Arc::new(DpkgSource)]);
+        let (packages, warnings) = scan_with(&fixture.host(runner), vec![Arc::new(DpkgSource::default())]);
         assert_eq!(ids(&packages), ["/home/user/.local/bin/mine"]);
         assert_eq!(warnings.len(), 1, "{warnings:?}");
         assert!(warnings[0].contains("did not finish"), "{warnings:?}");
@@ -700,5 +725,33 @@ if __name__ == \"__main__\":
     #[test]
     fn nothing_installed_is_empty() {
         assert!(scan(&Fixture::new(), FakeRunner::new(), Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn rustup_plans_its_own_uninstaller_from_cargo_home() {
+        let fixture = Fixture::new();
+        fixture.dir(&home(".rustup/toolchains"));
+        fixture.executable("/srv/cargo/bin/rustup", ELF);
+        let host = fixture.host_with_vars(FakeRunner::new(), &[("CARGO_HOME", "/srv/cargo")]);
+        let (packages, _) = scan_with(&host, Vec::new());
+        let plan = ManualSource.plan(&host, find(&packages, "installer/rustup")).unwrap();
+        assert_eq!(plan.tier, Tier::OwnUninstaller);
+        assert_eq!(
+            plan.steps,
+            [Step::run(
+                Actor::User,
+                ["/srv/cargo/bin/rustup", "self", "uninstall", "-y"]
+            )]
+        );
+    }
+
+    #[test]
+    fn hand_installs_have_no_known_removal() {
+        let fixture = Fixture::new();
+        fixture.executable("/opt/tool/tool", ELF);
+        let host = fixture.host(FakeRunner::new());
+        let (packages, _) = scan_with(&host, Vec::new());
+        let plan = ManualSource.plan(&host, find(&packages, "/opt/tool")).unwrap();
+        assert_eq!(plan, RemovalPlan::unknown());
     }
 }
