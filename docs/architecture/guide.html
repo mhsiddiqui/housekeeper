@@ -272,6 +272,8 @@ subclass inheriting (and overriding) a long list of methods. Two things go wrong
     <span class="k">fn</span> probe(&amp;self, host: &amp;Host) -&gt; Availability;                 <span class="c">// cheap: is it on this machine?</span>
     <span class="k">fn</span> inventory(&amp;self, host: &amp;Host, scan: &amp;ScanContext) -&gt; Result&lt;Vec&lt;Package&gt;, SourceError&gt;; <span class="c">// everything it installed</span>
     <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt; { None }    <span class="c">// optional ability (section 7)</span>
+    <span class="k">fn</span> file_list(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileList&gt; { None }          <span class="c">// optional: the files one package installed</span>
+    <span class="k">fn</span> dependant_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> Dependants&gt; { None } <span class="c">// optional: what needs one package</span>
     <span class="k">fn</span> install_roots(&amp;self, host: &amp;Host) -&gt; Vec&lt;PathBuf&gt; { vec![] }  <span class="c">// where its programs live</span>
 }</code></pre>
 <p>A source never holds another source. While it is read, its <code>ScanContext</code> gives it every source of the
@@ -449,13 +451,16 @@ as an optional component:</p>
 <pre><code><span class="k">trait</span> <span class="t">Source</span> {
     <span class="c">// … info, probe, inventory as today …</span>
     <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// today: dpkg, rpm, pacman name the package that owns a file</span>
+    <span class="k">fn</span> file_list(&amp;self)    -&gt; Option&lt;&amp;<span class="k">dyn</span> FileList&gt;      { None }  <span class="c">// today: package managers, pip, cargo</span>
+    <span class="k">fn</span> dependant_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> Dependants&gt; { None } <span class="c">// today: package managers, Flatpak, Snap</span>
     <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// Phase 3/4: plan and run removal</span>
     <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// Phase 5: install a downloaded file</span>
     <span class="k">fn</span> updater(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Updater&gt;       { None }  <span class="c">// Phase 7</span>
 }</code></pre>
 <ul>
   <li>The default is "I can't", so adding <code>remover()</code> does not break the sources that don't implement it
-  yet. <code>owner_lookup()</code> was added this way: only the three native sources implement it.</li>
+  yet. <code>owner_lookup()</code>, <code>file_list()</code> and <code>dependant_lookup()</code> were added this way:
+  only the sources that record that information implement them.</li>
   <li>The app asks "can this source remove things?" by checking for <code>Some</code>. The answer is honest
   instead of a fake method that throws.</li>
   <li>An AppImage source can offer <code>remover()</code> (delete the file and its menu entry) without offering
@@ -621,7 +626,7 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D29)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D30)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

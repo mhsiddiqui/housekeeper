@@ -72,6 +72,7 @@ housekeeper list --search godot                # name, title or summary contains
 housekeeper list --duplicates                  # apps installed more than once, grouped
 housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
+housekeeper show code                          # everything about one installed item: files, launchers, what needs it
 ```
 
 `housekeeper sources` shows what was detected:
@@ -132,6 +133,40 @@ Flatpak ID or its snap's `common-id`), a menu-entry ID, a name or title, or a co
 packages of the same name count as two installs, so `vim` and `vim-common` stay apart. A group shows when any of its
 installs passes the other filters, with all of its installs. The plain `list` says how many apps are installed
 more than once.
+
+### Everything about one item
+`housekeeper show` takes an ID from `list --json` or `--duplicates` (`dpkg:code`, `snap:sublime-merge`), or a name or
+title, and prints what Housekeeper knows about that one item:
+
+```text
+$ housekeeper show dpkg:sublime-merge
+Sublime Merge
+dpkg:sublime-merge
+
+Summary:    Sublime Merge is a Git Client, from the makers of Sublime Text
+Version:    2136
+Source:     Debian packages
+Known from: dpkg's database, through `dpkg-query --show`
+Installed:  installed on purpose, for all users
+Kind:       app
+Size:       28.7 MB
+Commands:   smerge
+Launchers:  Sublime Merge (sublime_merge.desktop)
+Also as:    Sublime Merge 2136 (snap:sublime-merge)
+Same app:   shares the name sublimemerge
+Files:      72 files, 28.7 MB, as the source records them (--files lists them)
+Needed by:  nothing installed
+```
+
+- **Files** come from the package database (`dpkg-query --listfiles`, `rpm -ql`, pacman's database) or pip's `RECORD`
+  when the source records them; otherwise they are everything in the item's install folder (Flatpak, Snap, npm,
+  pipx, AppImage, hand installs). `--files` lists every one.
+- **Needed by** lists the installed packages of the same source that directly depend on it (dpkg, rpm and pacman
+  dependencies, Flatpak apps on a runtime, snaps on a base or using its content), up to 10; `--json` has all of them.
+  Optional dependencies (Recommends, optdepends) do not count. "not known" means the source does not record
+  dependencies.
+- When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
+  matches, it exits with 2. `--json` prints the same as a document.
 
 ### Who installed this?
 `housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source

@@ -18,6 +18,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   from one (npm under two Node versions), grouped by a shared AppStream ID, menu-entry ID, name or command, with a
   `FROM` column that tells the copies apart. The plain `list` says how many there are. In `--json`: `groups`, and
   `app_ids` on each package (from AppStream metainfo, Flatpak IDs and snaps' `common-id`).
+- `housekeeper show <id or name>`: everything about one installed item: details, how its source knows it is
+  installed, commands, launchers, AppStream IDs, its other installs, its files (from the package database or pip's
+  `RECORD`, otherwise its install folder; `--files` lists them) and the packages that directly need it. `--json` for
+  scripts. `housekeeper sources --json` now says how each source knows what is installed (`evidence`).
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
