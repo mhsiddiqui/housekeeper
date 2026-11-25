@@ -48,4 +48,4 @@ links back.
 | [0032](0032-who-command.md) | `housekeeper who`: which source and package a command or file comes from | 2.3 | `feat/who-command` |
 | [0033](0033-desktop-entries.md) | Launchers and commands tell apps from components | 2.1 | #23 |
 | [0034](0034-group-apps.md) | Apps installed more than once are grouped | 2.2 | #24 |
-| [0035](0035-show-command.md) | `housekeeper show`: everything about one installed item | 2.4 | `feat/show-command` |
+| [0035](0035-show-command.md) | `housekeeper show`: everything about one installed item | 2.4 | #25 |

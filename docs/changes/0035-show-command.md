@@ -1,7 +1,7 @@
 # 0035: `housekeeper show`: everything about one installed item
 
 - **Date:** 2026-11-25
-- **Branch / PR:** `feat/show-command`
+- **Branch / PR:** `feat/show-command`, #25
 - **Plan chunks:** 2.4 (`housekeeper show`), done; Phase 2 done
 - **Commits:** 8d48d99, 355c6c7
 
