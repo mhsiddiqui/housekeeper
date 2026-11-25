@@ -10,6 +10,7 @@ pub mod inventory;
 pub mod model;
 mod ownership;
 pub mod platform;
+pub mod remove;
 pub mod show;
 pub mod source;
 #[cfg(test)]
@@ -28,6 +29,7 @@ pub use model::{
     SystemInfo,
 };
 pub use platform::{Platform, path_dirs};
+pub use remove::{Action, Actor, RemovalPlan, Remover, Step, Tier};
 pub use show::{Details, Files, FilesFrom, Lookup};
 pub use source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 pub use who::{Evidence, Found, Owner, Who};

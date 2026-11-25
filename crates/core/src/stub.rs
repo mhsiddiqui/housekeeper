@@ -8,6 +8,7 @@ use crate::host::Host;
 use crate::inventory::Housekeeper;
 use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
 use crate::platform::Platform;
+use crate::remove::{RemovalPlan, Remover};
 use crate::source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 use crate::testing::{FakeRunner, Fixture};
 
@@ -24,6 +25,10 @@ pub struct Stub {
     pub lookup_fails: bool,
     /// `(dependant, package)` pairs: the first needs the second (both package names).
     pub needs: Vec<(&'static str, &'static str)>,
+    /// What its remover plans for every package; `None` with `plan_fails` false means it has no remover.
+    pub plan: Option<RemovalPlan>,
+    /// Its remover cannot make a plan.
+    pub plan_fails: bool,
 }
 
 impl Source for Stub {
@@ -47,6 +52,9 @@ impl Source for Stub {
     }
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
         (!self.needs.is_empty()).then_some(self as &dyn Dependants)
+    }
+    fn remover(&self) -> Option<&dyn Remover> {
+        (self.plan.is_some() || self.plan_fails).then_some(self as &dyn Remover)
     }
     fn install_roots(&self, _: &Host) -> Vec<PathBuf> {
         self.roots.iter().map(PathBuf::from).collect()
@@ -88,6 +96,15 @@ impl Dependants for Stub {
             .filter_map(|(dependant, _)| self.packages.iter().find(|p| p.name == *dependant))
             .map(|p| p.id.clone())
             .collect())
+    }
+}
+
+impl Remover for Stub {
+    fn plan(&self, _: &Host, _: &Package) -> Result<RemovalPlan, SourceError> {
+        match (&self.plan, self.plan_fails) {
+            (Some(plan), false) => Ok(plan.clone()),
+            _ => Err(SourceError::parse("removal plan", "garbage")),
+        }
     }
 }
 

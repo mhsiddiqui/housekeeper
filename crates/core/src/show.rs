@@ -1,5 +1,5 @@
-//! `housekeeper show`: one installed item in full: details, launchers, other installs of the same app, files and
-//! the packages that need it.
+//! `housekeeper show`: one installed item in full: details, launchers, other installs of the same app, files, the
+//! packages that need it and how it would be removed.
 
 use std::path::{Path, PathBuf};
 
@@ -9,6 +9,7 @@ use crate::group::{Shared, keys};
 use crate::host::{FileType, Host};
 use crate::inventory::{Housekeeper, Selection, SourceStatus};
 use crate::model::{Package, SourceInfo};
+use crate::remove::RemovalPlan;
 
 /// What a query names.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,8 @@ pub struct Details {
     pub files: Option<Files>,
     /// Installed packages of the same source that directly need this one; `None` when the source cannot tell.
     pub needed_by: Option<Vec<Package>>,
+    /// How it would be removed; `None` when the source could not make the plan (a warning says why).
+    pub removal: Option<RemovalPlan>,
     /// Sources that could not be read, and questions a source could not answer.
     pub warnings: Vec<String>,
 }
@@ -167,6 +170,20 @@ impl Housekeeper {
                     }
                 });
 
+        let removal = match source.remover() {
+            Some(remover) => match remover.plan(&self.host, &package) {
+                Ok(plan) => Some(plan),
+                Err(error) => {
+                    warnings.push(format!(
+                        "could not plan the removal of {} from {}: {error}",
+                        package.name, info.label
+                    ));
+                    None
+                }
+            },
+            None => Some(RemovalPlan::unknown()),
+        };
+
         Lookup::Found(Box::new(Details {
             package,
             source: info,
@@ -174,6 +191,7 @@ impl Housekeeper {
             shared,
             files,
             needed_by,
+            removal,
             warnings,
         }))
     }
@@ -235,6 +253,7 @@ fn walk(host: &Host, location: &Path) -> (Vec<PathBuf>, usize) {
 mod tests {
     use super::*;
     use crate::model::PackageKind;
+    use crate::remove::{Actor, Step, Tier};
     use crate::stub::{Stub, housekeeper, package};
     use crate::testing::{Fixture, HOME};
 
@@ -407,6 +426,48 @@ mod tests {
             standalone.shared,
             [Shared::Command("tsc".into())],
             "the two npm installs also share their name, which is not this install's"
+        );
+    }
+
+    #[test]
+    fn removal_comes_from_the_source_and_is_unknown_without_a_remover() {
+        let fixture = Fixture::new();
+        let plan = RemovalPlan::new(
+            Tier::PackageManager,
+            vec![Step::run(Actor::User, ["npm", "uninstall", "-g", "thing"])],
+        );
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![
+                Stub {
+                    id: "npm",
+                    packages: vec![package("npm", "thing", None, &[])],
+                    plan: Some(plan.clone()),
+                    ..Stub::default()
+                },
+                Stub {
+                    id: "manual",
+                    packages: vec![package("manual", "tool", None, &[])],
+                    ..Stub::default()
+                },
+                Stub {
+                    id: "dpkg",
+                    packages: vec![package("dpkg", "broken", None, &[])],
+                    plan_fails: true,
+                    ..Stub::default()
+                },
+            ],
+        );
+
+        assert_eq!(found(hk.show("npm:thing")).removal, Some(plan));
+        assert_eq!(found(hk.show("manual:tool")).removal, Some(RemovalPlan::unknown()));
+        let broken = found(hk.show("dpkg:broken"));
+        assert_eq!(broken.removal, None);
+        assert!(
+            broken.warnings.iter().any(|w| w.contains("could not plan the removal of broken")),
+            "{:?}",
+            broken.warnings
         );
     }
 }

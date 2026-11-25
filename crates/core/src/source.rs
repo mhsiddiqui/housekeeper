@@ -7,12 +7,13 @@ use std::sync::{Arc, Mutex, PoisonError};
 use crate::command::RunError;
 use crate::host::Host;
 use crate::model::{Availability, Package, SourceInfo};
+use crate::remove::Remover;
 
 /// One way software gets installed: a package manager, an app format, a language tool, or manual installs.
 ///
 /// Sources only read. Abilities only some sources have are separate traits a source offers as optional components
-/// (`owner_lookup`, `file_list` and `dependant_lookup` today; removing, installing and updating in later phases), so a new
-/// ability never forces every source to implement or stub it.
+/// (`owner_lookup`, `file_list`, `dependant_lookup` and `remover` today; installing and updating in later phases), so a
+/// new ability never forces every source to implement or stub it.
 pub trait Source: Send + Sync {
     fn info(&self) -> SourceInfo;
 
@@ -35,6 +36,12 @@ pub trait Source: Send + Sync {
 
     /// "Which installed packages need this one?", for sources that record dependencies.
     fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        None
+    }
+
+    /// "How is this package removed?", for sources that know (decision D8). Without it, nothing records how its
+    /// packages were installed. It only plans; nothing is removed until Phase 4.
+    fn remover(&self) -> Option<&dyn Remover> {
         None
     }
 
