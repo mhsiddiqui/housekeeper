@@ -83,6 +83,13 @@ if [ "$installed" = yes ]; then
   housekeeper who housekeeper > /tmp/who.txt || { cat /tmp/who.txt >&2; fail "housekeeper who found no owner for itself"; }
   grep -q 'lists /usr/bin/housekeeper as a file of housekeeper$' /tmp/who.txt \
     || { cat /tmp/who.txt >&2; fail "housekeeper who did not name its own package"; }
+  # `show` lists the package's files through the real database (dpkg-query -L, rpm -ql, pacman's files) and asks it
+  # what needs the package.
+  housekeeper show housekeeper --files > /tmp/show.txt || { cat /tmp/show.txt >&2; fail "housekeeper show found nothing for itself"; }
+  grep -qx '/usr/bin/housekeeper' /tmp/show.txt \
+    || { cat /tmp/show.txt >&2; fail "housekeeper show did not list /usr/bin/housekeeper among its files"; }
+  grep -q '^Needed by: *nothing installed$' /tmp/show.txt \
+    || { cat /tmp/show.txt >&2; fail "housekeeper show could not tell what needs it"; }
   remove
   # Check the file itself: the shell may still remember where the command was.
   [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"

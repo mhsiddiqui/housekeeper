@@ -8,7 +8,7 @@ use crate::host::Host;
 use crate::inventory::Housekeeper;
 use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
 use crate::platform::Platform;
-use crate::source::{OwnerLookup, ScanContext, Source, SourceError};
+use crate::source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
 use crate::testing::{FakeRunner, Fixture};
 
 /// A source with fixed packages, install folders and package-database files.
@@ -22,6 +22,8 @@ pub struct Stub {
     pub broken: bool,
     /// Its package database cannot be asked who owns files.
     pub lookup_fails: bool,
+    /// `(dependant, package)` pairs: the first needs the second (both package names).
+    pub needs: Vec<(&'static str, &'static str)>,
 }
 
 impl Source for Stub {
@@ -40,6 +42,12 @@ impl Source for Stub {
     fn owner_lookup(&self) -> Option<&dyn OwnerLookup> {
         (!self.files.is_empty() || self.lookup_fails).then_some(self as &dyn OwnerLookup)
     }
+    fn file_list(&self) -> Option<&dyn FileList> {
+        (!self.files.is_empty()).then_some(self as &dyn FileList)
+    }
+    fn dependant_lookup(&self) -> Option<&dyn Dependants> {
+        (!self.needs.is_empty()).then_some(self as &dyn Dependants)
+    }
     fn install_roots(&self, _: &Host) -> Vec<PathBuf> {
         self.roots.iter().map(PathBuf::from).collect()
     }
@@ -57,6 +65,29 @@ impl OwnerLookup for Stub {
             }
         }
         Ok(owners)
+    }
+}
+
+impl FileList for Stub {
+    fn files(&self, _: &Host, package: &Package) -> Result<Vec<PathBuf>, SourceError> {
+        Ok(self
+            .files
+            .iter()
+            .filter(|(_, owner)| *owner == package.name)
+            .map(|(path, _)| PathBuf::from(path))
+            .collect())
+    }
+}
+
+impl Dependants for Stub {
+    fn dependants(&self, _: &Host, package: &Package) -> Result<Vec<String>, SourceError> {
+        Ok(self
+            .needs
+            .iter()
+            .filter(|(_, needed)| *needed == package.name)
+            .filter_map(|(dependant, _)| self.packages.iter().find(|p| p.name == *dependant))
+            .map(|p| p.id.clone())
+            .collect())
     }
 }
 

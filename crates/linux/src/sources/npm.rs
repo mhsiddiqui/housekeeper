@@ -27,6 +27,7 @@ register!(NpmSource);
 impl Source for NpmSource {
     fn info(&self) -> SourceInfo {
         SourceInfo::new("npm", "npm (global)", SourceKind::Language)
+            .evidence("its `package.json` in a Node installation's global `node_modules`")
     }
 
     fn probe(&self, host: &Host) -> Availability {

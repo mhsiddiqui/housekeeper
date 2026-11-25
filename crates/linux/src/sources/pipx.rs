@@ -23,7 +23,7 @@ register!(PipxSource);
 
 impl Source for PipxSource {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new("pipx", "pipx", SourceKind::Language)
+        SourceInfo::new("pipx", "pipx", SourceKind::Language).evidence("its venv's `pipx_metadata.json`")
     }
 
     fn probe(&self, host: &Host) -> Availability {

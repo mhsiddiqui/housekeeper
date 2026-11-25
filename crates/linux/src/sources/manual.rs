@@ -147,7 +147,10 @@ register!(ManualSource);
 
 impl Source for ManualSource {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new("manual", "Installed by hand or script", SourceKind::Manual)
+        SourceInfo::new("manual", "Installed by hand or script", SourceKind::Manual).evidence(
+            "its files on disk (in `/opt`, `/usr/local/bin`, `~/.local/bin` or a known script installer's folder), \
+             which no package manager or installer claims",
+        )
     }
 
     fn probe(&self, _host: &Host) -> Availability {

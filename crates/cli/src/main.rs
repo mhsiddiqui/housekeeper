@@ -1,6 +1,7 @@
 //! `housekeeper`: every installed app, however it got here.
 
 mod filter;
+mod show;
 mod table;
 mod who;
 
@@ -10,7 +11,7 @@ use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use housekeeper_core::{Availability, Host, Housekeeper, Package, Selection, SourceStatus};
+use housekeeper_core::{Availability, Host, Housekeeper, Lookup, Package, Selection, SourceStatus};
 use serde::Serialize;
 
 use crate::filter::{Filter, View, keep_duplicates};
@@ -59,6 +60,19 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Everything about one installed item: details, launchers, other installs of the same app, files, and what
+    /// needs it. Exits 0 when found, 1 when the name matches several items, 2 when nothing matches.
+    Show {
+        /// `source:id` from `list --json` or a previous `show` (`dpkg:firefox`), or a name or title.
+        #[arg(value_name = "ID_OR_NAME")]
+        query: String,
+        /// Also list every file.
+        #[arg(long)]
+        files: bool,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<ExitCode> {
@@ -82,6 +96,7 @@ fn main() -> Result<ExitCode> {
             list(&housekeeper, &sources, &view, json, &mut out).map(|()| ExitCode::SUCCESS)
         }
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
+        Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
     };
     match result {
         // The reader went away (`housekeeper list | head`): not an error.
@@ -268,4 +283,41 @@ fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write)
         Some(found) if found.owner.is_none() => ExitCode::from(1),
         Some(_) => ExitCode::SUCCESS,
     })
+}
+
+fn show(housekeeper: &Housekeeper, query: &str, all_files: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    let mut err = io::stderr().lock();
+    match housekeeper.show(query) {
+        Lookup::Found(details) => {
+            if json {
+                serde_json::to_writer_pretty(&mut *out, &details)?;
+                writeln!(out)?;
+            } else {
+                show::render(&details, all_files, out)?;
+            }
+            for warning in &details.warnings {
+                writeln!(err, "warning: {warning}")?;
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Lookup::Several(packages) => {
+            if json {
+                serde_json::to_writer_pretty(&mut *out, &packages)?;
+                writeln!(out)?;
+            } else {
+                show::render_several(&packages, out)?;
+            }
+            writeln!(
+                err,
+                "housekeeper: {} installed items match `{query}`; pick one by its ID (`housekeeper show {}`).",
+                packages.len(),
+                packages.first().map(Package::key).unwrap_or_default()
+            )?;
+            Ok(ExitCode::from(1))
+        }
+        Lookup::NotFound => {
+            writeln!(err, "housekeeper: nothing installed matches `{query}`")?;
+            Ok(ExitCode::from(2))
+        }
+    }
 }
