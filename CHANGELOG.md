@@ -40,6 +40,11 @@ the project uses [Semantic Versioning](https://semver.org/).
   them and how to remove them: `housekeeper show` plans nvm, pyenv, Bun, Deno, SDKMAN!, Volta and Atuin by moving
   their folder to the Trash, and rustup with `rustup self uninstall`. Homebrew's and Oh My Zsh's own folders stay
   "not known".
+- `housekeeper remove --dry-run <id or name>`: the removal plan in full with what the item would leave behind:
+  folders named after it in `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` and a Flatpak's
+  `~/.var/app/<id>` (with their size, whether they are your data, and whether another install may still use them),
+  and lines in shell startup files that load it. It changes nothing; without `--dry-run` it refuses, because
+  removing comes with the root helper. `housekeeper show` counts the leftovers; `--json` has them as `leftovers`.
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command

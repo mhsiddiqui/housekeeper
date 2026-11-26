@@ -11,7 +11,9 @@ use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use housekeeper_core::{Availability, Host, Housekeeper, Lookup, Package, Selection, SourceStatus};
+use housekeeper_core::{
+    Availability, Details, Host, Housekeeper, Leftovers, Lookup, Package, RemovalPlan, Selection, SourceStatus,
+};
 use serde::Serialize;
 
 use crate::filter::{Filter, View, keep_duplicates};
@@ -73,6 +75,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// How one installed item would be removed and what it would leave behind. Only `--dry-run` exists for now:
+    /// nothing is removed until Housekeeper's root helper does it. Exits 0 when found, 1 when the name matches several
+    /// items, 2 when nothing matches or `--dry-run` is missing.
+    Remove {
+        /// `source:id` from `list --json` or `show` (`dpkg:firefox`), or a name or title.
+        #[arg(value_name = "ID_OR_NAME")]
+        query: String,
+        /// Plan only: show the steps, what else would go and the leftovers, and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<ExitCode> {
@@ -97,6 +113,7 @@ fn main() -> Result<ExitCode> {
         }
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
         Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
+        Command::Remove { query, dry_run, json } => remove(&housekeeper, &query, dry_run, json, &mut out),
     };
     match result {
         // The reader went away (`housekeeper list | head`): not an error.
@@ -286,15 +303,66 @@ fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write)
 }
 
 fn show(housekeeper: &Housekeeper, query: &str, all_files: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    lookup(housekeeper, query, "show", json, out, |details, out| {
+        if json {
+            serde_json::to_writer_pretty(&mut *out, details)?;
+            writeln!(out)?;
+        } else {
+            show::render(details, all_files, out)?;
+        }
+        Ok(())
+    })
+}
+
+/// What `remove --dry-run --json` prints: the item, its plan and its leftovers.
+#[derive(Serialize)]
+struct DryRun<'a> {
+    package: &'a Package,
+    removal: &'a Option<RemovalPlan>,
+    leftovers: &'a Leftovers,
+    warnings: &'a [String],
+}
+
+fn remove(housekeeper: &Housekeeper, query: &str, dry_run: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    if !dry_run {
+        writeln!(
+            io::stderr().lock(),
+            "housekeeper: removing is not available yet (it comes with Housekeeper's root helper); \
+             `housekeeper remove --dry-run {query}` shows what it would do"
+        )?;
+        return Ok(ExitCode::from(2));
+    }
+    lookup(housekeeper, query, "remove --dry-run", json, out, |details, out| {
+        if json {
+            let dry_run = DryRun {
+                package: &details.package,
+                removal: &details.removal,
+                leftovers: &details.leftovers,
+                warnings: &details.warnings,
+            };
+            serde_json::to_writer_pretty(&mut *out, &dry_run)?;
+            writeln!(out)?;
+        } else {
+            show::render_removal(details, out)?;
+        }
+        Ok(())
+    })
+}
+
+/// Finds the one item `query` names and hands it to `found`, or lists the items it matches (exit 1) or says nothing
+/// matches (exit 2). `command` is the subcommand to suggest with an item's ID.
+fn lookup<W: Write>(
+    housekeeper: &Housekeeper,
+    query: &str,
+    command: &str,
+    json: bool,
+    out: &mut W,
+    found: impl FnOnce(&Details, &mut W) -> Result<()>,
+) -> Result<ExitCode> {
     let mut err = io::stderr().lock();
     match housekeeper.show(query) {
         Lookup::Found(details) => {
-            if json {
-                serde_json::to_writer_pretty(&mut *out, &details)?;
-                writeln!(out)?;
-            } else {
-                show::render(&details, all_files, out)?;
-            }
+            found(&details, out)?;
             for warning in &details.warnings {
                 writeln!(err, "warning: {warning}")?;
             }
@@ -309,7 +377,7 @@ fn show(housekeeper: &Housekeeper, query: &str, all_files: bool, json: bool, out
             }
             writeln!(
                 err,
-                "housekeeper: {} installed items match `{query}`; pick one by its ID (`housekeeper show {}`).",
+                "housekeeper: {} installed items match `{query}`; pick one by its ID (`housekeeper {command} {}`).",
                 packages.len(),
                 packages.first().map(Package::key).unwrap_or_default()
             )?;

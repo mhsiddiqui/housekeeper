@@ -1,8 +1,11 @@
-//! Text output of `housekeeper show`.
+//! Text output of `housekeeper show` and `housekeeper remove --dry-run`.
 
 use std::io::{self, Write};
 
-use housekeeper_core::{Action, Actor, Details, FilesFrom, Package, PackageKind, RemovalPlan, Shared, Tier};
+use housekeeper_core::{
+    Action, Actor, Details, FilesFrom, Leftover, LeftoverKind, Leftovers, Package, PackageKind, RemovalPlan, Shared,
+    Tier,
+};
 
 use crate::table::{Table, human_size};
 use crate::who::circumstances;
@@ -23,14 +26,7 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
     writeln!(out, "{}", package.key())?;
     writeln!(out)?;
     // A label of "" continues the previous one.
-    let mut line = |label: &str, value: &str| {
-        let label = if label.is_empty() {
-            String::new()
-        } else {
-            format!("{label}:")
-        };
-        writeln!(out, "{label:<LABEL$}{value}")
-    };
+    let mut line = |label: &str, value: &str| labelled(out, label, value);
 
     if let Some(summary) = &package.summary {
         line("Summary", summary)?;
@@ -115,6 +111,7 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
         }
         None => line("Removal", "could not be planned")?,
     }
+    line("Leftovers", &leftovers_summary(&details.leftovers))?;
 
     if all_files {
         if let Some(files) = &details.files {
@@ -125,6 +122,96 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
         }
     }
     Ok(())
+}
+
+/// `housekeeper remove --dry-run`: how the item would be removed and everything it would leave behind, in full.
+pub fn render_removal(details: &Details, out: &mut impl Write) -> io::Result<()> {
+    let package = &details.package;
+    writeln!(out, "{}", package.display_name())?;
+    writeln!(out, "{}", package.key())?;
+    writeln!(out)?;
+    match &details.removal {
+        Some(plan) => {
+            for (n, text) in removal(plan).iter().enumerate() {
+                labelled(out, if n == 0 { "Removal" } else { "" }, text)?;
+            }
+        }
+        None => labelled(out, "Removal", "could not be planned")?,
+    }
+    let leftovers = &details.leftovers;
+    if leftovers.folders.is_empty() {
+        labelled(out, "Leftovers", "no folders named after it")?;
+    }
+    for (n, folder) in leftovers.folders.iter().enumerate() {
+        labelled(out, if n == 0 { "Leftovers" } else { "" }, &leftover(folder))?;
+    }
+    for (n, shell) in leftovers.shell_lines.iter().enumerate() {
+        let text = format!("{} line {}: {}", shell.file.display(), shell.line, shell.text);
+        labelled(out, if n == 0 { "Shell" } else { "" }, &text)?;
+    }
+    if !leftovers.shell_lines.is_empty() {
+        labelled(
+            out,
+            "",
+            "(these lines are not edited yet; remove them by hand after removing it)",
+        )?;
+    }
+    writeln!(out)?;
+    writeln!(
+        out,
+        "Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper."
+    )
+}
+
+/// `label:` padded so values line up; a label of "" continues the previous one.
+fn labelled(out: &mut impl Write, label: &str, value: &str) -> io::Result<()> {
+    let label = if label.is_empty() {
+        String::new()
+    } else {
+        format!("{label}:")
+    };
+    writeln!(out, "{label:<LABEL$}{value}")
+}
+
+/// `3 folders, 120.0 MB, and 2 lines in shell startup files (housekeeper remove --dry-run lists them)`.
+fn leftovers_summary(leftovers: &Leftovers) -> String {
+    let mut parts = Vec::new();
+    if !leftovers.folders.is_empty() {
+        let size: u64 = leftovers.folders.iter().map(|folder| folder.size_bytes).sum();
+        parts.push(format!(
+            "{}, {}",
+            crate::count(leftovers.folders.len(), "folder"),
+            human_size(size)
+        ));
+    }
+    if !leftovers.shell_lines.is_empty() {
+        parts.push(format!(
+            "{} in shell startup files",
+            crate::count(leftovers.shell_lines.len(), "line")
+        ));
+    }
+    if parts.is_empty() {
+        return "none found".to_string();
+    }
+    format!("{} (`housekeeper remove --dry-run` lists them)", parts.join(" and "))
+}
+
+/// `/home/u/.config/foo (settings, 2.1 MB; yours: kept unless you choose it; snap:foo may still use it)`.
+fn leftover(folder: &Leftover) -> String {
+    let kind = match folder.kind {
+        LeftoverKind::Config => "settings",
+        LeftoverKind::Cache => "cache",
+        LeftoverKind::Data => "data",
+        LeftoverKind::State => "history and state",
+    };
+    let mut notes = vec![format!("{kind}, {}", human_size(folder.size_bytes))];
+    if folder.kind.is_user_data() {
+        notes.push("yours: kept unless you choose it".into());
+    }
+    if !folder.also_used_by.is_empty() {
+        notes.push(format!("{} may still use it", folder.also_used_by.join(", ")));
+    }
+    format!("{} ({})", folder.path.display(), notes.join("; "))
 }
 
 /// The installed items a name matched, to pick one by `source:id`.
@@ -241,8 +328,32 @@ fn command_line(argv: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use housekeeper_core::{Files, InstallReason, Scope, Simulation, SourceId, SourceInfo, SourceKind};
+    use housekeeper_core::{Files, InstallReason, Scope, ShellLine, Simulation, SourceId, SourceInfo, SourceKind};
     use std::path::PathBuf;
+
+    fn leftovers() -> Leftovers {
+        Leftovers {
+            folders: vec![
+                Leftover {
+                    path: PathBuf::from("/home/u/.cache/tool"),
+                    kind: LeftoverKind::Cache,
+                    size_bytes: 1_500_000,
+                    also_used_by: Vec::new(),
+                },
+                Leftover {
+                    path: PathBuf::from("/home/u/.config/tool"),
+                    kind: LeftoverKind::Config,
+                    size_bytes: 500_000,
+                    also_used_by: vec!["snap:tool".into()],
+                },
+            ],
+            shell_lines: vec![ShellLine {
+                file: PathBuf::from("/home/u/.bashrc"),
+                line: 12,
+                text: "export PATH=\"$HOME/.tool/bin:$PATH\"".into(),
+            }],
+        }
+    }
 
     #[test]
     fn every_known_fact_gets_a_line_and_long_dependant_lists_are_cut() {
@@ -293,6 +404,7 @@ mod tests {
                     )],
                 )
             }),
+            leftovers: leftovers(),
             warnings: Vec::new(),
         };
         let mut out = Vec::new();
@@ -322,10 +434,41 @@ Needed by:  app0 (dpkg:app0)
 Removal:    through its package manager
             as root, by Housekeeper's helper: apt-get remove --yes libc6:amd64
             also removes 12 packages: app0, app1, app2, app3, app4, app5, app6, app7, app8, app9, …, says `apt-get --simulate remove`
+Leftovers:  2 folders, 2.0 MB and 1 line in shell startup files (`housekeeper remove --dry-run` lists them)
 
 /usr/lib/libc.so.6
 /usr/share/doc/libc6
 ";
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn a_dry_run_lists_every_leftover_and_marks_what_is_the_users() {
+        let details = Details {
+            package: Package::new(SourceId::new("dpkg"), "tool", "tool", Scope::System),
+            source: SourceInfo::new("dpkg", "Debian packages", SourceKind::System),
+            also_installed: Vec::new(),
+            shared: Vec::new(),
+            files: None,
+            needed_by: None,
+            removal: Some(RemovalPlan::unknown()),
+            leftovers: leftovers(),
+            warnings: Vec::new(),
+        };
+        let mut out = Vec::new();
+        render_removal(&details, &mut out).unwrap();
+        let expected = "\
+tool
+dpkg:tool
+
+Removal:    not known: nothing records how it was installed
+Leftovers:  /home/u/.cache/tool (cache, 1.5 MB)
+            /home/u/.config/tool (settings, 500.0 kB; yours: kept unless you choose it; snap:tool may still use it)
+Shell:      /home/u/.bashrc line 12: export PATH=\"$HOME/.tool/bin:$PATH\"
+            (these lines are not edited yet; remove them by hand after removing it)
+
+Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper.
+";
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
 }
