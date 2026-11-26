@@ -43,12 +43,18 @@ the project uses [Semantic Versioning](https://semver.org/).
 - `housekeeper remove --dry-run <id or name>`: the removal plan in full with what the item would leave behind:
   folders named after it in `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` and a Flatpak's
   `~/.var/app/<id>` (with their size, whether they are your data, and whether another install may still use them),
-  and lines in shell startup files that load it. It changes nothing; without `--dry-run` it refuses, because
-  removing comes with the root helper. `housekeeper show` counts the leftovers; `--json` has them as `leftovers`.
+  and lines in shell startup files that load it. It changes nothing. `housekeeper show` counts the leftovers; `--json`
+  has them as `leftovers`.
 - Housekeeper's root helper, `/usr/lib/housekeeper/housekeeper-helper`, and its polkit action are installed with the
   packages (the tarball carries them too). `pkexec` starts it, asking for an administrator's password each time; it
   takes one request on standard input and removes only installed packages, named plainly, through the system's own
-  package tool. Nothing calls it yet: `housekeeper remove` will.
+  package tool, or moves a file outside every home folder (an AppImage in `/opt`) to root's Trash.
+- `housekeeper remove <id or name>`: removes an installed item the way its installer intended. It shows the plan and
+  the leftovers, asks (`--yes` skips the question), checks the plan again just before acting, and runs each step as
+  you or, for what needs root, through the root helper (`pkexec` asks for an administrator's password). It waits while
+  apt, dnf, zypper or pacman is busy, stops at the first step that fails, then moves the chosen leftovers to the Trash
+  (`--leftovers caches`, the default, `none` or `all`) and writes the outcome to the history. Exit codes: 0 removed,
+  3 nothing changed, 4 a step failed.
 - `housekeeper history [--json]`: what Housekeeper changed on this computer, from `history.jsonl` in
   `~/.local/state/housekeeper`. Each scan (`list`, `show`) also keeps `seen.jsonl` there: every item found, with when
   it was first and last seen, so the leftovers of something removed outside Housekeeper can be named later. Nothing
@@ -56,7 +62,7 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - `housekeeper remove --dry-run` says which leftover folders would go with the item: a cache that nothing else may
-  use "goes to the Trash with it"; everything else is "kept unless you choose it". Chosen folders will go to the
+  use "goes to the Trash with it"; everything else is "kept unless you choose it". Chosen folders go to the
   freedesktop Trash (they can be put back from the file manager), and only after they are checked again. `--json`
   gives each folder an `identity` (device, inode, owner) for that check.
 - Removal plans for dnf and zypper no longer use online repositories (`dnf remove --assumeyes --disablerepo=*`,
@@ -68,7 +74,6 @@ the project uses [Semantic Versioning](https://semver.org/).
 - `housekeeper show` no longer measures leftover folders (it took seconds for a large cache); its `Leftovers:` line
   counts them, and `size_bytes` is `null` in its `--json`. `housekeeper remove --dry-run` measures them, counting at
   most 50,000 files and folders per folder: a bigger one shows "at least" its size (`size_complete: false`).
-- `housekeeper remove` without `--dry-run` now exits with 3 instead of 2, which already meant "nothing matches".
 - `--json`: `protected` is now the reason a package is protected (a string, or `null`) instead of `true`/`false`, so
   the scan's `schema` is `2`.
 - Kernels other than the running one are no longer protected on Fedora, openSUSE and Arch, so older kernels can be

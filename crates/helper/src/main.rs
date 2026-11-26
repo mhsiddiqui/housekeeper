@@ -10,6 +10,7 @@ use std::io::{self, Read, Write};
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use housekeeper_core::helper::effective_uid;
 use housekeeper_core::{HelperReply, HelperRequest, Host, SystemRunner, carry_out};
 
 /// Where the programs the helper runs come from, whatever `PATH` it was started with.
@@ -64,15 +65,6 @@ fn runs_as_root(host: &Host) -> bool {
         .is_ok_and(|status| effective_uid(&status) == Some("0"))
 }
 
-/// The effective user ID in a `/proc/<pid>/status`: the second number of its `Uid:` line (real, effective, saved, file
-/// system).
-fn effective_uid(status: &str) -> Option<&str> {
-    status
-        .lines()
-        .find_map(|line| line.strip_prefix("Uid:"))
-        .and_then(|ids| ids.split_whitespace().nth(1))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,17 +94,5 @@ mod tests {
         }
         let huge = format!("{{\"protocol\":1,\"pad\":\"{}\"}}", "x".repeat(MAX_REQUEST as usize));
         assert!(read_request(huge.as_bytes()).unwrap_err().contains("larger than"));
-    }
-
-    #[test]
-    fn only_an_effective_root_user_counts_as_root() {
-        let status = |uids: &str| format!("Name:\thousekeeper-help\nUmask:\t0022\nUid:\t{uids}\nGid:\t0\t0\t0\t0\n");
-        assert_eq!(effective_uid(&status("0\t0\t0\t0")), Some("0"));
-        assert_eq!(
-            effective_uid(&status("0\t1000\t0\t1000")),
-            Some("1000"),
-            "real root, effective user"
-        );
-        assert_eq!(effective_uid("Name:\tx\n"), None);
     }
 }

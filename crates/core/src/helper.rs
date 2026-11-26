@@ -1,18 +1,22 @@
-//! What Housekeeper's root helper does (decisions D4, D25, D31): one typed operation in, one reply out.
+//! What Housekeeper's root helper does (decisions D4, D25, D31, D40): one typed operation in, one reply out.
 //!
 //! The helper binary reads a [`HelperRequest`] as JSON on its standard input, hands it to [`carry_out`] and prints the
 //! [`HelperReply`]. Everything it is given is checked here: the package tool must be this system's, every package name
-//! must be a plain name the package database lists as installed, and the helper builds the command itself; nothing
-//! from the caller ever becomes an option or a shell string.
+//! must be a plain name the package database lists as installed, and the helper builds the command itself; a path to
+//! trash must be a plain one, no package's, and not part of the system. Nothing from the caller ever becomes an option
+//! or a shell string.
 
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::command::Cmd;
+use crate::history::unix_now;
 use crate::host::Host;
 use crate::platform::Platform;
 use crate::source::SourceError;
+use crate::trash::trash;
 
 /// Version of the request and reply format. A helper refuses requests of another version, so a front end and a helper
 /// from different releases never misread each other.
@@ -40,6 +44,25 @@ pub enum HelperOperation {
     /// Removes installed packages through the system's package tool: the `tool` and `packages` of a plan's
     /// [`Action::RemovePackages`](crate::remove::Action::RemovePackages) step, and nothing else.
     RemovePackages { tool: String, packages: Vec<String> },
+    /// Moves a file or folder outside every home folder to root's Trash: a plan's
+    /// [`Action::Trash`](crate::remove::Action::Trash) step for the helper (an AppImage in `/opt`, a recipe's folder).
+    Trash { path: PathBuf },
+}
+
+/// How a front end reaches the root helper: through `pkexec`, which asks for an administrator's password, or directly
+/// when it already runs as root.
+pub trait RootHelper: Send + Sync {
+    /// The helper's reply to `request`, or why it could not be asked (not installed, authentication refused).
+    fn ask(&self, host: &Host, request: &HelperRequest) -> Result<HelperReply, String>;
+}
+
+/// The effective user ID in a Linux `/proc/<pid>/status`: the second number of its `Uid:` line (real, effective, saved,
+/// file system).
+pub fn effective_uid(status: &str) -> Option<&str> {
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("Uid:"))
+        .and_then(|ids| ids.split_whitespace().nth(1))
 }
 
 /// What came of a request.
@@ -101,6 +124,63 @@ pub fn carry_out(platform: &dyn Platform, host: &Host, request: &HelperRequest) 
     }
     match &request.operation {
         HelperOperation::RemovePackages { tool, packages } => remove_packages(platform, host, tool, packages),
+        HelperOperation::Trash { path } => trash_system_path(platform, host, path),
+    }
+}
+
+/// Trashes `path` when it is a plain absolute path at least two folders deep, holds no symbolic link, is not (and
+/// holds no) folder the system is made of, and no package owns it (a package's files go with the package).
+fn trash_system_path(platform: &dyn Platform, host: &Host, path: &Path) -> HelperReply {
+    let shown = path.display();
+    let plain = path.is_absolute()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
+    if !plain {
+        return HelperReply::refused(format!("{shown} is not a plain absolute path"));
+    }
+    if path.components().count() < 3 {
+        return HelperReply::refused(format!("{shown} is too close to the root folder"));
+    }
+    if platform
+        .system_paths()
+        .iter()
+        .any(|system| Path::new(system).starts_with(path))
+    {
+        return HelperReply::refused(format!("{shown} is, or holds, a folder the system is made of"));
+    }
+    if platform.home_paths().iter().any(|home| path.starts_with(home)) {
+        return HelperReply::refused(format!("{shown} is in a home folder; its user removes it, not root"));
+    }
+    if host.canonical(path) != path {
+        return HelperReply::refused(format!("{shown} has a symbolic link in its path"));
+    }
+    if host.symlink_metadata(path).is_none() {
+        return HelperReply::refused(format!("{shown} is not there"));
+    }
+    for lookup in platform.sources().iter().filter_map(|source| source.owner_lookup()) {
+        match lookup.owners(host, &[path.to_path_buf()]) {
+            Ok(owners) => {
+                if let Some(owner) = owners.values().flatten().next() {
+                    return HelperReply::refused(format!("{shown} belongs to the package {owner}, which removes it"));
+                }
+            }
+            Err(e) => return HelperReply::refused(format!("could not check which package owns {shown}: {e}")),
+        }
+    }
+    let command = vec!["trash".to_string(), shown.to_string()];
+    match trash(host, path, unix_now()) {
+        Ok(trashed) => HelperReply::Done {
+            command,
+            stdout: format!("moved to {}\n", trashed.to.display()),
+            stderr: String::new(),
+        },
+        Err(e) => HelperReply::Failed {
+            command,
+            code: None,
+            stdout: String::new(),
+            stderr: e.to_string(),
+        },
     }
 }
 
@@ -214,6 +294,12 @@ mod tests {
         }
         fn package_removal(&self) -> Option<&dyn PackageRemoval> {
             self.tool.as_ref().map(|tool| tool as &dyn PackageRemoval)
+        }
+        fn system_paths(&self) -> &'static [&'static str] {
+            &["/opt", "/usr", "/usr/share"]
+        }
+        fn home_paths(&self) -> &'static [&'static str] {
+            &["/home", "/root"]
         }
     }
 
@@ -341,5 +427,54 @@ mod tests {
         let mut old = request("tool", &["vim"]);
         old.protocol = HELPER_PROTOCOL + 1;
         assert!(refusal(reply(Some(VIM), FakeRunner::new(), &old)).contains("version 2"));
+    }
+
+    fn trash_request(path: &str) -> HelperRequest {
+        HelperRequest {
+            protocol: HELPER_PROTOCOL,
+            operation: HelperOperation::Trash { path: path.into() },
+        }
+    }
+
+    #[test]
+    fn a_system_file_goes_to_roots_trash() {
+        let fixture = Fixture::new();
+        fixture.file("/opt/Tool.AppImage", "ELF");
+        let host = fixture.host(FakeRunner::new());
+        let reply = carry_out(&system(None), &host, &trash_request("/opt/Tool.AppImage"));
+        assert!(matches!(reply, HelperReply::Done { .. }), "{reply:?}");
+        assert!(!host.exists("/opt/Tool.AppImage"));
+    }
+
+    #[test]
+    fn the_helper_trashes_nothing_the_system_or_a_user_owns() {
+        let fixture = Fixture::new();
+        fixture
+            .file("/usr/share/applications/tool.desktop", "")
+            .file("/home/user/precious", "")
+            .file("/opt/real/Tool.AppImage", "")
+            .symlink("/opt/link", "/opt/real");
+        let host = fixture.host(FakeRunner::new());
+        let refused = |path: &str| refusal(carry_out(&system(None), &host, &trash_request(path)));
+        assert!(refused("opt/Tool.AppImage").contains("not a plain absolute path"));
+        assert!(refused("/opt/../etc/passwd").contains("not a plain absolute path"));
+        assert!(refused("/opt").contains("too close to the root folder"));
+        assert!(refused("/usr/share").contains("a folder the system is made of"));
+        assert!(refused("/home/user/precious").contains("in a home folder"));
+        assert!(refused("/opt/link/Tool.AppImage").contains("symbolic link"));
+        assert!(refused("/opt/gone").contains("not there"));
+        assert!(host.exists("/home/user/precious") && host.exists("/opt/real/Tool.AppImage"));
+    }
+
+    #[test]
+    fn only_an_effective_root_user_counts_as_root() {
+        let status = |uids: &str| format!("Name:\thousekeeper-help\nUmask:\t0022\nUid:\t{uids}\nGid:\t0\t0\t0\t0\n");
+        assert_eq!(effective_uid(&status("0\t0\t0\t0")), Some("0"));
+        assert_eq!(
+            effective_uid(&status("0\t1000\t0\t1000")),
+            Some("1000"),
+            "real root, effective user"
+        );
+        assert_eq!(effective_uid("Name:\tx\n"), None);
     }
 }

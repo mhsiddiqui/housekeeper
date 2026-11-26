@@ -60,9 +60,10 @@ install -Dm755 housekeeper-*-x86_64-linux/housekeeper ~/.local/bin/housekeeper
 ```
 
 The packages also install Housekeeper's root helper (`/usr/lib/housekeeper/housekeeper-helper`) and its polkit
-action. Only `pkexec` starts it, asking for an administrator's password each time, and it removes nothing but checked,
-installed packages through the system's own package tool. The tarball carries both files for whoever installs them
-by hand to the same places.
+action, which `housekeeper remove` uses for what needs root. Only `pkexec` starts it, asking for an administrator's
+password each time, and it does nothing but remove checked, installed packages through the system's own package tool
+and move a checked file outside every home folder (an AppImage in `/opt`) to root's Trash. The tarball carries both
+files; `housekeeper remove` uses the helper only where the packages put it, so install them there by hand to use it.
 
 **Uninstall** the same way you installed: `sudo apt remove housekeeper`, `sudo dnf remove housekeeper`,
 `sudo zypper remove housekeeper`, `sudo pacman -R housekeeper`, or delete `~/.local/bin/housekeeper`.
@@ -79,6 +80,7 @@ housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
 housekeeper show code                          # everything about one item: files, what needs it, how it is removed
 housekeeper remove --dry-run code              # how it would be removed and what it would leave behind; changes nothing
+housekeeper remove code                        # remove it that way, after asking (root steps ask for a password)
 housekeeper history                            # what Housekeeper changed on this computer
 ```
 
@@ -184,7 +186,7 @@ Removal:    through its package manager
   what else would go: `apt-get --simulate remove` and `pacman --remove --print` answer on Debian, Ubuntu and Arch,
   and on Fedora and openSUSE the RPM database names every package that needs it, directly or through others (dnf
   and zypper remove those too, and their own simulation needs root). A refusal from the package manager, or a
-  protected package among what would go, blocks the removal. Nothing is removed yet; that comes with the helper.
+  protected package among what would go, blocks the removal. `housekeeper remove` carries the plan out (below).
 - **Protected** says why removing the item could break the system, and blocks its removal: dpkg's Essential and
   Protected marks and Priority required, dnf's protected packages (`/etc/dnf/protected.d`, `protected_packages` in
   `dnf.conf`), Arch's `base` metapackage and what it depends on, the C library, init system, shell, core commands and
@@ -195,23 +197,40 @@ Removal:    through its package manager
 - When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
   matches, it exits with 2. `--json` prints the same as a document.
 
-### What a removal would take and leave behind
-`housekeeper remove --dry-run` takes the same IDs and names as `show` and prints the removal plan in full, with what
-the item would leave behind. It changes nothing. Without `--dry-run` it refuses with exit code 3, because removing
-comes with Housekeeper's root helper (Phase 4); its other exit codes are `show`'s.
+### Removing an app
+`housekeeper remove` takes the same IDs and names as `show`, prints the removal plan in full with what the item would
+leave behind, asks, and then removes it the way its installer intended:
 
 ```text
-$ housekeeper remove --dry-run "Godot Engine"
-Godot Engine
-flatpak:system/app/org.godotengine.Godot/x86_64/stable
+$ housekeeper remove dpkg:housekeeper
+housekeeper
+dpkg:housekeeper
 
 Removal:    through its package manager
-            as you: flatpak uninstall --noninteractive --system app/org.godotengine.Godot/x86_64/stable
-Leftovers:  /home/me/.var/app/org.godotengine.Godot (data, 473.5 MB; yours: kept unless you choose it)
+            as root, by Housekeeper's helper: apt-get remove --yes housekeeper
+            removes nothing else, says `apt-get --simulate remove`
+Leftovers:  /home/me/.local/state/housekeeper (history and state, 8.8 kB; yours: kept unless you choose it)
+            /home/me/.cache/housekeeper (cache, 2 B; goes to the Trash with it)
 
-Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper.
+Remove housekeeper and move 1 leftover folder to the Trash? [y/N] y
+Removing housekeeper…
+
+done:     as root, by Housekeeper's helper: apt-get remove --yes housekeeper
+done:     as you: move /home/me/.cache/housekeeper to the Trash
 ```
 
+- **Steps that need root** go through Housekeeper's root helper: `pkexec` asks for an administrator's password (in a
+  dialog, or on the terminal) each time. Steps in your own scope (pipx, npm, Flatpak, …) run as you.
+- **Before anything changes** the plan is made again; if the item's version, its protection or what its removal would
+  take changed since you saw the plan, nothing is done. While apt, dnf, zypper or pacman is busy, it waits and says
+  who holds the lock.
+- **Steps run in order** and stop at the first that fails. Leftovers go only when every step was done.
+- `--dry-run` shows the plan and changes nothing. `--yes` skips the question (needed without a terminal).
+  `--leftovers caches` (the default) takes only the folders marked "goes to the Trash with it", `none` keeps them all,
+  `all` takes your settings and data too. `--json` prints the plan with `--dry-run`, otherwise what was done.
+- Every removal is written to the history (`housekeeper history`). Exit codes: 0 removed, 1 the name matches several
+  items, 2 nothing matches, 3 nothing was changed (blocked, not confirmed, changed since planned, cancelled), 4 a step
+  failed.
 - **Leftovers** are folders named after the item (its name, AppStream ID or menu-entry ID) in `~/.config`,
   `~/.cache`, `~/.local/share` and `~/.local/state` (or their `XDG_*_HOME` variables), or, for a Flatpak, its
   `~/.var/app/<id>` only (Flatpaks and strictly confined snaps keep their settings in their own folders). A cache that
@@ -304,14 +323,12 @@ target and [nfpm](https://nfpm.goreleaser.com)). Running the checks and contribu
 
 ## Roadmap
 The [build plan](docs/planning/plan.md) has the details. Done: the inventory, identity and ownership (`who`, `show`,
-duplicates), and removal planning (`remove --dry-run`: the way each installer intended, simulated, protected packages
-blocked, leftovers listed). Next, in order:
+duplicates), removal planning (the way each installer intended, simulated, protected packages blocked, leftovers
+listed), and removing safely (`housekeeper remove`: a root helper started through polkit, an operation queue that
+waits for busy package managers, leftovers moved to the Trash, a history). Next, in order:
 
-1. **Making changes safely:** the privileged helper started through polkit (it removes checked packages) and the
-   operation queue (one change per package manager at a time, waiting while apt or dnf is busy) are in place; next a
-   history log, leftovers moved to the Trash, and `housekeeper remove` carrying out plans.
-2. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
-3. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
+1. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
+2. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
 
 ## Documentation

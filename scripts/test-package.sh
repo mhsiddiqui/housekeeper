@@ -130,21 +130,27 @@ if [ "$installed" = yes ]; then
   grep -q "$HOME/.config/housekeeper (settings" /tmp/dry-run.txt \
     || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run did not list its settings folder"; }
   grep -q '^Nothing was changed' /tmp/dry-run.txt || fail "housekeeper remove --dry-run did not say it changed nothing"
+  # Without a terminal to ask on, removing needs --yes; nothing changes without it.
   refused=0
-  housekeeper remove housekeeper 2>/dev/null || refused=$?
-  [ "$refused" = 3 ] || fail "housekeeper remove without --dry-run exited with $refused, not 3 (not available yet)"
-  command -v housekeeper >/dev/null || fail "housekeeper remove changed something"
-  rm -r "$HOME/.config/housekeeper"
+  housekeeper remove housekeeper < /dev/null 2>/dev/null || refused=$?
+  [ "$refused" = 3 ] || fail "housekeeper remove without --yes exited with $refused, not 3 (nothing done)"
+  command -v housekeeper >/dev/null || fail "housekeeper remove without --yes changed something"
   [ -f /usr/share/polkit-1/actions/io.github.mhsiddiqui.housekeeper.policy ] \
     || fail "the package did not install the helper's polkit action"
-  # The helper removes the package, under the id the native source gives it, with the command the plan showed.
-  housekeeper show housekeeper --json > /tmp/show.json
-  id=$(sed -n 's/^    "id": "\(.*\)",$/\1/p' /tmp/show.json | head -n 1)
-  [ -n "$id" ] || { cat /tmp/show.json >&2; fail "no package id in housekeeper show --json"; }
-  [ "$(run_helper "$id")" = 0 ] && grep -q '"outcome":"done"' /tmp/helper.json \
-    || { cat /tmp/helper.json >&2; fail "the helper did not remove $id"; }
+  # Housekeeper removes itself the way its plan says: the package through the root helper (run directly, as the
+  # tests run as root), then every leftover folder to the Trash, then a line in the history.
+  housekeeper remove --yes --leftovers all housekeeper > /tmp/remove.txt 2>&1 \
+    || { cat /tmp/remove.txt >&2; fail "housekeeper remove did not remove its own package"; }
+  grep -q "^done: *as root, by Housekeeper's helper: $planned" /tmp/remove.txt \
+    || { cat /tmp/remove.txt >&2; fail "housekeeper remove did not run the planned command through the helper"; }
   # Check the files themselves: the shell may still remember where the command was.
-  [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after the helper removed the package"
-  [ ! -e "$helper" ] || fail "$helper is still there after the helper removed the package"
+  [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after housekeeper remove"
+  [ ! -e "$helper" ] || fail "$helper is still there after housekeeper remove"
+  [ ! -e "$HOME/.config/housekeeper" ] || fail "the settings folder was not moved to the Trash"
+  grep -qx "Path=$HOME/.config/housekeeper" "$HOME"/.local/share/Trash/info/*.trashinfo \
+    || fail "the Trash does not say where the settings folder came from"
+  history="${XDG_STATE_HOME:-$HOME/.local/state}/housekeeper/history.jsonl"
+  grep -q '"item":"'"$native"':housekeeper.*"outcome":"done"' "$history" \
+    || fail "the history does not record the removal"
 fi
 echo "OK: $(basename "$pkg") on $PRETTY_NAME"

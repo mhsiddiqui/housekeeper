@@ -1,7 +1,7 @@
 //! Running external programs: always an argv vector, never a shell, always with a timeout.
 
 use std::fmt;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -16,6 +16,8 @@ pub struct Cmd {
     pub program: String,
     pub args: Vec<String>,
     pub timeout: Duration,
+    /// What the program reads on its standard input; `None` closes it.
+    pub stdin: Option<Vec<u8>>,
 }
 
 impl Cmd {
@@ -24,6 +26,7 @@ impl Cmd {
             program: program.into(),
             args: Vec::new(),
             timeout: DEFAULT_TIMEOUT,
+            stdin: None,
         }
     }
 
@@ -43,6 +46,11 @@ impl Cmd {
 
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
+        self
+    }
+
+    pub fn stdin(mut self, input: impl Into<Vec<u8>>) -> Self {
+        self.stdin = Some(input.into());
         self
     }
 }
@@ -141,13 +149,23 @@ impl CommandRunner for SystemRunner {
             .args(&cmd.args)
             // Untranslated, stable output for parsing.
             .env("LC_ALL", "C")
-            .stdin(Stdio::null())
+            .stdin(if cmd.stdin.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(io_err)?;
 
-        // Drain both pipes concurrently so a chatty program cannot block on a full pipe.
+        // Feed and close stdin from a thread, and drain both pipes concurrently, so a chatty program cannot block on a
+        // full pipe.
+        if let (Some(mut pipe), Some(input)) = (child.stdin.take(), cmd.stdin.clone()) {
+            thread::spawn(move || {
+                let _ = pipe.write_all(&input);
+            });
+        }
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let status = match wait_with_deadline(&mut child, cmd.timeout).map_err(io_err)? {
@@ -210,6 +228,15 @@ fn is_executable(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feeds_standard_input_when_given() {
+        let runner = SystemRunner::new(None);
+        let out = runner.run(&Cmd::new("cat").stdin("request\n")).unwrap();
+        assert_eq!(out.stdout, "request\n");
+        let out = runner.run(&Cmd::new("cat")).unwrap();
+        assert_eq!(out.stdout, "", "closed when not given");
+    }
 
     #[test]
     fn captures_output_and_exit_code() {
