@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
@@ -88,6 +88,11 @@ impl Host {
         self.dir_from_var("XDG_DATA_HOME", ".local/share")
     }
 
+    /// `$XDG_STATE_HOME`, defaulting to `~/.local/state`: history and other state worth keeping between runs.
+    pub fn state_home(&self) -> PathBuf {
+        self.dir_from_var("XDG_STATE_HOME", ".local/state")
+    }
+
     /// Real path of a logical path. Only for code that must hand a path to the OS (sockets, mmap).
     pub fn real_path(&self, logical: impl AsRef<Path>) -> PathBuf {
         let relative: PathBuf = logical
@@ -119,6 +124,40 @@ impl Host {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(SourceError::io(path, e)),
         }
+    }
+
+    /// Replaces the file at `path` with `contents` in one step (a temporary file beside it, then a rename), creating
+    /// its folder. A reader sees the old file or the new one, never half of one.
+    pub fn write_atomic(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<(), SourceError> {
+        let path = path.as_ref();
+        let real = self.real_path(path);
+        let err = |e| SourceError::io(path, e);
+        if let Some(dir) = real.parent() {
+            fs::create_dir_all(dir).map_err(err)?;
+        }
+        let mut temporary = real.clone().into_os_string();
+        temporary.push(format!(".tmp-{}", std::process::id()));
+        fs::write(&temporary, contents).map_err(err)?;
+        fs::rename(&temporary, &real).map_err(|e| {
+            let _ = fs::remove_file(&temporary);
+            err(e)
+        })
+    }
+
+    /// Adds `contents` to the end of the file at `path` in one write, creating the file and its folder.
+    pub fn append(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<(), SourceError> {
+        let path = path.as_ref();
+        let real = self.real_path(path);
+        let err = |e| SourceError::io(path, e);
+        if let Some(dir) = real.parent() {
+            fs::create_dir_all(dir).map_err(err)?;
+        }
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&real)
+            .and_then(|mut file| file.write_all(contents))
+            .map_err(err)
     }
 
     /// First `len` bytes of a file (fewer if the file is shorter).

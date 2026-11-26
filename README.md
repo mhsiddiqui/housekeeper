@@ -79,6 +79,7 @@ housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
 housekeeper show code                          # everything about one item: files, what needs it, how it is removed
 housekeeper remove --dry-run code              # how it would be removed and what it would leave behind; changes nothing
+housekeeper history                            # what Housekeeper changed on this computer
 ```
 
 `housekeeper sources` shows what was detected:
@@ -220,6 +221,16 @@ Nothing was changed: this is a dry run. Carrying out removals comes with Houseke
   most 50,000 files and folders per folder; a bigger one (a package manager's cache) shows "at least" its size.
 - **Shell** lines are lines in `~/.bashrc`, `~/.profile`, the zsh files and fish's `config.fish` that mention the
   item's own install folder (nvm's `export NVM_DIR="$HOME/.nvm"`). They are not edited yet; remove them by hand.
+
+### What Housekeeper keeps
+Housekeeper keeps two files in `~/.local/state/housekeeper` (or `$XDG_STATE_HOME/housekeeper`), and nothing leaves
+the computer:
+
+- `history.jsonl`: every change it carried out or tried, with each step and how it went. `housekeeper history` lists
+  them (`--json` prints them whole).
+- `seen.jsonl`: every item a scan found (its ID, name, AppStream and menu-entry IDs) with when it was first and last
+  seen. Each `list` or `show` refreshes it. An item that is no longer installed stays with its last date, so that the
+  folders it left behind can still be named after it was removed some other way; one not seen for a year is dropped.
 
 ### Who installed this?
 `housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source

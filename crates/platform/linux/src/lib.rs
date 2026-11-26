@@ -132,7 +132,7 @@ impl Platform for LinuxPlatform {
             (host.dir_from_var("XDG_CONFIG_HOME", ".config"), LeftoverKind::Config),
             (host.dir_from_var("XDG_CACHE_HOME", ".cache"), LeftoverKind::Cache),
             (host.data_home(), LeftoverKind::Data),
-            (host.dir_from_var("XDG_STATE_HOME", ".local/state"), LeftoverKind::State),
+            (host.state_home(), LeftoverKind::State),
         ]
     }
 

@@ -1,6 +1,7 @@
 //! `housekeeper`: every installed app, however it got here.
 
 mod filter;
+mod history;
 mod show;
 mod table;
 mod who;
@@ -90,6 +91,13 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// What Housekeeper changed on this computer, oldest first, from its history in
+    /// `$XDG_STATE_HOME/housekeeper/history.jsonl`.
+    History {
+        /// Print JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> Result<ExitCode> {
@@ -115,6 +123,7 @@ fn main() -> Result<ExitCode> {
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
         Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
         Command::Remove { query, dry_run, json } => remove(&housekeeper, &query, dry_run, json, &mut out),
+        Command::History { json } => history(&housekeeper, json, &mut out).map(|()| ExitCode::SUCCESS),
     };
     match result {
         // The reader went away (`housekeeper list | head`): not an error.
@@ -131,6 +140,17 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
                 .and_then(|e| e.io_error_kind())
         }) == Some(io::ErrorKind::BrokenPipe)
     })
+}
+
+fn history(housekeeper: &Housekeeper, json: bool, out: &mut impl Write) -> Result<()> {
+    let entries = housekeeper.history()?;
+    if json {
+        serde_json::to_writer_pretty(&mut *out, &entries)?;
+        writeln!(out)?;
+        Ok(())
+    } else {
+        Ok(history::render(&entries, out)?)
+    }
 }
 
 fn sources(housekeeper: &Housekeeper, json: bool, out: &mut impl Write) -> Result<()> {
