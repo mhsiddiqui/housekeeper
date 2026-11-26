@@ -184,14 +184,15 @@ Removal:    through its package manager
   `dnf.conf`), Arch's `base` metapackage and what it depends on, the C library, init system, shell, core commands and
   package managers, snapd and the system's own snaps, and the running kernel (older kernels next to it are not
   protected).
-- **Leftovers** counts what the item would leave behind; `housekeeper remove --dry-run` lists it (below).
+- **Leftovers** counts the folders and shell lines the item would leave behind, without measuring them (a large
+  folder takes seconds); `housekeeper remove --dry-run` measures and lists them (below).
 - When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
   matches, it exits with 2. `--json` prints the same as a document.
 
 ### What a removal would take and leave behind
 `housekeeper remove --dry-run` takes the same IDs and names as `show` and prints the removal plan in full, with what
-the item would leave behind. It changes nothing; without `--dry-run` it refuses, because removing comes with
-Housekeeper's root helper (Phase 4).
+the item would leave behind. It changes nothing. Without `--dry-run` it refuses with exit code 3, because removing
+comes with Housekeeper's root helper (Phase 4); its other exit codes are `show`'s.
 
 ```text
 $ housekeeper remove --dry-run "Godot Engine"
@@ -210,7 +211,8 @@ Nothing was changed: this is a dry run. Carrying out removals comes with Houseke
   `~/.var/app/<id>` only (Flatpaks and strictly confined snaps keep their settings in their own folders). Caches can
   go; settings and data are yours and are kept unless you choose them. A folder that another installed item could
   also be using says so, as does one a copy in a project or virtual environment could use (pip, npm, cargo…).
-  Folders holding installs and folders every program shares (`fonts`, `dconf`…) are never listed.
+  Folders holding installs and folders every program shares (`fonts`, `dconf`…) are never listed. Sizes count at
+  most 50,000 files and folders per folder; a bigger one (a package manager's cache) shows "at least" its size.
 - **Shell** lines are lines in `~/.bashrc`, `~/.profile`, the zsh files and fish's `config.fish` that mention the
   item's own install folder (nvm's `export NVM_DIR="$HOME/.nvm"`). They are not edited yet; remove them by hand.
 

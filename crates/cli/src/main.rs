@@ -12,7 +12,8 @@ use std::process::ExitCode;
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use housekeeper_core::{
-    Availability, Details, Host, Housekeeper, Leftovers, Lookup, Package, RemovalPlan, Selection, SourceStatus,
+    Availability, Details, Host, Housekeeper, Leftovers, Lookup, MEASURE_BUDGET, Package, RemovalPlan, Selection,
+    SourceStatus,
 };
 use serde::Serialize;
 
@@ -77,7 +78,7 @@ enum Command {
     },
     /// How one installed item would be removed and what it would leave behind. Only `--dry-run` exists for now:
     /// nothing is removed until Housekeeper's root helper does it. Exits 0 when found, 1 when the name matches several
-    /// items, 2 when nothing matches or `--dry-run` is missing.
+    /// items, 2 when nothing matches, 3 without `--dry-run` (removing is not available yet).
     Remove {
         /// `source:id` from `list --json` or `show` (`dpkg:firefox`), or a name or title.
         #[arg(value_name = "ID_OR_NAME")]
@@ -330,9 +331,10 @@ fn remove(housekeeper: &Housekeeper, query: &str, dry_run: bool, json: bool, out
             "housekeeper: removing is not available yet (it comes with Housekeeper's root helper); \
              `housekeeper remove --dry-run {query}` shows what it would do"
         )?;
-        return Ok(ExitCode::from(2));
+        return Ok(ExitCode::from(3));
     }
     lookup(housekeeper, query, "remove --dry-run", json, out, |details, out| {
+        housekeeper.measure_leftovers(&mut details.leftovers, MEASURE_BUDGET);
         if json {
             let dry_run = DryRun {
                 package: &details.package,
@@ -357,12 +359,12 @@ fn lookup<W: Write>(
     command: &str,
     json: bool,
     out: &mut W,
-    found: impl FnOnce(&Details, &mut W) -> Result<()>,
+    found: impl FnOnce(&mut Details, &mut W) -> Result<()>,
 ) -> Result<ExitCode> {
     let mut err = io::stderr().lock();
     match housekeeper.show(query) {
-        Lookup::Found(details) => {
-            found(&details, out)?;
+        Lookup::Found(mut details) => {
+            found(&mut details, out)?;
             for warning in &details.warnings {
                 writeln!(err, "warning: {warning}")?;
             }

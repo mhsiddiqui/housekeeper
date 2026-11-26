@@ -8,13 +8,19 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::host::{FileType, Host};
+use crate::inventory::Housekeeper;
 use crate::model::{Package, SourceId, SourceKind};
 use crate::platform::Platform;
+
+/// How many files and folders [`Housekeeper::measure_leftovers`] looks at in each leftover folder before it stops
+/// counting: enough for settings and most caches, while a package manager's cache (uv's held 167,000 entries) or a
+/// game library stops there instead of taking seconds.
+pub const MEASURE_BUDGET: usize = 50_000;
 
 /// What an item leaves behind.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Leftovers {
-    /// Folders named after the item in the per-user state folders, largest first.
+    /// Folders named after the item in the per-user state folders: by path, largest first once measured.
     pub folders: Vec<Leftover>,
     /// Lines in shell startup files that mention the item's install folder.
     pub shell_lines: Vec<ShellLine>,
@@ -25,8 +31,11 @@ pub struct Leftovers {
 pub struct Leftover {
     pub path: PathBuf,
     pub kind: LeftoverKind,
-    /// Size of the files in it (symlinks are not followed).
-    pub size_bytes: u64,
+    /// Size of the files in it (symlinks are not followed); `None` until measured.
+    pub size_bytes: Option<u64>,
+    /// `size_bytes` counts every file in it; false when measuring stopped at its budget, so the folder holds more.
+    #[serde(default)]
+    pub size_complete: bool,
     /// Other installed items (`source:id`) that use the same folder and whose names match it too: it may still be
     /// theirs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -142,7 +151,8 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
                 .map(Package::key)
                 .collect();
             folders.push(Leftover {
-                size_bytes: size(host, &entry.path),
+                size_bytes: None,
+                size_complete: false,
                 path: entry.path,
                 kind: root.kind,
                 also_used_by,
@@ -150,7 +160,7 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
             });
         }
     }
-    folders.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes).then_with(|| a.path.cmp(&b.path)));
+    folders.sort_by(|a, b| a.path.cmp(&b.path));
     Leftovers {
         folders,
         shell_lines: shell_lines(platform, host, package, installed, &install_roots),
@@ -232,15 +242,36 @@ fn mentions(line: &str, path: &str) -> bool {
     })
 }
 
-/// Size of the files under `dir`, not following symlinks; folders that cannot be read count as empty.
-fn size(host: &Host, dir: &Path) -> u64 {
+impl Housekeeper {
+    /// Measures each of `leftovers`' folders, looking at no more than `budget` files and folders in each, and sorts
+    /// them largest first. `show` leaves leftovers unmeasured: a large folder takes seconds to walk.
+    pub fn measure_leftovers(&self, leftovers: &mut Leftovers, budget: usize) {
+        for folder in &mut leftovers.folders {
+            let (bytes, complete) = size(&self.host, &folder.path, budget);
+            folder.size_bytes = Some(bytes);
+            folder.size_complete = complete;
+        }
+        leftovers
+            .folders
+            .sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes).then_with(|| a.path.cmp(&b.path)));
+    }
+}
+
+/// Size of the files under `dir`, not following symlinks, from at most `budget` files and folders; folders that cannot
+/// be read count as empty. Also whether it looked at everything.
+fn size(host: &Host, dir: &Path, budget: usize) -> (u64, bool) {
     let mut total = 0;
+    let mut seen = 0;
     let mut pending = vec![dir.to_path_buf()];
     while let Some(dir) = pending.pop() {
         let Ok(entries) = host.read_dir(&dir) else {
             continue;
         };
         for entry in entries {
+            if seen == budget {
+                return (total, false);
+            }
+            seen += 1;
             match entry.file_type {
                 _ if entry.is_symlink => {}
                 Some(FileType::Dir) => pending.push(entry.path),
@@ -249,7 +280,7 @@ fn size(host: &Host, dir: &Path) -> u64 {
             }
         }
     }
-    total
+    (total, true)
 }
 
 #[cfg(test)]
@@ -299,18 +330,23 @@ mod tests {
             ],
         );
 
-        let found = leftovers(&hk, "dpkg:tool");
-        let summary: Vec<(String, LeftoverKind, u64)> = found
+        let mut found = leftovers(&hk, "dpkg:tool");
+        assert!(
+            found.folders.iter().all(|f| f.size_bytes.is_none()),
+            "show does not measure"
+        );
+        hk.measure_leftovers(&mut found, MEASURE_BUDGET);
+        let summary: Vec<(String, LeftoverKind, Option<u64>, bool)> = found
             .folders
             .iter()
-            .map(|f| (f.path.display().to_string(), f.kind, f.size_bytes))
+            .map(|f| (f.path.display().to_string(), f.kind, f.size_bytes, f.size_complete))
             .collect();
         assert_eq!(
             summary,
             [
-                (home(".cache/tool"), LeftoverKind::Cache, 100),
-                (home(".config/Tool"), LeftoverKind::Config, 10),
-                (home(".local/share/org.example.Tool"), LeftoverKind::Data, 5),
+                (home(".cache/tool"), LeftoverKind::Cache, Some(100), true),
+                (home(".config/Tool"), LeftoverKind::Config, Some(10), true),
+                (home(".local/share/org.example.Tool"), LeftoverKind::Data, Some(5), true),
             ]
         );
         assert!(!LeftoverKind::Cache.is_user_data() && LeftoverKind::Config.is_user_data());
@@ -323,6 +359,31 @@ mod tests {
             ["snap:tool"],
             "the snap install of the same app may still use it"
         );
+    }
+
+    #[test]
+    fn measuring_stops_at_the_budget_and_says_so() {
+        let fixture = Fixture::new();
+        fixture
+            .file(&home(".cache/tool/a"), "1")
+            .file(&home(".cache/tool/b"), "22")
+            .file(&home(".cache/tool/c"), "333");
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![Stub {
+                id: "dpkg",
+                packages: vec![package("dpkg", "tool", None, &[])],
+                ..Stub::default()
+            }],
+        );
+        let size = |budget| {
+            let mut found = leftovers(&hk, "dpkg:tool");
+            hk.measure_leftovers(&mut found, budget);
+            (found.folders[0].size_bytes, found.folders[0].size_complete)
+        };
+        assert_eq!(size(2), (Some(3), false), "a and b counted, c not");
+        assert_eq!(size(3), (Some(6), true), "exactly the budget is everything");
     }
 
     #[test]

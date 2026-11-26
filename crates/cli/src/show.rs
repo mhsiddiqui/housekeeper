@@ -173,16 +173,12 @@ fn labelled(out: &mut impl Write, label: &str, value: &str) -> io::Result<()> {
     writeln!(out, "{label:<LABEL$}{value}")
 }
 
-/// `3 folders, 120.0 MB, and 2 lines in shell startup files (housekeeper remove --dry-run lists them)`.
+/// `3 folders and 2 lines in shell startup files (housekeeper remove --dry-run measures and lists them)`. Not measured
+/// here: a large folder takes seconds to walk.
 fn leftovers_summary(leftovers: &Leftovers) -> String {
     let mut parts = Vec::new();
     if !leftovers.folders.is_empty() {
-        let size: u64 = leftovers.folders.iter().map(|folder| folder.size_bytes).sum();
-        parts.push(format!(
-            "{}, {}",
-            crate::count(leftovers.folders.len(), "folder"),
-            human_size(size)
-        ));
+        parts.push(crate::count(leftovers.folders.len(), "folder"));
     }
     if !leftovers.shell_lines.is_empty() {
         parts.push(format!(
@@ -193,10 +189,14 @@ fn leftovers_summary(leftovers: &Leftovers) -> String {
     if parts.is_empty() {
         return "none found".to_string();
     }
-    format!("{} (`housekeeper remove --dry-run` lists them)", parts.join(" and "))
+    format!(
+        "{} (`housekeeper remove --dry-run` measures and lists them)",
+        parts.join(" and ")
+    )
 }
 
-/// `/home/u/.config/foo (settings, 2.1 MB; yours: kept unless you choose it; snap:foo may still use it)`.
+/// `/home/u/.config/foo (settings, 2.1 MB; yours: kept unless you choose it; snap:foo may still use it)`; a folder
+/// measured only in part is "at least" its size.
 fn leftover(folder: &Leftover) -> String {
     let kind = match folder.kind {
         LeftoverKind::Config => "settings",
@@ -204,7 +204,14 @@ fn leftover(folder: &Leftover) -> String {
         LeftoverKind::Data => "data",
         LeftoverKind::State => "history and state",
     };
-    let mut notes = vec![format!("{kind}, {}", human_size(folder.size_bytes))];
+    let mut notes = vec![match folder.size_bytes {
+        Some(size) if folder.size_complete => format!("{kind}, {}", human_size(size)),
+        Some(size) => format!(
+            "{kind}, at least {}: too many files to count them all",
+            human_size(size)
+        ),
+        None => kind.to_string(),
+    }];
     if folder.kind.is_user_data() {
         notes.push("yours: kept unless you choose it".into());
     }
@@ -340,14 +347,16 @@ mod tests {
                 Leftover {
                     path: PathBuf::from("/home/u/.cache/tool"),
                     kind: LeftoverKind::Cache,
-                    size_bytes: 1_500_000,
+                    size_bytes: Some(1_500_000),
+                    size_complete: false,
                     also_used_by: Vec::new(),
                     unseen_copies: true,
                 },
                 Leftover {
                     path: PathBuf::from("/home/u/.config/tool"),
                     kind: LeftoverKind::Config,
-                    size_bytes: 500_000,
+                    size_bytes: Some(500_000),
+                    size_complete: true,
                     also_used_by: vec!["snap:tool".into()],
                     unseen_copies: false,
                 },
@@ -439,7 +448,7 @@ Needed by:  app0 (dpkg:app0)
 Removal:    through its package manager
             as root, by Housekeeper's helper: apt-get remove --yes libc6:amd64
             also removes 12 packages: app0, app1, app2, app3, app4, app5, app6, app7, app8, app9, …, says `apt-get --simulate remove`
-Leftovers:  2 folders, 2.0 MB and 1 line in shell startup files (`housekeeper remove --dry-run` lists them)
+Leftovers:  2 folders and 1 line in shell startup files (`housekeeper remove --dry-run` measures and lists them)
 
 /usr/lib/libc.so.6
 /usr/share/doc/libc6
@@ -467,7 +476,7 @@ tool
 dpkg:tool
 
 Removal:    not known: nothing records how it was installed
-Leftovers:  /home/u/.cache/tool (cache, 1.5 MB; copies in projects or virtual environments Housekeeper does not read may still use it)
+Leftovers:  /home/u/.cache/tool (cache, at least 1.5 MB: too many files to count them all; copies in projects or virtual environments Housekeeper does not read may still use it)
             /home/u/.config/tool (settings, 500.0 kB; yours: kept unless you choose it; snap:tool may still use it)
 Shell:      /home/u/.bashrc line 12: export PATH=\"$HOME/.tool/bin:$PATH\"
             (these lines are not edited yet; remove them by hand after removing it)

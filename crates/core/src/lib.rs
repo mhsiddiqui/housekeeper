@@ -25,7 +25,7 @@ pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use group::{AppGroup, Shared};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
-pub use leftovers::{Leftover, LeftoverKind, Leftovers, ShellLine};
+pub use leftovers::{Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};
 pub use model::{
     Availability, InstallReason, Launcher, Metainfo, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind,
     SystemInfo,
