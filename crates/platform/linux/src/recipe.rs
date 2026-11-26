@@ -1,5 +1,5 @@
-//! Recipes: one reviewed TOML file per script-installed tool in `crates/linux/recipes/`, saying how to find the tool
-//! and how to remove it (decisions D8, D26).
+//! Recipes: one reviewed TOML file per script-installed tool in this crate's `recipes/` folder, saying how to find the
+//! tool and how to remove it (decisions D8, D26).
 //!
 //! The files are compiled into the binary; `build.rs` lists the folder, so adding a tool is one file and no Rust. A
 //! recipe can only use a fixed vocabulary: find the install by a marker file under candidate folders, and remove it
@@ -7,7 +7,7 @@
 //! It never runs a shell, and nothing it names can leave the install folder.
 //!
 //! ```toml
-//! # crates/linux/recipes/rustup.toml; the file name is the tool's key (`installer/rustup`).
+//! # recipes/rustup.toml; the file name is the tool's key (`installer/rustup`).
 //! title = "rustup"
 //!
 //! [detect]

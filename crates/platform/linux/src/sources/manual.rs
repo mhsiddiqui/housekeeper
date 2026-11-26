@@ -1,5 +1,5 @@
 //! Software installed by hand or by a script: directories in `/opt`, loose executables on the PATH and the
-//! script-installed tools the recipes describe (rustup, nvm, pyenv…; `crates/linux/recipes/`, decision D26).
+//! script-installed tools the recipes describe (rustup, nvm, pyenv…; this crate's `recipes/`, decision D26).
 
 use std::collections::{BTreeMap, HashSet};
 use std::os::unix::fs::MetadataExt;
