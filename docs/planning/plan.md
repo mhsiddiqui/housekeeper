@@ -33,7 +33,7 @@ source, without root and without changing anything.
 | 1.6 ✅ | AppImage source (magic bytes), manual source (`/opt`, `/usr/local/bin`, `~/.local/bin`, symlink farms grouped by install folder; native-owned paths left out), known script installers (rustup, nvm, pyenv, atuin, bun, deno, sdkman, Homebrew, Volta, oh-my-zsh) |
 | 1.7 ✅ | CLI: `housekeeper sources`, `housekeeper list` (table/JSON, filters) |
 | 1.8 ✅ | CI smoke test inside Debian, Ubuntu, Fedora, openSUSE Tumbleweed and Arch containers |
-| 1.9 ✅ | Homebrew on Linux (formulae, taps, casks) and one-file providers: every file in `crates/linux/src/sources/` registers itself; native package managers declare their distributions |
+| 1.9 ✅ | Homebrew on Linux (formulae, taps, casks) and one-file providers: every file in `crates/platform/linux/src/sources/` registers itself; native package managers declare their distributions |
 
 ## Phase 2: Identity and ownership ✅
 | Chunk | Delivers |

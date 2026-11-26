@@ -4,13 +4,13 @@ Instructions for AI coding agents (and humans) working on Housekeeper. The sourc
 section, [docs/](docs/README.md); this file says how to use it and how to keep it current.
 
 Housekeeper shows every app installed on a Linux machine, whatever installed it, and (in later phases) removes each one
-the way its own installer intended. Rust workspace: `crates/core` (no OS knowledge), `crates/linux` (one `Source` per
-way software gets installed), `crates/platform` (picks the OS crate for front ends), `crates/cli` (the `housekeeper`
-command).
+the way its own installer intended. Rust workspace: `crates/core` (no OS knowledge), `crates/platform` (picks the OS
+crate for front ends) with one crate per operating system inside it, today `crates/platform/linux` (one `Source` per
+way software gets installed), and `crates/cli` (the `housekeeper` command).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D34. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D35. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.
@@ -45,16 +45,16 @@ A branch is ready for review only when all of these hold:
 The full "which document to update" table is in [docs/README.md](docs/README.md#which-document-to-update).
 
 ## Code rules
-- **Composition:** a new way of installing software is **one new file** in `crates/linux/src/sources/` with a type that
-  implements `Source` and `LinuxSource` and a `register!(<Type>);` line; `build.rs` lists it, so no list is edited
-  (D20). Sources never import from each other; shared code lives outside `sources/`. A new distribution is the
+- **Composition:** a new way of installing software is **one new file** in `crates/platform/linux/src/sources/` with a
+  type that implements `Source` and `LinuxSource` and a `register!(<Type>);` line; `build.rs` lists it, so no list is
+  edited (D20). Sources never import from each other; shared code lives outside `sources/`. A new distribution is the
   same: its native package manager's file declares `LinuxSource::NATIVE` (families and `os-release` IDs) and
   implements `OwnerLookup` (see the [guide](docs/architecture/guide.html#new-distro)). A distribution's package tool
-  (apt, dnf…) is one file in `crates/linux/src/tools/` implementing `PackageTool` and `LinuxTool`, with
+  (apt, dnf…) is one file in `crates/platform/linux/src/tools/` implementing `PackageTool` and `LinuxTool`, with
   `register_package_tool!(<Type>);` (D24). A tool installed by its own script (rustup, nvm…) is one reviewed TOML
-  recipe in `crates/linux/recipes/` and no Rust (D26, D34). A new operating system is a new crate implementing
-  `Platform`, registered in `housekeeper-platform` (D27). Core never mentions an OS, distribution or package manager,
-  and must build on every OS (Unix-only code behind `cfg(unix)`).
+  recipe in `crates/platform/linux/recipes/` and no Rust (D26, D34). A new operating system is a new crate in
+  `crates/platform/<os>/` implementing `Platform`, registered in `housekeeper-platform` (D27, D35). Core never
+  mentions an OS, distribution or package manager, and must build on every OS (Unix-only code behind `cfg(unix)`).
 - **Optional abilities** (owner lookup, removal, install, update) are separate traits returned as
   `Option<&dyn …>` from a source, never methods every source must stub.
 - **All machine access goes through `Host`**: logical absolute paths (`host.read_to_string`, `host.read_dir`, …) and
@@ -68,12 +68,13 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
 - New dependencies need a reason in the change record and must pass `cargo deny` (permissive, GPL-compatible
   licences only). Housekeeper itself is GPL-3.0-or-later (D21); never copy code from GPL-incompatible projects.
 - No sign-in or telemetry (D15).
-- Tests use `housekeeper_core::testing::{Fixture, FakeRunner}`; follow `crates/linux/src/sources/dpkg.rs`.
+- Tests use `housekeeper_core::testing::{Fixture, FakeRunner}`; follow `crates/platform/linux/src/sources/dpkg.rs`.
 
 ## Checks
 ```sh
 cargo fmt --all --check
-rustfmt --check crates/linux/src/sources/*.rs   # cargo fmt cannot see these (declared by build.rs)
+# cargo fmt cannot see these files (build.rs declares them):
+rustfmt --check crates/platform/linux/src/sources/*.rs crates/platform/linux/src/tools/*.rs
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps

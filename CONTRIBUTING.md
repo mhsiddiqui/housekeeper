@@ -34,7 +34,8 @@ CI runs all of these on every pull request into `main` ([ci.yml](.github/workflo
 
 ```sh
 cargo fmt --all --check
-rustfmt --check crates/linux/src/sources/*.rs   # cargo fmt cannot see these (declared by build.rs)
+# cargo fmt cannot see these files (build.rs declares them):
+rustfmt --check crates/platform/linux/src/sources/*.rs crates/platform/linux/src/tools/*.rs
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
@@ -54,9 +55,9 @@ docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/scripts:/scripts:ro" fedora:lat
 
 ## Code
 - Read [docs/architecture/README.md](docs/architecture/README.md) first. A new way of installing software is one new
-  file in `crates/linux/src/sources/` implementing `Source` and `LinuxSource` and calling `register!(<Type>);`; it
-  registers itself, nothing else changes ([how](docs/architecture/guide.html#new-provider)). Sources never import from
-  each other; code they share lives outside `sources/`.
+  file in `crates/platform/linux/src/sources/` implementing `Source` and `LinuxSource` and calling
+  `register!(<Type>);`; it registers itself, nothing else changes ([how](docs/architecture/guide.html#new-provider)).
+  Sources never import from each other; code they share lives outside `sources/`.
 - Sources read the machine only through `Host` (logical paths, injected command runner), so every source is tested
   with fixture files and recorded command output.
 - Tests should catch bugs a user would notice: wrong install reason, missed packages, crashes on unusual input.
