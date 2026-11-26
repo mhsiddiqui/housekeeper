@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `feat/root-helper`, #35
 - **Plan chunks:** 4.1, done
-- **Commits:** 3a5d2ee, a402d45, 704825f
+- **Commits:** 3a5d2ee, a402d45, 704825f, d88b134
 
 ## What changed
 - **New crate `crates/helper`, binary `housekeeper-helper`** (decisions D4, D25, D40).
