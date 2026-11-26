@@ -60,6 +60,12 @@ the project uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 - `housekeeper who` named the wrong snap for a snap command when a later file on its symlink chain had another
   snap's name (`/snap/bin/pinta` → … → `/usr/lib/snapd/snapd` could be credited to the snapd snap).
+- `housekeeper remove --dry-run` no longer lists, as one item's leftovers, folders it cannot own: a Flatpak's
+  `~/.var/app/<id>` for a `.deb` of the same app, `~/.config/<name>` for a Flatpak or a strictly confined snap (they
+  keep their settings in their own folders), or folders every program shares such as `~/.config/dconf` (Fedora,
+  openSUSE and Arch have a `dconf` package). Folders of pip, npm, cargo and other language packages say that copies in
+  projects or virtual environments may still use them (`unseen_copies` in `--json`). Shell lines are no longer
+  matched inside a longer path (`/mnt/backup/home/me/.nvm`).
 
 ## 0.1.0 (2026-11-24)
 
