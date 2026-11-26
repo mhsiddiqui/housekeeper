@@ -1,9 +1,9 @@
 # 0039: Recipes for script-installed tools
 
 - **Date:** 2026-11-26
-- **Branch / PR:** `feat/recipes`, PR not opened yet
+- **Branch / PR:** `feat/recipes`, #29
 - **Plan chunks:** 3.4 (recipe format), done
-- **Commits:** 296e060, 4bd5820
+- **Commits:** 296e060, 4bd5820, c4849fa
 
 ## What changed
 - **`crates/linux/recipes/*.toml`**: one reviewed file per script-installed tool, named by the tool's key. Each file
