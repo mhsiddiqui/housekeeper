@@ -5,6 +5,12 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.2.0 (2026-11-26)
+
+Housekeeper can now remove what it lists, the way each app's installer intended: it shows the plan and what would be
+left behind, checks everything again just before acting, asks for an administrator's password only for steps that
+need root, moves leftovers to the Trash instead of deleting them, and records every change.
+
 ### Added
 - `housekeeper who <command or path>`: which source and package a command or file comes from, following its
   symlinks, with the evidence (the package manager lists it, it is inside a package's install folder, or inside a
@@ -20,14 +26,16 @@ the project uses [Semantic Versioning](https://semver.org/).
   `app_ids` on each package (from AppStream metainfo, Flatpak IDs and snaps' `common-id`).
 - `housekeeper show <id or name>`: everything about one installed item: details, how its source knows it is
   installed, commands, launchers, AppStream IDs, its other installs, its files (from the package database or pip's
-  `RECORD`, otherwise its install folder; `--files` lists them) and the packages that directly need it. `--json` for
-  scripts. `housekeeper sources --json` now says how each source knows what is installed (`evidence`).
+  `RECORD`, otherwise its install folder; `--files` lists them) and the packages that directly need it (on RPM
+  systems, also those that require one of its programs, such as `/usr/bin/sed`). `--json` for scripts.
+  `housekeeper sources --json` now says how each source knows what is installed (`evidence`).
 - `housekeeper show` says how the item would be removed the way its installer intended, without removing anything:
   through the distribution's own tool for system packages (apt, dnf, zypper, rpm-ostree, pacman), through Flatpak,
   Snap, Homebrew, npm (with the npm of the Node version it is under), pipx, uv, pip or cargo for theirs, by trashing
   an AppImage and the launchers that start it, or with rustup's own uninstaller. Each step says whether it would run
   as you or as root, and what blocks it (a package that is part of a Silverblue image, an npm or cargo install
-  outside your home folder). `--json` has the plan as `removal`.
+  outside your home folder). Removing with dnf or zypper uses only what is installed, never online repositories, so a
+  mirror that is down cannot stop it. `--json` has the plan as `removal`.
 - A protected package's removal is blocked, and `housekeeper show` says why it is protected: dpkg's Essential or
   Protected mark (newly read; `init` and `libgcc-s1` are Protected on Debian and Ubuntu) or Priority required, dnf's
   protected packages (now also `protected_packages` in `/etc/dnf/dnf.conf`), Arch's `base` and everything it depends
@@ -42,9 +50,14 @@ the project uses [Semantic Versioning](https://semver.org/).
   "not known".
 - `housekeeper remove --dry-run <id or name>`: the removal plan in full with what the item would leave behind:
   folders named after it in `~/.config`, `~/.cache`, `~/.local/share`, `~/.local/state` and a Flatpak's
-  `~/.var/app/<id>` (with their size, whether they are your data, and whether another install may still use them),
-  and lines in shell startup files that load it. It changes nothing. `housekeeper show` counts the leftovers; `--json`
-  has them as `leftovers`.
+  `~/.var/app/<id>`, and lines in shell startup files that load it. Only folders the item can use are listed (none in
+  `~/.config` for a Flatpak or a strictly confined snap, never folders every program shares such as
+  `~/.config/dconf`), and folders of pip, npm, cargo and other language packages say that copies in projects or
+  virtual environments may still use them. Each folder shows its size (counting at most 50,000 files and folders, so
+  a bigger one shows "at least" its size), whether it is your data, and whether it would go with the item: a cache
+  that nothing else may use "goes to the Trash with it"; everything else is "kept unless you choose it". It changes
+  nothing. `housekeeper show` counts the leftovers; `--json` has them as `leftovers` (with `unseen_copies`,
+  `size_complete` and the `identity` checked again before a folder moves).
 - Housekeeper's root helper, `/usr/lib/housekeeper/housekeeper-helper`, and its polkit action are installed with the
   packages (the tarball carries them too). `pkexec` starts it, asking for an administrator's password each time; it
   takes one request on standard input and removes only installed packages, named plainly, through the system's own
@@ -61,35 +74,13 @@ the project uses [Semantic Versioning](https://semver.org/).
   leaves the computer.
 
 ### Changed
-- `housekeeper remove --dry-run` says which leftover folders would go with the item: a cache that nothing else may
-  use "goes to the Trash with it"; everything else is "kept unless you choose it". Chosen folders go to the
-  freedesktop Trash (they can be put back from the file manager), and only after they are checked again. `--json`
-  gives each folder an `identity` (device, inode, owner) for that check.
-- Removal plans for dnf and zypper no longer use online repositories (`dnf remove --assumeyes --disablerepo=*`,
-  `zypper --non-interactive --no-remote remove`): removing needs only what is installed, and a mirror that is down
-  can no longer stop it.
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
   (fonts, firmware, themes, data, plugins) are a new kind, `component`, shown with `--all`. On an Ubuntu desktop the
   default list went from 525 to 210 entries.
-- `housekeeper show` no longer measures leftover folders (it took seconds for a large cache); its `Leftovers:` line
-  counts them, and `size_bytes` is `null` in its `--json`. `housekeeper remove --dry-run` measures them, counting at
-  most 50,000 files and folders per folder: a bigger one shows "at least" its size (`size_complete: false`).
 - `--json`: `protected` is now the reason a package is protected (a string, or `null`) instead of `true`/`false`, so
   the scan's `schema` is `2`.
 - Kernels other than the running one are no longer protected on Fedora, openSUSE and Arch, so older kernels can be
   removed; the running kernel is protected instead.
-- `housekeeper show`'s "Needed by" on RPM systems also counts packages that require one of the package's programs
-  (`/usr/bin/sed`), not only what it provides.
-
-### Fixed
-- `housekeeper who` named the wrong snap for a snap command when a later file on its symlink chain had another
-  snap's name (`/snap/bin/pinta` → … → `/usr/lib/snapd/snapd` could be credited to the snapd snap).
-- `housekeeper remove --dry-run` no longer lists, as one item's leftovers, folders it cannot own: a Flatpak's
-  `~/.var/app/<id>` for a `.deb` of the same app, `~/.config/<name>` for a Flatpak or a strictly confined snap (they
-  keep their settings in their own folders), or folders every program shares such as `~/.config/dconf` (Fedora,
-  openSUSE and Arch have a `dconf` package). Folders of pip, npm, cargo and other language packages say that copies in
-  projects or virtual environments may still use them (`unseen_copies` in `--json`). Shell lines are no longer
-  matched inside a longer path (`/mnt/backup/home/me/.nvm`).
 
 ## 0.1.0 (2026-11-24)
 
