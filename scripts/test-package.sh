@@ -83,6 +83,11 @@ if grep -q '"state": "failed"' /tmp/all.json; then
   fail "a source failed"
 fi
 
+# The scan keeps its record of items seen in the user's state folder; nothing has been changed yet.
+grep -q '"key":"'"$native"':' "${XDG_STATE_HOME:-$HOME/.local/state}/housekeeper/seen.jsonl" \
+  || fail "the scan did not record the $native packages it saw"
+housekeeper history | grep -q '^Housekeeper has not changed anything' || fail "housekeeper history is not empty"
+
 # The root helper refuses what is not a plain, installed package of this system's tool, and changes nothing.
 [ "$(run_helper housekeeper-no-such-package)" = 2 ] \
   && grep -q '"reason":"housekeeper-no-such-package is not installed"' /tmp/helper.json \
@@ -120,7 +125,9 @@ if [ "$installed" = yes ]; then
   mkdir -p "$HOME/.config/housekeeper" && echo 'x' > "$HOME/.config/housekeeper/settings"
   housekeeper remove --dry-run housekeeper > /tmp/dry-run.txt \
     || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run found nothing for itself"; }
-  grep -q "^Leftovers: *$HOME/.config/housekeeper (settings" /tmp/dry-run.txt \
+  # Housekeeper's own state folder (its record of items seen) is listed too, so the settings folder is not
+  # necessarily the first line.
+  grep -q "$HOME/.config/housekeeper (settings" /tmp/dry-run.txt \
     || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run did not list its settings folder"; }
   grep -q '^Nothing was changed' /tmp/dry-run.txt || fail "housekeeper remove --dry-run did not say it changed nothing"
   refused=0
