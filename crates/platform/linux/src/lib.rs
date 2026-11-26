@@ -7,6 +7,7 @@
 mod appstream;
 mod desktop;
 pub mod distro;
+mod elevate;
 mod files;
 mod kernel;
 mod lock;
@@ -23,8 +24,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, ScanContext, Source, SourceKind,
-    SystemInfo, path_dirs,
+    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, RootHelper, ScanContext, Source,
+    SourceKind, SystemInfo, path_dirs,
 };
 
 use crate::distro::Distro;
@@ -103,6 +104,20 @@ impl Platform for LinuxPlatform {
         (name == backend).then(|| tool.lock()).flatten()
     }
 
+    /// `pkexec` and the helper the packages install (D40).
+    fn root_helper(&self) -> Option<&dyn RootHelper> {
+        Some(&elevate::Pkexec)
+    }
+
+    fn system_paths(&self) -> &'static [&'static str] {
+        SYSTEM_PATHS
+    }
+
+    /// Home folders (Silverblue's live in `/var/home`), root's, and the per-user runtime folders.
+    fn home_paths(&self) -> &'static [&'static str] {
+        &["/home", "/var/home", "/root", "/run/user"]
+    }
+
     fn sources(&self) -> &[Arc<dyn Source>] {
         &self.sources
     }
@@ -164,6 +179,54 @@ impl Platform for LinuxPlatform {
             .collect()
     }
 }
+
+/// The file system hierarchy's own folders, and the ones packages install into: never trashed by the root helper,
+/// nor anything holding them. What is inside them (an AppImage in `/opt`) can be.
+const SYSTEM_PATHS: &[&str] = &[
+    "/bin",
+    "/boot",
+    "/dev",
+    "/etc",
+    "/home",
+    "/lib",
+    "/lib32",
+    "/lib64",
+    "/libx32",
+    "/media",
+    "/mnt",
+    "/opt",
+    "/proc",
+    "/root",
+    "/run",
+    "/sbin",
+    "/snap",
+    "/srv",
+    "/sys",
+    "/tmp",
+    "/usr",
+    "/usr/bin",
+    "/usr/games",
+    "/usr/include",
+    "/usr/lib",
+    "/usr/lib32",
+    "/usr/lib64",
+    "/usr/libexec",
+    "/usr/local",
+    "/usr/local/bin",
+    "/usr/local/lib",
+    "/usr/local/sbin",
+    "/usr/local/share",
+    "/usr/sbin",
+    "/usr/share",
+    "/usr/share/applications",
+    "/usr/src",
+    "/var",
+    "/var/cache",
+    "/var/home",
+    "/var/lib",
+    "/var/log",
+    "/var/tmp",
+];
 
 /// Lowercase, sorted.
 const SHARED_STATE_FOLDERS: &[&str] = &[

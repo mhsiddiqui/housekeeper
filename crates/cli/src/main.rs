@@ -7,14 +7,15 @@ mod table;
 mod who;
 
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
+use housekeeper_core::history::ChangeOutcome;
 use housekeeper_core::{
-    Availability, Details, Host, Housekeeper, Leftovers, Lookup, MEASURE_BUDGET, Package, RemovalPlan, Selection,
-    SourceStatus,
+    Availability, Cancel, Details, Event, Host, Housekeeper, Leftover, Leftovers, Lookup, MEASURE_BUDGET, Package,
+    RemovalPlan, Selection, SourceStatus,
 };
 use serde::Serialize;
 
@@ -77,9 +78,10 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// How one installed item would be removed and what it would leave behind. Only `--dry-run` exists for now:
-    /// nothing is removed until Housekeeper's root helper does it. Exits 0 when found, 1 when the name matches several
-    /// items, 2 when nothing matches, 3 without `--dry-run` (removing is not available yet).
+    /// Remove one installed item the way its installer intended, after showing the plan and asking. Steps that need
+    /// root go through Housekeeper's root helper (an administrator's password is asked). Exits 0 when it was removed,
+    /// 1 when the name matches several items, 2 when nothing matches, 3 when nothing was changed (blocked, declined,
+    /// changed since it was planned, cancelled), 4 when a step failed.
     Remove {
         /// `source:id` from `list --json` or `show` (`dpkg:firefox`), or a name or title.
         #[arg(value_name = "ID_OR_NAME")]
@@ -87,7 +89,14 @@ enum Command {
         /// Plan only: show the steps, what else would go and the leftovers, and change nothing.
         #[arg(long)]
         dry_run: bool,
-        /// Print JSON instead of text.
+        /// Remove without asking first.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Which leftover folders go to the Trash with it: those nothing else may use (`caches`, the default), none, or
+        /// all of them, your settings and data too.
+        #[arg(long, value_enum, default_value_t = LeftoverChoice::Caches)]
+        leftovers: LeftoverChoice,
+        /// Print JSON instead of text: the plan with `--dry-run`, otherwise what was done (as the history keeps it).
         #[arg(long)]
         json: bool,
     },
@@ -122,7 +131,23 @@ fn main() -> Result<ExitCode> {
         }
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
         Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
-        Command::Remove { query, dry_run, json } => remove(&housekeeper, &query, dry_run, json, &mut out),
+        Command::Remove {
+            query,
+            dry_run,
+            yes,
+            leftovers,
+            json,
+        } => remove(
+            &housekeeper,
+            &query,
+            &RemoveOptions {
+                dry_run,
+                yes,
+                leftovers,
+                json,
+            },
+            &mut out,
+        ),
         Command::History { json } => history(&housekeeper, json, &mut out).map(|()| ExitCode::SUCCESS),
     };
     match result {
@@ -331,7 +356,7 @@ fn show(housekeeper: &Housekeeper, query: &str, all_files: bool, json: bool, out
         } else {
             show::render(details, all_files, out)?;
         }
-        Ok(())
+        Ok(ExitCode::SUCCESS)
     })
 }
 
@@ -344,18 +369,29 @@ struct DryRun<'a> {
     warnings: &'a [String],
 }
 
-fn remove(housekeeper: &Housekeeper, query: &str, dry_run: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
-    if !dry_run {
-        writeln!(
-            io::stderr().lock(),
-            "housekeeper: removing is not available yet (it comes with Housekeeper's root helper); \
-             `housekeeper remove --dry-run {query}` shows what it would do"
-        )?;
-        return Ok(ExitCode::from(3));
-    }
-    lookup(housekeeper, query, "remove --dry-run", json, out, |details, out| {
+/// Which leftover folders a removal moves to the Trash (D38).
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum LeftoverChoice {
+    /// Those nothing else may use (`Leftover::preselected`).
+    Caches,
+    None,
+    /// Every folder listed, the user's settings and data included.
+    All,
+}
+
+/// What `remove` was told.
+struct RemoveOptions {
+    dry_run: bool,
+    yes: bool,
+    leftovers: LeftoverChoice,
+    json: bool,
+}
+
+fn remove(housekeeper: &Housekeeper, query: &str, options: &RemoveOptions, out: &mut impl Write) -> Result<ExitCode> {
+    let command = if options.dry_run { "remove --dry-run" } else { "remove" };
+    lookup(housekeeper, query, command, options.json, out, |details, out| {
         housekeeper.measure_leftovers(&mut details.leftovers, MEASURE_BUDGET);
-        if json {
+        if options.json && options.dry_run {
             let dry_run = DryRun {
                 package: &details.package,
                 removal: &details.removal,
@@ -364,31 +400,113 @@ fn remove(housekeeper: &Housekeeper, query: &str, dry_run: bool, json: bool, out
             };
             serde_json::to_writer_pretty(&mut *out, &dry_run)?;
             writeln!(out)?;
-        } else {
-            show::render_removal(details, out)?;
+            return Ok(ExitCode::SUCCESS);
         }
-        Ok(())
+        if !options.json {
+            show::render_removal(details, options.dry_run, out)?;
+        }
+        if options.dry_run {
+            return Ok(ExitCode::SUCCESS);
+        }
+        carry_out(housekeeper, details, options, out)
     })
 }
 
-/// Finds the one item `query` names and hands it to `found`, or lists the items it matches (exit 1) or says nothing
-/// matches (exit 2). `command` is the subcommand to suggest with an item's ID.
+/// Asks, checks the plan again (D37), removes, and says how each step went. Exit codes as `remove` documents.
+fn carry_out(
+    housekeeper: &Housekeeper,
+    details: &Details,
+    options: &RemoveOptions,
+    out: &mut impl Write,
+) -> Result<ExitCode> {
+    let not_done = ExitCode::from(3);
+    let title = details.package.display_name().to_string();
+    let plan = details.removal.clone().unwrap_or_else(RemovalPlan::unknown);
+    if !plan.blockers.is_empty() || plan.steps.is_empty() {
+        let why = if plan.steps.is_empty() {
+            "nothing records how it is removed".to_string()
+        } else {
+            plan.blockers.join("; ")
+        };
+        eprintln!("housekeeper: {title} is not removed: {why}. Nothing was changed.");
+        return Ok(not_done);
+    }
+    let chosen: Vec<Leftover> = details
+        .leftovers
+        .folders
+        .iter()
+        .filter(|folder| match options.leftovers {
+            LeftoverChoice::Caches => folder.preselected(),
+            LeftoverChoice::None => false,
+            LeftoverChoice::All => true,
+        })
+        .cloned()
+        .collect();
+    if !options.yes {
+        if !io::stdin().is_terminal() {
+            eprintln!("housekeeper: add --yes to remove {title} without being asked. Nothing was changed.");
+            return Ok(not_done);
+        }
+        let also = match chosen.len() {
+            0 => String::new(),
+            n => format!(" and move {} to the Trash", count(n, "leftover folder")),
+        };
+        eprint!("\nRemove {title}{also}? [y/N] ");
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+        if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+            eprintln!("Nothing was changed.");
+            return Ok(not_done);
+        }
+    }
+    if let Err(change) = housekeeper.still_as_reviewed(details) {
+        eprintln!("housekeeper: {title} changed since its removal was planned ({change}). Nothing was changed.");
+        return Ok(not_done);
+    }
+    let removal = housekeeper.remove(details, &chosen, &Cancel::default(), &|event| match event {
+        Event::Waiting { holder, .. } => eprintln!(
+            "Waiting for {} to let go of {}…",
+            match (&holder.program, holder.pid) {
+                (Some(program), Some(pid)) => format!("{program} (process {pid})"),
+                _ => "another program".to_string(),
+            },
+            holder.lock.display()
+        ),
+        Event::Started { .. } => eprintln!("Removing {title}…"),
+        Event::Finished { .. } | Event::Cancelled { .. } => {}
+    });
+    if options.json {
+        serde_json::to_writer_pretty(&mut *out, &removal.entry)?;
+        writeln!(out)?;
+    } else {
+        show::render_outcome(&removal.entry, out)?;
+    }
+    if let Some(error) = removal.history_error {
+        eprintln!("warning: the history could not be written: {error}");
+    }
+    Ok(match removal.entry.outcome {
+        ChangeOutcome::Done => ExitCode::SUCCESS,
+        ChangeOutcome::NotDone => not_done,
+        ChangeOutcome::Failed => ExitCode::from(4),
+    })
+}
+
+/// Finds the one item `query` names and hands it to `found`, whose exit code it returns, or lists the items it matches
+/// (exit 1) or says nothing matches (exit 2). `command` is the subcommand to suggest with an item's ID.
 fn lookup<W: Write>(
     housekeeper: &Housekeeper,
     query: &str,
     command: &str,
     json: bool,
     out: &mut W,
-    found: impl FnOnce(&mut Details, &mut W) -> Result<()>,
+    found: impl FnOnce(&mut Details, &mut W) -> Result<ExitCode>,
 ) -> Result<ExitCode> {
-    let mut err = io::stderr().lock();
     match housekeeper.show(query) {
         Lookup::Found(mut details) => {
-            found(&mut details, out)?;
             for warning in &details.warnings {
-                writeln!(err, "warning: {warning}")?;
+                eprintln!("warning: {warning}");
             }
-            Ok(ExitCode::SUCCESS)
+            found(&mut details, out)
         }
         Lookup::Several(packages) => {
             if json {
@@ -397,16 +515,15 @@ fn lookup<W: Write>(
             } else {
                 show::render_several(&packages, out)?;
             }
-            writeln!(
-                err,
+            eprintln!(
                 "housekeeper: {} installed items match `{query}`; pick one by its ID (`housekeeper {command} {}`).",
                 packages.len(),
                 packages.first().map(Package::key).unwrap_or_default()
-            )?;
+            );
             Ok(ExitCode::from(1))
         }
         Lookup::NotFound => {
-            writeln!(err, "housekeeper: nothing installed matches `{query}`")?;
+            eprintln!("housekeeper: nothing installed matches `{query}`");
             Ok(ExitCode::from(2))
         }
     }

@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::helper::PackageRemoval;
+use crate::helper::{PackageRemoval, RootHelper};
 use crate::host::Host;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Launcher, Metainfo, SystemInfo};
@@ -59,6 +59,23 @@ pub trait Platform: Send + Sync {
     /// (D6); `None` when the backend has none Housekeeper can see.
     fn package_lock(&self, _backend: &str) -> Option<&dyn PackageLock> {
         None
+    }
+
+    /// How front ends reach the root helper (D4, D40); `None` when the system has none.
+    fn root_helper(&self) -> Option<&dyn RootHelper> {
+        None
+    }
+
+    /// Folders the system is made of (`/usr`, `/etc`): the root helper never trashes one of them, nor a folder that
+    /// holds one.
+    fn system_paths(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// Folders that hold users' own files (`/home`): the root helper never trashes anything inside them, since what is
+    /// there is removed by its user.
+    fn home_paths(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// The user's shell startup files (logical paths), whose lines can load an installed tool.

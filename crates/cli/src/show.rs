@@ -1,10 +1,11 @@
-//! Text output of `housekeeper show` and `housekeeper remove --dry-run`.
+//! Text output of `housekeeper show` and `housekeeper remove`.
 
 use std::io::{self, Write};
 
+use housekeeper_core::history::{HistoryEntry, StepOutcome};
 use housekeeper_core::{
     Action, Actor, Details, FilesFrom, Leftover, LeftoverKind, Leftovers, Package, PackageKind, RemovalPlan, Shared,
-    Tier,
+    Step, Tier,
 };
 
 use crate::table::{Table, human_size};
@@ -124,8 +125,9 @@ pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::R
     Ok(())
 }
 
-/// `housekeeper remove --dry-run`: how the item would be removed and everything it would leave behind, in full.
-pub fn render_removal(details: &Details, out: &mut impl Write) -> io::Result<()> {
+/// `housekeeper remove`: how the item would be removed and everything it would leave behind, in full; with `dry_run`
+/// it ends by saying nothing was changed.
+pub fn render_removal(details: &Details, dry_run: bool, out: &mut impl Write) -> io::Result<()> {
     let package = &details.package;
     writeln!(out, "{}", package.display_name())?;
     writeln!(out, "{}", package.key())?;
@@ -156,11 +158,38 @@ pub fn render_removal(details: &Details, out: &mut impl Write) -> io::Result<()>
             "(these lines are not edited yet; remove them by hand after removing it)",
         )?;
     }
+    if dry_run {
+        writeln!(out)?;
+        writeln!(out, "Nothing was changed: this is a dry run.")?;
+    }
+    Ok(())
+}
+
+/// How each step of a removal went.
+pub fn render_outcome(entry: &HistoryEntry, out: &mut impl Write) -> io::Result<()> {
     writeln!(out)?;
-    writeln!(
-        out,
-        "Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper."
-    )
+    for record in &entry.steps {
+        let what = step_text(&record.step);
+        match &record.outcome {
+            StepOutcome::Done => writeln!(out, "done:     {what}")?,
+            StepOutcome::Failed { reason } => writeln!(out, "failed:   {what}\n          {reason}")?,
+            StepOutcome::Skipped { reason } => writeln!(out, "not done: {what}\n          {reason}")?,
+        }
+    }
+    Ok(())
+}
+
+/// `as root, by Housekeeper's helper: apt-get remove --yes vim`.
+fn step_text(step: &Step) -> String {
+    let by = match step.by {
+        Actor::User => "as you",
+        Actor::Helper => "as root, by Housekeeper's helper",
+    };
+    let what = match &step.action {
+        Action::Run { argv } | Action::RemovePackages { argv, .. } => command_line(argv),
+        Action::Trash { path } => format!("move {} to the Trash", path.display()),
+    };
+    format!("{by}: {what}")
 }
 
 /// `label:` padded so values line up; a label of "" continues the previous one.
@@ -287,17 +316,7 @@ fn removal(plan: &RemovalPlan) -> Vec<String> {
         Tier::Unknown => "not known: nothing records how it was installed",
     };
     let mut lines = vec![tier.to_string()];
-    for step in &plan.steps {
-        let by = match step.by {
-            Actor::User => "as you",
-            Actor::Helper => "as root, by Housekeeper's helper",
-        };
-        let what = match &step.action {
-            Action::Run { argv } | Action::RemovePackages { argv, .. } => command_line(argv),
-            Action::Trash { path } => format!("move {} to the Trash", path.display()),
-        };
-        lines.push(format!("{by}: {what}"));
-    }
+    lines.extend(plan.steps.iter().map(step_text));
     // A refusal is listed with the blockers; otherwise the item comes first and the rest is what goes with it.
     if let Some(simulation) = plan.simulation.as_ref().filter(|s| s.refused.is_empty()) {
         let others: Vec<&str> = simulation.removes.iter().skip(1).map(String::as_str).collect();
@@ -485,7 +504,7 @@ Leftovers:  3 folders and 1 line in shell startup files (`housekeeper remove --d
             warnings: Vec::new(),
         };
         let mut out = Vec::new();
-        render_removal(&details, &mut out).unwrap();
+        render_removal(&details, true, &mut out).unwrap();
         let expected = "\
 tool
 dpkg:tool
@@ -497,7 +516,7 @@ Leftovers:  /home/u/.cache/tool (cache, at least 1.5 MB: too many files to count
 Shell:      /home/u/.bashrc line 12: export PATH=\"$HOME/.tool/bin:$PATH\"
             (these lines are not edited yet; remove them by hand after removing it)
 
-Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper.
+Nothing was changed: this is a dry run.
 ";
         assert_eq!(String::from_utf8(out).unwrap(), expected);
     }

@@ -2,6 +2,7 @@
 //!
 //! See `docs/architecture/README.md` for how platforms, sources and the host fit together.
 
+pub mod carry;
 pub mod command;
 pub mod group;
 pub mod helper;
@@ -25,9 +26,10 @@ pub mod text;
 pub mod trash;
 pub mod who;
 
+pub use carry::Removal;
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use group::{AppGroup, Shared};
-pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, carry_out};
+pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, RootHelper, carry_out};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
 pub use leftovers::{FileIdentity, Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};

@@ -2,8 +2,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use crate::helper::{HelperReply, HelperRequest, RootHelper};
 use crate::host::Host;
 use crate::inventory::Housekeeper;
 use crate::leftovers::LeftoverKind;
@@ -141,11 +142,25 @@ impl Simulator for Stub {
     }
 }
 
+/// A root helper that gives one reply to everything and remembers what it was asked.
+pub struct FakeHelper {
+    reply: HelperReply,
+    pub asked: Mutex<Vec<HelperRequest>>,
+}
+
+impl RootHelper for FakeHelper {
+    fn ask(&self, _: &Host, request: &HelperRequest) -> Result<HelperReply, String> {
+        self.asked.lock().unwrap().push(request.clone());
+        Ok(self.reply.clone())
+    }
+}
+
 struct TestPlatform {
     system: SystemInfo,
     sources: Vec<Arc<dyn Source>>,
     launchers: Vec<Launcher>,
     metainfo: Vec<Metainfo>,
+    helper: Option<Arc<FakeHelper>>,
 }
 
 impl Platform for TestPlatform {
@@ -177,6 +192,9 @@ impl Platform for TestPlatform {
     fn shell_files(&self, _: &Host) -> Vec<PathBuf> {
         vec![Path::new(HOME).join(".bashrc")]
     }
+    fn root_helper(&self) -> Option<&dyn RootHelper> {
+        self.helper.as_deref().map(|helper| helper as &dyn RootHelper)
+    }
 }
 
 /// `path` is the `PATH`, which is also where commands are looked for.
@@ -192,6 +210,38 @@ pub fn housekeeper_with(
     launchers: Vec<Launcher>,
     metainfo: Vec<Metainfo>,
 ) -> Housekeeper {
+    build(
+        fixture.host_with_vars(FakeRunner::new(), &[("PATH", path)]),
+        sources,
+        launchers,
+        metainfo,
+        None,
+    )
+}
+
+/// For removals: commands answered by `runner`, and a root helper that answers every request with `reply`.
+pub fn housekeeper_removing(
+    fixture: &Fixture,
+    sources: Vec<Stub>,
+    runner: FakeRunner,
+    reply: HelperReply,
+) -> (Housekeeper, Arc<FakeHelper>) {
+    let helper = Arc::new(FakeHelper {
+        reply,
+        asked: Mutex::new(Vec::new()),
+    });
+    let host = fixture.host_with_vars(runner, &[("PATH", "/usr/bin")]);
+    let housekeeper = build(host, sources, Vec::new(), Vec::new(), Some(Arc::clone(&helper)));
+    (housekeeper, helper)
+}
+
+fn build(
+    host: Host,
+    sources: Vec<Stub>,
+    launchers: Vec<Launcher>,
+    metainfo: Vec<Metainfo>,
+    helper: Option<Arc<FakeHelper>>,
+) -> Housekeeper {
     let system = SystemInfo {
         os: "linux".into(),
         name: "Test".into(),
@@ -202,13 +252,13 @@ pub fn housekeeper_with(
         arch: "x86_64".into(),
     };
     let sources = sources.into_iter().map(|s| Arc::new(s) as Arc<dyn Source>).collect();
-    let host = fixture.host_with_vars(FakeRunner::new(), &[("PATH", path)]);
     Housekeeper::new(
         Box::new(TestPlatform {
             system,
             sources,
             launchers,
             metainfo,
+            helper,
         }),
         host,
     )
