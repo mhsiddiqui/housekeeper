@@ -19,6 +19,10 @@ pub struct Stub {
     pub id: &'static str,
     pub packages: Vec<Package>,
     pub roots: Vec<&'static str>,
+    /// Folders only its items keep their state in (their data), one subfolder per item.
+    pub state_roots: Vec<&'static str>,
+    /// A language package manager rather than a system one.
+    pub language: bool,
     /// `(path, package)` pairs its package database lists.
     pub files: Vec<(&'static str, &'static str)>,
     pub broken: bool,
@@ -39,7 +43,12 @@ pub struct Stub {
 
 impl Source for Stub {
     fn info(&self) -> SourceInfo {
-        SourceInfo::new(self.id, self.id, SourceKind::System)
+        let kind = if self.language {
+            SourceKind::Language
+        } else {
+            SourceKind::System
+        };
+        SourceInfo::new(self.id, self.id, kind)
     }
     fn probe(&self, _: &Host) -> Availability {
         Availability::Available { version: None }
@@ -64,6 +73,12 @@ impl Source for Stub {
     }
     fn install_roots(&self, _: &Host) -> Vec<PathBuf> {
         self.roots.iter().map(PathBuf::from).collect()
+    }
+    fn leftover_roots(&self, _: &Host) -> Vec<(PathBuf, LeftoverKind)> {
+        self.state_roots
+            .iter()
+            .map(|dir| (PathBuf::from(dir), LeftoverKind::Data))
+            .collect()
     }
 }
 
@@ -155,6 +170,9 @@ impl Platform for TestPlatform {
         .into_iter()
         .map(|(dir, kind)| (Path::new(HOME).join(dir), kind))
         .collect()
+    }
+    fn shared_state_folders(&self) -> &'static [&'static str] {
+        &["fonts"]
     }
     fn shell_files(&self, _: &Host) -> Vec<PathBuf> {
         vec![Path::new(HOME).join(".bashrc")]

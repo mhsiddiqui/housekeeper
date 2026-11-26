@@ -35,9 +35,16 @@ pub trait Platform: Send + Sync {
     }
 
     /// The per-user folders programs keep their state in, one subfolder per program, with what they hold
-    /// (`~/.config` holds settings). A subfolder named after an item is one of its leftovers.
+    /// (`~/.config` holds settings). A subfolder named after an item outside a sandbox is one of its leftovers; a
+    /// source's own such folders come from [`Source::leftover_roots`].
     fn leftover_roots(&self, _host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
         Vec::new()
+    }
+
+    /// Names (lowercase) of subfolders of the leftover roots that several programs share (`fonts`), so never one
+    /// item's leftover even when an item carries the name.
+    fn shared_state_folders(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// The user's shell startup files (logical paths), whose lines can load an installed tool.

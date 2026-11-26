@@ -211,6 +211,9 @@ fn leftover(folder: &Leftover) -> String {
     if !folder.also_used_by.is_empty() {
         notes.push(format!("{} may still use it", folder.also_used_by.join(", ")));
     }
+    if folder.unseen_copies {
+        notes.push("copies in projects or virtual environments Housekeeper does not read may still use it".into());
+    }
     format!("{} ({})", folder.path.display(), notes.join("; "))
 }
 
@@ -339,12 +342,14 @@ mod tests {
                     kind: LeftoverKind::Cache,
                     size_bytes: 1_500_000,
                     also_used_by: Vec::new(),
+                    unseen_copies: true,
                 },
                 Leftover {
                     path: PathBuf::from("/home/u/.config/tool"),
                     kind: LeftoverKind::Config,
                     size_bytes: 500_000,
                     also_used_by: vec!["snap:tool".into()],
+                    unseen_copies: false,
                 },
             ],
             shell_lines: vec![ShellLine {
@@ -462,7 +467,7 @@ tool
 dpkg:tool
 
 Removal:    not known: nothing records how it was installed
-Leftovers:  /home/u/.cache/tool (cache, 1.5 MB)
+Leftovers:  /home/u/.cache/tool (cache, 1.5 MB; copies in projects or virtual environments Housekeeper does not read may still use it)
             /home/u/.config/tool (settings, 500.0 kB; yours: kept unless you choose it; snap:tool may still use it)
 Shell:      /home/u/.bashrc line 12: export PATH=\"$HOME/.tool/bin:$PATH\"
             (these lines are not edited yet; remove them by hand after removing it)
