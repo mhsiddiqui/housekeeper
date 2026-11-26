@@ -1,8 +1,12 @@
 //! pacman, which changes its own database on Arch Linux and its derivatives.
 
-use housekeeper_core::{Cmd, Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{
+    Cmd, Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator,
+    SourceError,
+};
 
 use super::{command_for, removal};
+use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Pacman;
@@ -26,6 +30,18 @@ impl PackageTool for Pacman {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         Some(self)
+    }
+
+    fn lock(&self) -> Option<&dyn PackageLock> {
+        Some(self)
+    }
+}
+
+/// pacman's `db.lck`, which exists while pacman (or an AUR helper running it) changes packages, and which a pacman
+/// that crashed leaves behind; then nothing frees it but removing the file, so the queue's wait runs out.
+impl PackageLock for Pacman {
+    fn holder(&self, host: &Host) -> Option<LockHolder> {
+        lock::holder(host, &[LockFile::Exists("/var/lib/pacman/db.lck")])
     }
 }
 

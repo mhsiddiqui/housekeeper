@@ -1,8 +1,12 @@
 //! apt, which changes the Debian package database (Debian, Ubuntu, Mint…).
 
-use housekeeper_core::{Cmd, Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{
+    Cmd, Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator,
+    SourceError,
+};
 
 use super::{command_for, removal};
+use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Apt;
@@ -26,6 +30,23 @@ impl PackageTool for Apt {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         Some(self)
+    }
+
+    fn lock(&self) -> Option<&dyn PackageLock> {
+        Some(self)
+    }
+}
+
+/// apt's front-end lock, then dpkg's own (which `dpkg` run by hand takes alone).
+impl PackageLock for Apt {
+    fn holder(&self, host: &Host) -> Option<LockHolder> {
+        lock::holder(
+            host,
+            &[
+                LockFile::Locked("/var/lib/dpkg/lock-frontend"),
+                LockFile::Locked("/var/lib/dpkg/lock"),
+            ],
+        )
     }
 }
 

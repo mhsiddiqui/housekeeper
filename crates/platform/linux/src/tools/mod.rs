@@ -6,7 +6,15 @@
 
 use housekeeper_core::{Cmd, Host, Package, PackageRemoval, RemovalPlan, Simulation, SourceError, Step, Tier};
 
+use crate::lock::LockFile;
 use crate::rpmdb::removal_closure;
+
+/// The RPM database's own lock, which every transaction holds (dnf, zypper and rpm itself): in `/usr/lib/sysimage/rpm`
+/// on current Fedora and openSUSE, `/var/lib/rpm` elsewhere (often a link to the same file).
+pub(crate) const RPM_LOCKS: [LockFile; 2] = [
+    LockFile::Locked("/usr/lib/sysimage/rpm/.rpm.lock"),
+    LockFile::Locked("/var/lib/rpm/.rpm.lock"),
+];
 
 include!(concat!(env!("OUT_DIR"), "/tools.rs"));
 

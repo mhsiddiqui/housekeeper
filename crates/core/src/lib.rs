@@ -12,6 +12,7 @@ pub mod leftovers;
 pub mod model;
 mod ownership;
 pub mod platform;
+pub mod queue;
 pub mod remove;
 pub mod show;
 pub mod source;
@@ -33,6 +34,7 @@ pub use model::{
     SystemInfo,
 };
 pub use platform::{Platform, path_dirs};
+pub use queue::{Cancel, Event, Job, LockHolder, Outcome, PackageLock, Queue};
 pub use remove::{Action, Actor, RemovalPlan, Remover, Simulation, Simulator, Step, Tier};
 pub use show::{Details, Files, FilesFrom, Lookup};
 pub use source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};

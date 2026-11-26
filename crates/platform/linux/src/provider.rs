@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use housekeeper_core::{PackageRemoval, Remover, Source};
+use housekeeper_core::{PackageLock, PackageRemoval, Remover, Source};
 
 use crate::distro::Distro;
 
@@ -90,6 +90,11 @@ pub trait PackageTool: Send + Sync {
 
     /// What the root helper removes packages with (D25).
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        None
+    }
+
+    /// The lock changes wait for while another program holds it (D6).
+    fn lock(&self) -> Option<&dyn PackageLock> {
         None
     }
 }

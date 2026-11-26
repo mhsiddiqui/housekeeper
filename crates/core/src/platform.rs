@@ -7,6 +7,7 @@ use crate::helper::PackageRemoval;
 use crate::host::Host;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Launcher, Metainfo, SystemInfo};
+use crate::queue::PackageLock;
 use crate::source::{ScanContext, Source};
 
 /// Implemented once per operating system (`LinuxPlatform`, later macOS and Windows).
@@ -51,6 +52,12 @@ pub trait Platform: Send + Sync {
     /// How the system's package tool removes packages, for the root helper (D25); `None` when the system has no tool
     /// Housekeeper can use.
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        None
+    }
+
+    /// The lock of `backend` (a package tool's name, `apt`) that changes must wait for while another program holds it
+    /// (D6); `None` when the backend has none Housekeeper can see.
+    fn package_lock(&self, _backend: &str) -> Option<&dyn PackageLock> {
         None
     }
 
