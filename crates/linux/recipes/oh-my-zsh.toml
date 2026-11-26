@@ -1,0 +1,9 @@
+# Oh My Zsh (https://ohmyz.sh).
+title = "Oh My Zsh"
+
+[detect]
+roots = [{ var = "ZSH", default = ".oh-my-zsh" }]
+marker = "oh-my-zsh.sh"
+
+# No [remove]: its uninstaller asks questions and restores ~/.zshrc, and removing the folder alone would leave a
+# ~/.zshrc that loads a missing file. Editing shell startup files comes later (plan Phase 8).

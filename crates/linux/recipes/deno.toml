@@ -1,0 +1,10 @@
+# Deno (https://deno.com), installed by its script.
+title = "Deno"
+
+[detect]
+roots = [{ var = "DENO_INSTALL", default = ".deno" }]
+marker = "bin/deno"
+
+[remove]
+# Deno's documentation: remove ~/.deno (or $DENO_INSTALL).
+trash = ["."]

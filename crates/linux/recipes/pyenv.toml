@@ -1,0 +1,10 @@
+# pyenv (https://github.com/pyenv/pyenv), with every Python version it built.
+title = "pyenv"
+
+[detect]
+roots = [{ var = "PYENV_ROOT", default = ".pyenv" }]
+marker = "bin/pyenv"
+
+[remove]
+# pyenv's README: remove its root (`pyenv root`). Lines added to the shell startup files stay until edited.
+trash = ["."]

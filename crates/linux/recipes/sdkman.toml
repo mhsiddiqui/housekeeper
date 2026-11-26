@@ -1,0 +1,10 @@
+# SDKMAN! (https://sdkman.io), with every SDK it installed.
+title = "SDKMAN!"
+
+[detect]
+roots = [{ var = "SDKMAN_DIR", default = ".sdkman" }]
+marker = "bin/sdkman-init.sh"
+
+[remove]
+# SDKMAN!'s documentation: remove ~/.sdkman. The lines it added to the shell startup files check that it exists.
+trash = ["."]

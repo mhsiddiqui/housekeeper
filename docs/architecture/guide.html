@@ -604,8 +604,9 @@ there must be valid Rust identifiers; the build stops with a clear message other
 <p>Other deliberate limits:</p>
 <ul>
   <li><strong>Sources are compiled in, not loaded as plugins.</strong> A new source means a new release. This keeps
-  the privileged parts (Phase 4) auditable; uninstall <em>recipes</em> for script-installed tools are data files
-  instead, so those can be added without a release.</li>
+  the privileged parts (Phase 4) auditable. Script-installed tools are described by <em>recipes</em>
+  (<code>crates/linux/recipes/*.toml</code>, D26, D34): data files compiled in the same way, so adding one is a
+  reviewed TOML file and no Rust, but still a release.</li>
   <li><strong>One native source per system</strong> (decision D2). A stray <code>rpm</code> on Ubuntu is ignored on
   purpose, so its empty database never shows up as a second "system".</li>
 </ul>
@@ -627,10 +628,11 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and its package tool and assembles all sources</td></tr>
   <tr><td><code>crates/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/linux/src/tools/*.rs</code></td><td>One file per package tool (apt, dnf, zypper, rpm-ostree, pacman)</td></tr>
+  <tr><td><code>crates/linux/recipes/*.toml</code>, <code>src/recipe.rs</code></td><td>One recipe per script-installed tool: how to find it and how to remove it (D26, D34); the parser and its checks</td></tr>
   <tr><td><code>crates/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D33)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D34)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

@@ -1,17 +1,18 @@
-//! Software installed by hand or by a script: directories in `/opt`, loose executables on the PATH and well-known
-//! script installers (rustup, nvm, pyenv…).
+//! Software installed by hand or by a script: directories in `/opt`, loose executables on the PATH and the
+//! script-installed tools the recipes describe (rustup, nvm, pyenv…; `crates/linux/recipes/`, decision D26).
 
 use std::collections::{BTreeMap, HashSet};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Actor, Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
-    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
+    Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
 use crate::provider::{Context, LinuxSource, register};
+use crate::recipe::{Recipe, recipes};
 
 pub const ID: SourceId = SourceId::new("manual");
 
@@ -29,110 +30,6 @@ const GENERIC_DIRS: &[&str] = &["bin", "sbin", "libexec", "versions", "current",
 
 /// How much of an executable to read when checking for a pip launcher.
 const SCRIPT_HEAD_LEN: usize = 1024;
-
-/// A directory an installer may live in.
-#[derive(Clone, Copy)]
-enum Root {
-    /// An environment variable, falling back to a path under the home directory.
-    Var(&'static str, &'static str),
-    /// A path under the home directory.
-    Home(&'static str),
-    Absolute(&'static str),
-}
-
-impl Root {
-    fn path(self, host: &Host) -> PathBuf {
-        match self {
-            Self::Var(var, fallback) => host.dir_from_var(var, fallback),
-            Self::Home(relative) => host.home().join(relative),
-            Self::Absolute(path) => PathBuf::from(path),
-        }
-    }
-}
-
-/// A tool installed by its own script into one directory.
-struct Installer {
-    key: &'static str,
-    title: &'static str,
-    /// Candidate install directories; the first one with the marker wins.
-    roots: &'static [Root],
-    /// File proving the install, relative to the install directory or to `marker_root` when set.
-    marker: &'static str,
-    marker_root: Option<Root>,
-}
-
-const INSTALLERS: &[Installer] = &[
-    Installer {
-        key: "rustup",
-        title: "rustup",
-        roots: &[Root::Var("RUSTUP_HOME", ".rustup")],
-        marker: "bin/rustup",
-        marker_root: Some(Root::Var("CARGO_HOME", ".cargo")),
-    },
-    Installer {
-        key: "nvm",
-        title: "Node Version Manager (nvm)",
-        roots: &[Root::Var("NVM_DIR", ".nvm")],
-        marker: "nvm.sh",
-        marker_root: None,
-    },
-    Installer {
-        key: "pyenv",
-        title: "pyenv",
-        roots: &[Root::Var("PYENV_ROOT", ".pyenv")],
-        marker: "bin/pyenv",
-        marker_root: None,
-    },
-    Installer {
-        key: "atuin",
-        title: "Atuin",
-        roots: &[Root::Home(".atuin")],
-        marker: "bin/atuin",
-        marker_root: None,
-    },
-    Installer {
-        key: "bun",
-        title: "Bun",
-        roots: &[Root::Var("BUN_INSTALL", ".bun")],
-        marker: "bin/bun",
-        marker_root: None,
-    },
-    Installer {
-        key: "deno",
-        title: "Deno",
-        roots: &[Root::Var("DENO_INSTALL", ".deno")],
-        marker: "bin/deno",
-        marker_root: None,
-    },
-    Installer {
-        key: "sdkman",
-        title: "SDKMAN!",
-        roots: &[Root::Var("SDKMAN_DIR", ".sdkman")],
-        marker: "bin/sdkman-init.sh",
-        marker_root: None,
-    },
-    Installer {
-        key: "homebrew",
-        title: "Homebrew",
-        roots: &[Root::Absolute("/home/linuxbrew/.linuxbrew"), Root::Home(".linuxbrew")],
-        marker: "bin/brew",
-        marker_root: None,
-    },
-    Installer {
-        key: "volta",
-        title: "Volta",
-        roots: &[Root::Home(".volta")],
-        marker: "bin/volta",
-        marker_root: None,
-    },
-    Installer {
-        key: "oh-my-zsh",
-        title: "Oh My Zsh",
-        roots: &[Root::Var("ZSH", ".oh-my-zsh")],
-        marker: "oh-my-zsh.sh",
-        marker_root: None,
-    },
-];
 
 /// What no other source accounts for. Package managers' owner lookups and every source's install roots, both reached
 /// through the [`ScanContext`], decide what is left out.
@@ -185,7 +82,7 @@ impl Source for ManualSource {
         let owned = owned_paths(host, scan, &asked);
 
         let mut items: BTreeMap<String, Package> = BTreeMap::new();
-        let installers = detect_installers(host);
+        let installers = detect_installers(host, scan);
         for (_, package) in &installers {
             items.insert(package.id.clone(), package.clone());
         }
@@ -267,24 +164,17 @@ impl Source for ManualSource {
     }
 }
 
-/// Only rustup has its own uninstaller; every other script install and hand install has nothing recording how to
-/// remove it.
+/// Script-installed tools are removed as their recipe says; hand installs have nothing recording how.
 impl Remover for ManualSource {
     fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
-        if package.id != "installer/rustup" {
-            return Ok(RemovalPlan::unknown());
-        }
-        let rustup = Root::Var("CARGO_HOME", ".cargo").path(host).join("bin/rustup");
-        let argv = [
-            rustup.to_string_lossy().into_owned(),
-            "self".into(),
-            "uninstall".into(),
-            "-y".into(),
-        ];
-        Ok(RemovalPlan::new(
-            Tier::OwnUninstaller,
-            vec![Step::run(Actor::User, argv)],
-        ))
+        let recipe = package
+            .id
+            .strip_prefix(INSTALLER_PREFIX)
+            .and_then(|key| recipes().iter().flatten().find(|recipe| recipe.key == key));
+        Ok(match (recipe, &package.location) {
+            (Some(recipe), Some(root)) => recipe.plan(host, root),
+            _ => RemovalPlan::unknown(),
+        })
     }
 }
 
@@ -309,24 +199,28 @@ fn opt_dirs(host: &Host) -> Result<Vec<(PathBuf, bool)>, SourceError> {
     Ok(dirs)
 }
 
-/// Installers whose marker file exists, with their install directory.
-fn detect_installers(host: &Host) -> Vec<(PathBuf, Package)> {
+/// Prefix of a script-installed tool's id: `installer/rustup`.
+const INSTALLER_PREFIX: &str = "installer/";
+
+/// The recipes' tools that are installed, with their install folder. A recipe that cannot be read is a warning.
+fn detect_installers(host: &Host, scan: &ScanContext<'_>) -> Vec<(PathBuf, Package)> {
     let mut found = Vec::new();
-    for installer in INSTALLERS {
-        let detected = installer.roots.iter().map(|root| root.path(host)).find(|root| {
-            let marker_base = installer
-                .marker_root
-                .map_or_else(|| root.clone(), |base| base.path(host));
-            host.is_dir(root) && host.exists(marker_base.join(installer.marker))
-        });
-        if let Some(root) = detected {
+    for recipe in recipes() {
+        let recipe: &Recipe = match recipe {
+            Ok(recipe) => recipe,
+            Err(error) => {
+                scan.warn(format!("a script-installer recipe could not be read: {error}"));
+                continue;
+            }
+        };
+        if let Some(root) = recipe.detect(host) {
             let mut package = Package::new(
                 ID,
-                format!("installer/{}", installer.key),
-                installer.key,
+                format!("{INSTALLER_PREFIX}{}", recipe.key),
+                recipe.key,
                 scope_of(host, &root),
             );
-            package.title = Some(installer.title.to_string());
+            package.title = Some(recipe.title.clone());
             package.kind = PackageKind::App;
             package.reason = InstallReason::Explicit;
             package.location = Some(root.clone());
@@ -445,7 +339,7 @@ mod tests {
     use crate::sources::snap::SnapSource;
     use crate::sources::uv::UvToolSource;
     use housekeeper_core::testing::{FakeRunner, Fixture, HOME};
-    use housekeeper_core::{Output, Scope};
+    use housekeeper_core::{Actor, Output, Scope, Step, Tier};
     use std::sync::Arc;
 
     const ELF: &[u8] = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00";

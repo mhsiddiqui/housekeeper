@@ -1,0 +1,8 @@
+# Homebrew on Linux (https://brew.sh), the installation itself; its formulae are the Homebrew source's.
+title = "Homebrew"
+
+[detect]
+roots = [{ path = "/home/linuxbrew/.linuxbrew" }, { home = ".linuxbrew" }]
+marker = "bin/brew"
+
+# No [remove]: Homebrew's uninstaller is a script downloaded from its repository, which a recipe does not run.

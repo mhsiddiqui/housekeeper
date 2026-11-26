@@ -167,11 +167,13 @@ Removal:    through its package manager
   dependencies, Flatpak apps on a runtime, snaps on a base or using its content), up to 10; `--json` has all of them.
   Optional dependencies (Recommends, optdepends) do not count. "not known" means the source does not record
   dependencies.
-- **Removal** is how the item would be removed the way its installer intended: its own uninstaller (rustup), its
-  package manager (apt, dnf, zypper, rpm-ostree or pacman for the system's packages; Flatpak, Snap, Homebrew, npm,
-  pipx, uv, pip, cargo), its format's convention (an AppImage and the launchers that start it go to the Trash), or
-  "not known" (hand installs). Each step says whether it would run as you or as root through Housekeeper's helper,
-  and what blocks it (a package of a Silverblue image, a system-wide npm install). For system packages it also lists
+- **Removal** is how the item would be removed the way its installer intended: its own uninstaller (`rustup self
+  uninstall`), its package manager (apt, dnf, zypper, rpm-ostree or pacman for the system's packages; Flatpak, Snap,
+  Homebrew, npm, pipx, uv, pip, cargo), its format's convention (an AppImage and the launchers that start it go to the
+  Trash), a reviewed recipe for tools installed by their own script (nvm, pyenv, Bun, Deno, SDKMAN!, Volta, Atuin:
+  their folder goes to the Trash), or "not known" (hand installs, Homebrew's and Oh My Zsh's own folders). Each step
+  says whether it would run as you or as root through Housekeeper's helper, and what blocks it (a package of a
+  Silverblue image, a system-wide npm install). For system packages it also lists
   what else would go: `apt-get --simulate remove` and `pacman --remove --print` answer on Debian, Ubuntu and Arch,
   and on Fedora and openSUSE the RPM database names every package that needs it, directly or through others (dnf
   and zypper remove those too, and their own simulation needs root). A refusal from the package manager, or a

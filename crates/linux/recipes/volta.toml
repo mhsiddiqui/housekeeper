@@ -1,0 +1,10 @@
+# Volta (https://volta.sh), a JavaScript tool manager.
+title = "Volta"
+
+[detect]
+roots = [{ home = ".volta" }]
+marker = "bin/volta"
+
+[remove]
+# Volta's documentation: remove ~/.volta.
+trash = ["."]

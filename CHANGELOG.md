@@ -36,6 +36,9 @@ the project uses [Semantic Versioning](https://semver.org/).
   (Debian, Ubuntu), `pacman --remove --print` (Arch), and on Fedora and openSUSE every package that needs it in the
   RPM database, directly or through others. A refusal, or a protected package among what would go (removing
   `libsemanage2` takes `passwd`), blocks the removal. `--json` has it as `removal.simulation`.
+- Script-installed tools are described by reviewed recipes (`crates/linux/recipes/`), which say how to find them and
+  how to remove them: `housekeeper show` plans nvm, pyenv, Bun, Deno, SDKMAN!, Volta and Atuin by moving their folder
+  to the Trash, and rustup with `rustup self uninstall`. Homebrew's and Oh My Zsh's own folders stay "not known".
 
 ### Changed
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
