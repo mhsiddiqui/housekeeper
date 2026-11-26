@@ -1,9 +1,9 @@
 # 0040: Move the Linux crate into the platform folder
 
 - **Date:** 2026-11-26
-- **Branch / PR:** `refactor/platform-layout`, PR not opened yet
+- **Branch / PR:** `refactor/platform-layout`, #30
 - **Plan chunks:** none (layout only)
-- **Commits:** 6962212, 5f92021
+- **Commits:** 6962212, 5f92021, baf529d
 
 ## What changed
 - **Move**: `crates/linux` is now `crates/platform/linux`, unchanged. The crate is still `housekeeper-linux`. Git
