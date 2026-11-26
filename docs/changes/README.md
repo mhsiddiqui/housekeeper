@@ -56,3 +56,4 @@ links back.
 | [0040](0040-platform-layout.md) | Move the Linux crate into the platform folder | none | #30 |
 | [0041](0041-leftovers.md) | Leftovers and `housekeeper remove --dry-run` | 3.5 | #31 |
 | [0042](0042-leftover-matching.md) | Find leftovers only in folders the item can use | 3.6 | #32 |
+| [0043](0043-leftover-sizes.md) | Measure leftovers only in `remove --dry-run`, within a budget | 3.6 | #33 |
