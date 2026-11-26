@@ -109,16 +109,22 @@ impl Platform for LinuxPlatform {
         dirs
     }
 
-    /// The XDG base directories (settings, caches, data, state), and Flatpak's per-app data in `~/.var/app`, which
-    /// `flatpak uninstall` keeps. Snap's `~/snap/<name>` is not one: `snap remove` takes it along.
+    /// The XDG base directories (settings, caches, data, state). Flatpak's `~/.var/app` is the Flatpak source's own;
+    /// snap's `~/snap/<name>` is no one's, since `snap remove` takes it along.
     fn leftover_roots(&self, host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
         vec![
             (host.dir_from_var("XDG_CONFIG_HOME", ".config"), LeftoverKind::Config),
             (host.dir_from_var("XDG_CACHE_HOME", ".cache"), LeftoverKind::Cache),
             (host.data_home(), LeftoverKind::Data),
             (host.dir_from_var("XDG_STATE_HOME", ".local/state"), LeftoverKind::State),
-            (host.home().join(".var/app"), LeftoverKind::Data),
         ]
+    }
+
+    /// freedesktop folders every desktop program reads or writes: menus, fonts, themes, GTK's settings, the dconf
+    /// database of every GNOME app's settings (Fedora, openSUSE and Arch have a package named `dconf`), the keyring,
+    /// container images podman, buildah and skopeo share.
+    fn shared_state_folders(&self) -> &'static [&'static str] {
+        SHARED_STATE_FOLDERS
     }
 
     /// bash's, zsh's (in `$ZDOTDIR` when set), the login shell's and fish's startup files.
@@ -142,6 +148,30 @@ impl Platform for LinuxPlatform {
             .collect()
     }
 }
+
+/// Lowercase, sorted.
+const SHARED_STATE_FOLDERS: &[&str] = &[
+    "applications",
+    "autostart",
+    "containers",
+    "dbus-1",
+    "dconf",
+    "desktop-directories",
+    "environment.d",
+    "fonts",
+    "gtk-2.0",
+    "gtk-3.0",
+    "gtk-4.0",
+    "icons",
+    "keyrings",
+    "menus",
+    "mime",
+    "pulse",
+    "sounds",
+    "systemd",
+    "themes",
+    "trash",
+];
 
 /// Program folders every distribution has; a session's `PATH` can lack some (Debian leaves out `sbin` for users).
 const STANDARD_COMMAND_DIRS: [&str; 8] = [

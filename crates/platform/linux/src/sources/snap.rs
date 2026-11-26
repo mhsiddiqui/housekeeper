@@ -130,6 +130,8 @@ struct Snap {
     apps: Vec<App>,
     /// The base snap this snap runs on; absent for bases, snapd and app snaps on the original `core`.
     base: Option<String>,
+    /// `strict`, `devmode` or `classic`.
+    confinement: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -193,6 +195,9 @@ impl Snap {
         package.app_ids.retain(|id| !id.is_empty());
         package.app_ids.sort();
         package.app_ids.dedup();
+        // A confined snap (strict, or devmode, which only stops enforcing it) gets its own `$HOME` and XDG folders in
+        // `~/snap/<name>`; a classic snap uses the real ones.
+        package.sandboxed = matches!(self.confinement.as_deref(), Some("strict" | "devmode"));
         (package.kind, package.reason, package.protected) = match self.snap_type.as_str() {
             "snapd" => (
                 PackageKind::Runtime,
@@ -325,7 +330,10 @@ mod tests {
 {"name":"gtk-common-themes","title":"gtk-common-themes","version":"0.1-81-g442e511","type":"app",
  "publisher":{"display-name":"Canonical","validation":"verified"}},
 {"name":"hello-world","summary":"","version":"6.4","type":"app","apps":[{"name":"hello-world"},{"name":"evil"}],
- "publisher":{"display-name":"Canonical Ltd.","validation":"unproven"},"tracking-channel":"latest/edge"}
+ "publisher":{"display-name":"Canonical Ltd.","validation":"unproven"},"tracking-channel":"latest/edge"},
+{"name":"sublime-merge","title":"Sublime Merge","version":"2121","type":"app","base":"core22",
+ "apps":[{"name":"sublime-merge"}],"publisher":{"display-name":"Snapcrafters","validation":"starred"},
+ "confinement":"classic"}
 ]}"#;
 
     const CONNECTIONS: &str = r#"{"type":"sync","status-code":200,"status":"OK","result":{"established":[
@@ -410,6 +418,19 @@ mod tests {
             Some("Snap Store, Mozilla (verified), latest/stable/ubuntu-24.04")
         );
         assert_eq!(firefox.location.as_deref(), Some(Path::new("/snap/firefox/current")));
+    }
+
+    #[test]
+    fn confined_snaps_are_sandboxed_and_classic_ones_are_not() {
+        let packages = scan();
+        assert!(
+            find(&packages, "firefox").sandboxed,
+            "strict: its settings are under ~/snap/firefox"
+        );
+        assert!(
+            !find(&packages, "sublime-merge").sandboxed,
+            "classic: it writes the real ~/.config/sublime-merge"
+        );
     }
 
     #[test]

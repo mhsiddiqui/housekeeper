@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Actor, Availability, Cmd, Dependants, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
-    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, Cmd, Dependants, Host, InstallReason, LeftoverKind, Package, PackageKind, RemovalPlan,
+    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use super::version_line;
@@ -54,6 +54,12 @@ impl Source for FlatpakSource {
             PathBuf::from("/var/lib/flatpak/exports"),
             host.data_home().join("flatpak/exports"),
         ]
+    }
+
+    /// Each app's settings, caches and data in `~/.var/app/<id>`, which `flatpak uninstall` keeps. Flatpak points an
+    /// app's XDG folders there, so the shared `~/.config` and friends are not its (packages are sandboxed).
+    fn leftover_roots(&self, host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
+        vec![(host.home().join(".var/app"), LeftoverKind::Data)]
     }
 
     fn inventory(&self, host: &Host, _: &ScanContext<'_>) -> Result<Vec<Package>, SourceError> {
@@ -176,6 +182,7 @@ fn parse_listing(listing: &str, user_dir: &Path) -> Result<Vec<Package>, SourceE
         package.version = non_empty(version);
         package.size_bytes = parse_human_size(size);
         package.origin = non_empty(origin);
+        package.sandboxed = true;
         (package.kind, package.reason) = if runtime {
             (PackageKind::Runtime, InstallReason::Dependency)
         } else {

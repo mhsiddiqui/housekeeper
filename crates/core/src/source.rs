@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::command::RunError;
 use crate::host::Host;
+use crate::leftovers::LeftoverKind;
 use crate::model::{Availability, Package, SourceInfo};
 use crate::remove::Remover;
 
@@ -48,6 +49,13 @@ pub trait Source: Send + Sync {
     /// Directories this source installs programs into (logical, absolute). A program on the PATH that resolves into
     /// one of them is this source's, so a source that lists what nobody else installed (hand installs) leaves it out.
     fn install_roots(&self, _host: &Host) -> Vec<PathBuf> {
+        Vec::new()
+    }
+
+    /// Per-user folders only this source's items keep their state in, one subfolder per item, with what they hold.
+    /// Removing an item leaves its subfolder behind, so it is one of the item's leftovers; other sources' items are
+    /// never matched against these folders (D36).
+    fn leftover_roots(&self, _host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
         Vec::new()
     }
 }

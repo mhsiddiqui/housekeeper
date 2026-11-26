@@ -1,6 +1,6 @@
 //! Leftovers: what an installed item leaves behind outside its own files: settings, caches and data in the folders the
-//! platform keeps per-user state in, and lines in shell startup files that load it (decisions D7, D36). Found only;
-//! nothing here changes anything.
+//! platform and the item's source keep per-user state in, and lines in shell startup files that load it (decisions
+//! D7, D36). Found only; nothing here changes anything.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::host::{FileType, Host};
-use crate::model::Package;
+use crate::model::{Package, SourceId, SourceKind};
 use crate::platform::Platform;
 
 /// What an item leaves behind.
@@ -27,9 +27,14 @@ pub struct Leftover {
     pub kind: LeftoverKind,
     /// Size of the files in it (symlinks are not followed).
     pub size_bytes: u64,
-    /// Other installed items (`source:id`) whose names match the folder too: it may still be theirs.
+    /// Other installed items (`source:id`) that use the same folder and whose names match it too: it may still be
+    /// theirs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also_used_by: Vec<String>,
+    /// The item's source also installs copies Housekeeper does not read (a language package inside a project or a
+    /// virtual environment), which may use the folder too.
+    #[serde(default)]
+    pub unseen_copies: bool,
 }
 
 /// What a leftover folder holds. Only caches can go without asking; the rest is the user's (D7).
@@ -62,26 +67,29 @@ pub struct ShellLine {
     pub text: String,
 }
 
-/// Folder names in the per-user state folders that several programs share; never one item's leftover.
-const SHARED_FOLDERS: &[&str] = &[
-    "applications",
-    "autostart",
-    "dbus-1",
-    "desktop-directories",
-    "fonts",
-    "icons",
-    "menus",
-    "mime",
-    "sounds",
-    "systemd",
-    "themes",
-    "trash",
-];
+/// A folder leftovers are looked for in.
+struct Root {
+    dir: PathBuf,
+    kind: LeftoverKind,
+    /// The source whose items alone keep their state here; `None` for the platform's folders, which every item outside
+    /// a sandbox uses.
+    source: Option<SourceId>,
+}
+
+impl Root {
+    fn used_by(&self, package: &Package) -> bool {
+        match &self.source {
+            None => !package.sandboxed,
+            Some(source) => package.source == *source,
+        }
+    }
+}
 
 /// What `package` (one of `installed`) leaves behind on `platform`.
 pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, installed: &[Package]) -> Leftovers {
     let own = names(package);
-    let roots: Vec<PathBuf> = platform
+    let shared_folders = platform.shared_state_folders();
+    let install_roots: Vec<PathBuf> = platform
         .sources()
         .iter()
         .flat_map(|source| source.install_roots(host))
@@ -90,11 +98,31 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
     let install_dirs: Vec<&Path> = installed
         .iter()
         .filter_map(|p| p.location.as_deref())
-        .chain(roots.iter().map(PathBuf::as_path))
+        .chain(install_roots.iter().map(PathBuf::as_path))
         .collect();
+    let unseen_copies = platform.sources().iter().any(|source| {
+        let info = source.info();
+        info.id == package.source && info.kind == SourceKind::Language
+    });
+    let roots = platform
+        .leftover_roots(host)
+        .into_iter()
+        .map(|(dir, kind)| Root {
+            dir,
+            kind,
+            source: None,
+        })
+        .chain(platform.sources().iter().flat_map(|source| {
+            let id = source.info().id;
+            source.leftover_roots(host).into_iter().map(move |(dir, kind)| Root {
+                dir,
+                kind,
+                source: Some(id.clone()),
+            })
+        }));
     let mut folders = Vec::new();
-    for (root, kind) in platform.leftover_roots(host) {
-        let Ok(entries) = host.read_dir(&root) else {
+    for root in roots.filter(|root| root.used_by(package)) {
+        let Ok(entries) = host.read_dir(&root.dir) else {
             continue;
         };
         for entry in entries {
@@ -102,7 +130,7 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
             if entry.file_type != Some(FileType::Dir)
                 || entry.is_symlink
                 || !own.contains(&name)
-                || SHARED_FOLDERS.contains(&name.as_str())
+                || shared_folders.contains(&name.as_str())
                 || install_dirs.iter().any(|dir| dir.starts_with(&entry.path))
                 || package.location.as_ref().is_some_and(|own| entry.path.starts_with(own))
             {
@@ -110,21 +138,22 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
             }
             let also_used_by = installed
                 .iter()
-                .filter(|other| other.key() != package.key() && names(other).contains(&name))
+                .filter(|other| other.key() != package.key() && root.used_by(other) && names(other).contains(&name))
                 .map(Package::key)
                 .collect();
             folders.push(Leftover {
                 size_bytes: size(host, &entry.path),
                 path: entry.path,
-                kind,
+                kind: root.kind,
                 also_used_by,
+                unseen_copies,
             });
         }
     }
     folders.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes).then_with(|| a.path.cmp(&b.path)));
     Leftovers {
         folders,
-        shell_lines: shell_lines(platform, host, package, installed, &roots),
+        shell_lines: shell_lines(platform, host, package, installed, &install_roots),
     }
 }
 
@@ -192,13 +221,14 @@ fn shell_lines(
     lines
 }
 
-/// `line` names `path` itself or something inside it, not a longer name that starts the same (`~/.nvmrc`).
+/// `line` names `path` itself or something inside it, not a longer name that starts or ends the same (`~/.nvmrc`,
+/// `/mnt/backup/home/u/.nvm`).
 fn mentions(line: &str, path: &str) -> bool {
+    let part_of_name = |c: char| c.is_alphanumeric() || matches!(c, '-' | '_' | '.');
     line.match_indices(path).any(|(at, _)| {
-        line[at + path.len()..]
-            .chars()
-            .next()
-            .is_none_or(|next| !(next.is_alphanumeric() || matches!(next, '-' | '_' | '.')))
+        let before = line[..at].chars().next_back();
+        let after = line[at + path.len()..].chars().next();
+        !before.is_some_and(|c| part_of_name(c) || matches!(c, '/' | '~' | '$')) && !after.is_some_and(part_of_name)
     })
 }
 
@@ -284,6 +314,10 @@ mod tests {
             ]
         );
         assert!(!LeftoverKind::Cache.is_user_data() && LeftoverKind::Config.is_user_data());
+        assert!(
+            !found.folders[0].unseen_copies,
+            "a system package has no copies Housekeeper does not read"
+        );
         assert_eq!(
             found.folders[0].also_used_by,
             ["snap:tool"],
@@ -325,7 +359,8 @@ mod tests {
              [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"\n\
              source ~/.nvmrc-helper\n\
              export PATH=/home/user/.nvm/bin:$PATH\n\
-             export PATH=\"$HOME/.cargo/bin:$PATH\"\n",
+             export PATH=\"$HOME/.cargo/bin:$PATH\"\n\
+             cp -r /mnt/backup/home/user/.nvm /tmp\n",
         );
         let nvm = home(".nvm");
         let cargo_bin = home(".cargo/bin");
@@ -362,6 +397,97 @@ mod tests {
         assert!(
             leftovers(&hk, "cargo:ripgrep").shell_lines.is_empty(),
             "~/.cargo/bin is cargo's folder, shared by every crate"
+        );
+    }
+
+    #[test]
+    fn folders_several_programs_share_are_never_one_items() {
+        // Fedora and Arch have a package named `dconf`; `~/.config/dconf` holds every GNOME app's settings.
+        let fixture = Fixture::new();
+        fixture.file(&home(".config/fonts/fonts.conf"), "everyone's");
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![Stub {
+                id: "rpm",
+                packages: vec![package("rpm", "Fonts", None, &[])],
+                ..Stub::default()
+            }],
+        );
+        assert!(leftovers(&hk, "rpm:Fonts").folders.is_empty());
+    }
+
+    #[test]
+    fn sandboxed_items_have_leftovers_only_in_their_sources_folders() {
+        let fixture = Fixture::new();
+        fixture
+            .file(&home(".config/org.example.App/native.ini"), "")
+            .file(&home(".var/app/org.example.App/config/app.ini"), "");
+        let mut native = package("dpkg", "app", None, &[]);
+        native.app_ids = vec!["org.example.App".into()];
+        let sandboxed = |id: &str| {
+            let mut app = package("flatpak", "org.example.App", None, &[]);
+            app.id = id.into();
+            app.app_ids = vec!["org.example.App".into()];
+            app.sandboxed = true;
+            app
+        };
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![
+                Stub {
+                    id: "dpkg",
+                    packages: vec![native],
+                    ..Stub::default()
+                },
+                Stub {
+                    id: "flatpak",
+                    packages: vec![sandboxed("system/app"), sandboxed("user/app")],
+                    state_roots: vec!["/home/user/.var/app"],
+                    ..Stub::default()
+                },
+            ],
+        );
+        let folders = |query: &str| -> Vec<(String, Vec<String>)> {
+            leftovers(&hk, query)
+                .folders
+                .into_iter()
+                .map(|f| (f.path.display().to_string(), f.also_used_by))
+                .collect()
+        };
+
+        assert_eq!(
+            folders("dpkg:app"),
+            [(home(".config/org.example.App"), Vec::new())],
+            "the Flatpak's own folder is not the native install's, and the Flatpak cannot use ~/.config"
+        );
+        assert_eq!(
+            folders("flatpak:system/app"),
+            [(home(".var/app/org.example.App"), vec!["flatpak:user/app".to_string()])],
+            "a sandboxed app's state is in its source's folder, shared by its other installation"
+        );
+    }
+
+    #[test]
+    fn language_packages_may_have_copies_housekeeper_does_not_read() {
+        let fixture = Fixture::new();
+        fixture.file(&home(".config/matplotlib/matplotlibrc"), "");
+        let hk = housekeeper(
+            &fixture,
+            "/usr/bin",
+            vec![Stub {
+                id: "pip",
+                packages: vec![package("pip", "matplotlib", None, &[])],
+                language: true,
+                ..Stub::default()
+            }],
+        );
+        let found = leftovers(&hk, "pip:matplotlib");
+        assert_eq!(found.folders.len(), 1);
+        assert!(
+            found.folders[0].unseen_copies,
+            "a virtual environment's copy may use it too"
         );
     }
 }

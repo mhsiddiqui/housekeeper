@@ -149,6 +149,11 @@ pub struct Package {
     /// Why removing it could break the system (`dpkg marks it Essential`); `None` when nothing protects it. A
     /// protected package's removal plan is blocked.
     pub protected: Option<String>,
+    /// Runs in a sandbox that keeps its settings and data out of the per-user folders other programs share (a Flatpak
+    /// app in its own folder under `~/.var/app`, a strictly confined snap under `~/snap`), so its leftovers are only
+    /// looked for in its source's own folders (D36).
+    #[serde(default)]
+    pub sandboxed: bool,
 }
 
 /// An entry in the system's application menu (a desktop entry on Linux).
@@ -203,6 +208,7 @@ impl Package {
             icon: None,
             app_ids: Vec::new(),
             protected: None,
+            sandboxed: false,
         }
     }
 
