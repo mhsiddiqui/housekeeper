@@ -196,7 +196,7 @@ fn leftovers_summary(leftovers: &Leftovers) -> String {
 }
 
 /// `/home/u/.config/foo (settings, 2.1 MB; yours: kept unless you choose it; snap:foo may still use it)`; a folder
-/// measured only in part is "at least" its size.
+/// measured only in part is "at least" its size. Whether it goes unless the user says otherwise follows D38.
 fn leftover(folder: &Leftover) -> String {
     let kind = match folder.kind {
         LeftoverKind::Config => "settings",
@@ -212,8 +212,12 @@ fn leftover(folder: &Leftover) -> String {
         ),
         None => kind.to_string(),
     }];
-    if folder.kind.is_user_data() {
+    if folder.preselected() {
+        notes.push("goes to the Trash with it".into());
+    } else if folder.kind.is_user_data() {
         notes.push("yours: kept unless you choose it".into());
+    } else {
+        notes.push("kept unless you choose it".into());
     }
     if !folder.also_used_by.is_empty() {
         notes.push(format!("{} may still use it", folder.also_used_by.join(", ")));
@@ -351,6 +355,7 @@ mod tests {
                     size_complete: false,
                     also_used_by: Vec::new(),
                     unseen_copies: true,
+                    identity: None,
                 },
                 Leftover {
                     path: PathBuf::from("/home/u/.config/tool"),
@@ -359,6 +364,16 @@ mod tests {
                     size_complete: true,
                     also_used_by: vec!["snap:tool".into()],
                     unseen_copies: false,
+                    identity: None,
+                },
+                Leftover {
+                    path: PathBuf::from("/home/u/.cache/tool-thumbnails"),
+                    kind: LeftoverKind::Cache,
+                    size_bytes: Some(2_000),
+                    size_complete: true,
+                    also_used_by: Vec::new(),
+                    unseen_copies: false,
+                    identity: None,
                 },
             ],
             shell_lines: vec![ShellLine {
@@ -448,7 +463,7 @@ Needed by:  app0 (dpkg:app0)
 Removal:    through its package manager
             as root, by Housekeeper's helper: apt-get remove --yes libc6:amd64
             also removes 12 packages: app0, app1, app2, app3, app4, app5, app6, app7, app8, app9, …, says `apt-get --simulate remove`
-Leftovers:  2 folders and 1 line in shell startup files (`housekeeper remove --dry-run` measures and lists them)
+Leftovers:  3 folders and 1 line in shell startup files (`housekeeper remove --dry-run` measures and lists them)
 
 /usr/lib/libc.so.6
 /usr/share/doc/libc6
@@ -476,8 +491,9 @@ tool
 dpkg:tool
 
 Removal:    not known: nothing records how it was installed
-Leftovers:  /home/u/.cache/tool (cache, at least 1.5 MB: too many files to count them all; copies in projects or virtual environments Housekeeper does not read may still use it)
+Leftovers:  /home/u/.cache/tool (cache, at least 1.5 MB: too many files to count them all; kept unless you choose it; copies in projects or virtual environments Housekeeper does not read may still use it)
             /home/u/.config/tool (settings, 500.0 kB; yours: kept unless you choose it; snap:tool may still use it)
+            /home/u/.cache/tool-thumbnails (cache, 2.0 kB; goes to the Trash with it)
 Shell:      /home/u/.bashrc line 12: export PATH=\"$HOME/.tool/bin:$PATH\"
             (these lines are not edited yet; remove them by hand after removing it)
 

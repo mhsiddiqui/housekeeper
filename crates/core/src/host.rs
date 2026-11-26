@@ -160,6 +160,37 @@ impl Host {
             .map_err(err)
     }
 
+    /// Creates the file at `path` with `contents` only if nothing is there yet (`false` when something is), creating
+    /// its folder. Claiming a name this way cannot overwrite anything.
+    pub fn create_new(&self, path: impl AsRef<Path>, contents: &[u8]) -> Result<bool, SourceError> {
+        let path = path.as_ref();
+        let real = self.real_path(path);
+        let err = |e| SourceError::io(path, e);
+        if let Some(dir) = real.parent() {
+            fs::create_dir_all(dir).map_err(err)?;
+        }
+        match fs::OpenOptions::new().write(true).create_new(true).open(&real) {
+            Ok(mut file) => file.write_all(contents).map(|()| true).map_err(err),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(err(e)),
+        }
+    }
+
+    /// Moves `from` to `to` on the same file system, without following a symlink at `from` (the link itself moves).
+    pub fn rename(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+        fs::rename(self.real_path(from), self.real_path(to))
+    }
+
+    pub fn remove_file(&self, path: impl AsRef<Path>) -> Result<(), SourceError> {
+        let path = path.as_ref();
+        fs::remove_file(self.real_path(path)).map_err(|e| SourceError::io(path, e))
+    }
+
+    pub fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<(), SourceError> {
+        let path = path.as_ref();
+        fs::create_dir_all(self.real_path(path)).map_err(|e| SourceError::io(path, e))
+    }
+
     /// First `len` bytes of a file (fewer if the file is shorter).
     pub fn read_head(&self, path: impl AsRef<Path>, len: usize) -> Result<Vec<u8>, SourceError> {
         let path = path.as_ref();
@@ -224,6 +255,11 @@ impl Host {
     /// Size, type and modification time, following symlinks within the root.
     pub fn metadata(&self, path: impl AsRef<Path>) -> Option<fs::Metadata> {
         fs::metadata(self.resolve(path)).ok()
+    }
+
+    /// What is at `path` itself, a symlink included as the link; `None` when nothing is there.
+    pub fn symlink_metadata(&self, path: impl AsRef<Path>) -> Option<fs::Metadata> {
+        fs::symlink_metadata(self.real_path(path)).ok()
     }
 
     /// What the path is, following symlinks within the root; `None` when nothing is there.

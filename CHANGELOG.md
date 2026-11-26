@@ -55,6 +55,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   leaves the computer.
 
 ### Changed
+- `housekeeper remove --dry-run` says which leftover folders would go with the item: a cache that nothing else may
+  use "goes to the Trash with it"; everything else is "kept unless you choose it". Chosen folders will go to the
+  freedesktop Trash (they can be put back from the file manager), and only after they are checked again. `--json`
+  gives each folder an `identity` (device, inode, owner) for that check.
 - Removal plans for dnf and zypper no longer use online repositories (`dnf remove --assumeyes --disablerepo=*`,
   `zypper --non-interactive --no-remote remove`): removing needs only what is installed, and a mirror that is down
   can no longer stop it.

@@ -22,6 +22,7 @@ mod stub;
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 pub mod text;
+pub mod trash;
 pub mod who;
 
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
@@ -29,7 +30,7 @@ pub use group::{AppGroup, Shared};
 pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, carry_out};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
-pub use leftovers::{Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};
+pub use leftovers::{FileIdentity, Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};
 pub use model::{
     Availability, InstallReason, Launcher, Metainfo, Package, PackageKind, Scope, SourceId, SourceInfo, SourceKind,
     SystemInfo,

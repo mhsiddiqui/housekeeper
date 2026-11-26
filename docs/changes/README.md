@@ -61,3 +61,4 @@ links back.
 | [0045](0045-root-helper.md) | Add the root helper, which removes checked packages | 4.1 | #35 |
 | [0046](0046-operation-queue.md) | Add the operation queue, which waits for package-manager locks | 4.2 | #36 |
 | [0047](0047-history.md) | Keep a history of changes and a record of items seen | 4.3 | #37 |
+| [0048](0048-trash.md) | Move chosen leftovers to the Trash, after checking them again | 4.4 | #38 |

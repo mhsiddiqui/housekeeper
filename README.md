@@ -214,11 +214,13 @@ Nothing was changed: this is a dry run. Carrying out removals comes with Houseke
 
 - **Leftovers** are folders named after the item (its name, AppStream ID or menu-entry ID) in `~/.config`,
   `~/.cache`, `~/.local/share` and `~/.local/state` (or their `XDG_*_HOME` variables), or, for a Flatpak, its
-  `~/.var/app/<id>` only (Flatpaks and strictly confined snaps keep their settings in their own folders). Caches can
-  go; settings and data are yours and are kept unless you choose them. A folder that another installed item could
-  also be using says so, as does one a copy in a project or virtual environment could use (pip, npm, cargo…).
-  Folders holding installs and folders every program shares (`fonts`, `dconf`…) are never listed. Sizes count at
-  most 50,000 files and folders per folder; a bigger one (a package manager's cache) shows "at least" its size.
+  `~/.var/app/<id>` only (Flatpaks and strictly confined snaps keep their settings in their own folders). A cache that
+  nothing else may use "goes to the Trash with it"; everything else (settings and data, which are yours, and any folder
+  another installed item or a copy in a project or virtual environment could use, which says so) is kept unless you
+  choose it. Folders go to the Trash, never deleted, and only after they are checked again: a folder that became a
+  symbolic link, or was replaced, stays where it is. Folders holding installs and folders every program shares
+  (`fonts`, `dconf`…) are never listed. Sizes count at most 50,000 files and folders per folder; a bigger one (a
+  package manager's cache) shows "at least" its size.
 - **Shell** lines are lines in `~/.bashrc`, `~/.profile`, the zsh files and fish's `config.fish` that mention the
   item's own install folder (nvm's `export NVM_DIR="$HOME/.nvm"`). They are not edited yet; remove them by hand.
 
