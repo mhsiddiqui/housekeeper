@@ -1,0 +1,10 @@
+# Bun (https://bun.sh), installed by its script.
+title = "Bun"
+
+[detect]
+roots = [{ var = "BUN_INSTALL", default = ".bun" }]
+marker = "bin/bun"
+
+[remove]
+# Bun's documentation: remove ~/.bun (or $BUN_INSTALL).
+trash = ["."]

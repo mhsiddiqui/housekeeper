@@ -1,0 +1,10 @@
+# Node Version Manager (https://github.com/nvm-sh/nvm), with every Node version it installed.
+title = "Node Version Manager (nvm)"
+
+[detect]
+roots = [{ var = "NVM_DIR", default = ".nvm" }]
+marker = "nvm.sh"
+
+[remove]
+# nvm's README: remove "$NVM_DIR". The lines it added to the shell startup files check that nvm.sh exists first.
+trash = ["."]

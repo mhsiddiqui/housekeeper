@@ -1,0 +1,12 @@
+# rustup, the Rust toolchain installer (https://rustup.rs). Its home holds the toolchains; its binary lives in
+# cargo's home.
+title = "rustup"
+
+[detect]
+roots = [{ var = "RUSTUP_HOME", default = ".rustup" }]
+marker = "bin/rustup"
+marker_root = { var = "CARGO_HOME", default = ".cargo" }
+
+[remove]
+# `rustup self uninstall` removes the toolchains, rustup itself and the PATH lines it added.
+uninstaller = { program = "bin/rustup", from = "marker-root", args = ["self", "uninstall", "-y"] }

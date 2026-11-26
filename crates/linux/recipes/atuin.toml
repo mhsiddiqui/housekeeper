@@ -1,0 +1,10 @@
+# Atuin shell history (https://atuin.sh), installed by its script into ~/.atuin.
+title = "Atuin"
+
+[detect]
+roots = [{ home = ".atuin" }]
+marker = "bin/atuin"
+
+[remove]
+# The program folder only; the history itself is in ~/.local/share/atuin, the user's data.
+trash = ["."]
