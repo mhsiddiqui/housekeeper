@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `fix/leftover-matching`, #32
 - **Plan chunks:** 3.6 (a), done; 3.6 (b) next
-- **Commits:** 9e52dfe, cfb165c
+- **Commits:** 9e52dfe, cfb165c, 59d7a1c
 
 ## What changed
 A review of [0041](0041-leftovers.md) found leftover folders credited to items that cannot own them. This change
