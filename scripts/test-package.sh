@@ -107,7 +107,9 @@ if [ "$installed" = yes ]; then
   grep -q "^Leftovers: *$HOME/.config/housekeeper (settings" /tmp/dry-run.txt \
     || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run did not list its settings folder"; }
   grep -q '^Nothing was changed' /tmp/dry-run.txt || fail "housekeeper remove --dry-run did not say it changed nothing"
-  if housekeeper remove housekeeper 2>/dev/null; then fail "housekeeper remove without --dry-run did not refuse"; fi
+  refused=0
+  housekeeper remove housekeeper 2>/dev/null || refused=$?
+  [ "$refused" = 3 ] || fail "housekeeper remove without --dry-run exited with $refused, not 3 (not available yet)"
   command -v housekeeper >/dev/null || fail "housekeeper remove changed something"
   rm -r "$HOME/.config/housekeeper"
   remove

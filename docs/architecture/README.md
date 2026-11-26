@@ -143,8 +143,9 @@ lists every package that would go with it, and core blocks the plan when the pac
 those is protected. `show` also lists what the item would leave behind (D36): folders named after it in the
 platform's per-user state folders (`Platform::leftover_roots`, for items outside a sandbox) or its source's own
 (`Source::leftover_roots`, Flatpak's `~/.var/app`), and lines in shell startup files
-(`Platform::shell_files`) that mention its own install folder. `housekeeper remove --dry-run` prints the plan with
-all of them. Nothing is carried out before Phase 4.
+(`Platform::shell_files`) that mention its own install folder. `show` only counts the folders;
+`Housekeeper::measure_leftovers` sizes them, at most `MEASURE_BUDGET` (50,000) files and folders each, and
+`housekeeper remove --dry-run` prints the plan with all of them, measured. Nothing is carried out before Phase 4.
 
 ### Package tools
 

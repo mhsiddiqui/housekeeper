@@ -50,6 +50,10 @@ the project uses [Semantic Versioning](https://semver.org/).
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
   (fonts, firmware, themes, data, plugins) are a new kind, `component`, shown with `--all`. On an Ubuntu desktop the
   default list went from 525 to 210 entries.
+- `housekeeper show` no longer measures leftover folders (it took seconds for a large cache); its `Leftovers:` line
+  counts them, and `size_bytes` is `null` in its `--json`. `housekeeper remove --dry-run` measures them, counting at
+  most 50,000 files and folders per folder: a bigger one shows "at least" its size (`size_complete: false`).
+- `housekeeper remove` without `--dry-run` now exits with 3 instead of 2, which already meant "nothing matches".
 - `--json`: `protected` is now the reason a package is protected (a string, or `null`) instead of `true`/`false`, so
   the scan's `schema` is `2`.
 - Kernels other than the running one are no longer protected on Fedora, openSUSE and Arch, so older kernels can be
