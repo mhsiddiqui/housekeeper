@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `docs/phase-4-safety`, #34
 - **Plan chunks:** 4.3, 4.4, 4.5, 6.1 and Phase 10 reworded; nothing built
-- **Commits:** 113e401
+- **Commits:** 113e401, 5ae9d72
 
 ## What changed
 This change adds decisions only. It closes the last findings of the review that led to [0042](0042-leftover-matching.md)
