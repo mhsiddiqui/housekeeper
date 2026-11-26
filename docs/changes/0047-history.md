@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `feat/history`, #37
 - **Plan chunks:** 4.3, done
-- **Commits:** 55aff98, ffa2cb9, 7d79637
+- **Commits:** 55aff98, ffa2cb9, 7d79637, e5dfde4
 
 ## What changed
 - **New core module `history.rs`** (decisions D39, D42), working on two JSON Lines files in
