@@ -53,14 +53,14 @@ source, without root and without changing anything.
 | 3.5 ✅ | Leftover discovery (folders named after the item in the XDG config, cache, data and state folders and Flatpak's `~/.var/app`; shell startup lines that load it; D36) and `housekeeper remove --dry-run` (change 0041) |
 | 3.6 ✅ | Leftover hardening, from a review of 3.5: (a) leftovers only in folders the item can use (a Flatpak's own `~/.var/app`, none in `~/.config` for sandboxed apps), folders every program shares never one item's (`dconf`), language packages' folders flagged as possibly used by unscanned copies, shell lines not matched inside longer paths (change 0042); (b) `show` stops measuring leftovers, `remove --dry-run` measures them within a budget of 50,000 files and folders per folder, and `remove` without `--dry-run` exits with 3 (change 0043) |
 
-## Phase 4: Making changes safely 🚧
+## Phase 4: Making changes safely ✅
 | Chunk | Delivers |
 |---|---|
 | 4.1 ✅ | `housekeeper-helper`: privileged binary run through `pkexec`, polkit policy, one typed JSON operation on stdin, argv only, names checked against the package database (D25, D40); packaged with the CLI at `/usr/lib/housekeeper/` and tested by removing Housekeeper's own package on every distribution (change 0045) |
 | 4.2 ✅ | Operation queue: one change per backend at a time, package-manager lock detection and waiting, cancellation (D41; change 0046) |
 | 4.3 ✅ | History log (JSONL under `$XDG_STATE_HOME/housekeeper`), and a record of every item seen installed (key, name, AppStream and launcher IDs, source, when first and last seen), rewritten by each scan, so leftovers of apps removed outside Housekeeper can be named later (D39, D42); `housekeeper history` (change 0047) |
 | 4.4 ✅ | Leftovers go to the freedesktop Trash, never `rm -rf`: only caches nothing else uses are preselected (D38), and each folder is checked again just before it moves (D37, D43); `remove --dry-run` marks which go (change 0048) |
-| 4.5 | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37) |
+| 4.5 ✅ | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37, D44); the helper also trashes system paths (D40); tested by Housekeeper removing its own package on every distribution (change 0049) |
 
 ## Phase 5: Install from file ⬜
 | Chunk | Delivers |
