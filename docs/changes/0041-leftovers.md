@@ -1,9 +1,9 @@
 # 0041: Leftovers and `housekeeper remove --dry-run`
 
 - **Date:** 2026-11-26
-- **Branch / PR:** `feat/leftovers`, PR not opened yet
+- **Branch / PR:** `feat/leftovers`, #31
 - **Plan chunks:** 3.5 (leftover discovery and `remove --dry-run`), done; Phase 3 done
-- **Commits:** 7a5d460, 5e93feb
+- **Commits:** 7a5d460, 5e93feb, b587adb
 
 ## What changed
 - **New `leftovers.rs` in core.** It defines `Leftovers`, which holds `folders` (each a `Leftover`) and `shell_lines`
