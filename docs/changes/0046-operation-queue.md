@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `feat/operation-queue`, #36
 - **Plan chunks:** 4.2, done
-- **Commits:** 05c62d5, eea29be
+- **Commits:** 05c62d5, eea29be, 4a28814
 
 ## What changed
 - **New core module `queue.rs`** (decision D41).
