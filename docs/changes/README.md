@@ -62,3 +62,4 @@ links back.
 | [0046](0046-operation-queue.md) | Add the operation queue, which waits for package-manager locks | 4.2 | #36 |
 | [0047](0047-history.md) | Keep a history of changes and a record of items seen | 4.3 | #37 |
 | [0048](0048-trash.md) | Move chosen leftovers to the Trash, after checking them again | 4.4 | #38 |
+| [0049](0049-remove.md) | `housekeeper remove` carries out the reviewed plan | 4.5 | #39 |
