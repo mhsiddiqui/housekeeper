@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+# Operating-system crates live inside the platform crate that picks between them (`crates/platform/<os>`).
+members = ["crates/*", "crates/platform/linux"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,7 +14,7 @@ publish = false
 
 [workspace.dependencies]
 housekeeper-core = { path = "crates/core" }
-housekeeper-linux = { path = "crates/linux" }
+housekeeper-linux = { path = "crates/platform/linux" }
 housekeeper-platform = { path = "crates/platform" }
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }

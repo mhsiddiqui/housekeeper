@@ -1,3 +1,4 @@
 max_width = 120
-# Lets plain `rustfmt` format the files cargo fmt cannot see (crates/linux/src/sources/, declared by build.rs).
+# Lets plain `rustfmt` format the files cargo fmt cannot see (crates/platform/linux/src/sources/ and src/tools/,
+# declared by build.rs).
 edition = "2024"

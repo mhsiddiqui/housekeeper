@@ -30,8 +30,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      # Sources are declared by build.rs through include!, which cargo fmt does not follow.
-      - run: rustfmt --check crates/linux/src/sources/*.rs
+      # Sources and package tools are declared by build.rs through include!, which cargo fmt does not follow.
+      - run: rustfmt --check crates/platform/linux/src/sources/*.rs crates/platform/linux/src/tools/*.rs
       - run: cargo clippy --workspace --all-targets --all-features --locked
 
   test:
