@@ -1,8 +1,11 @@
 //! zypper, which changes the RPM database on openSUSE and SUSE Linux Enterprise.
 
-use housekeeper_core::{Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{
+    Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+};
 
-use super::{command_for, removal, rpm_installed, rpm_simulation};
+use super::{RPM_LOCKS, command_for, removal, rpm_installed, rpm_simulation};
+use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Zypper;
@@ -26,6 +29,18 @@ impl PackageTool for Zypper {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         Some(self)
+    }
+
+    fn lock(&self) -> Option<&dyn PackageLock> {
+        Some(self)
+    }
+}
+
+/// libzypp's lock, held by zypper, YaST and PackageKit for their whole run, then the RPM database's.
+impl PackageLock for Zypper {
+    fn holder(&self, host: &Host) -> Option<LockHolder> {
+        let [rpm, rpm_old] = RPM_LOCKS;
+        lock::holder(host, &[LockFile::Pid("/run/zypp.pid"), rpm, rpm_old])
     }
 }
 

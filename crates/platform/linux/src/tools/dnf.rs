@@ -1,8 +1,11 @@
 //! dnf, which changes the RPM database on Fedora, RHEL and their rebuilds.
 
-use housekeeper_core::{Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{
+    Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+};
 
-use super::{command_for, removal, rpm_installed, rpm_simulation};
+use super::{RPM_LOCKS, command_for, removal, rpm_installed, rpm_simulation};
+use crate::lock;
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Dnf;
@@ -26,6 +29,17 @@ impl PackageTool for Dnf {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         Some(self)
+    }
+
+    fn lock(&self) -> Option<&dyn PackageLock> {
+        Some(self)
+    }
+}
+
+/// The RPM database's lock, which dnf (and anything else changing packages) holds through its transaction.
+impl PackageLock for Dnf {
+    fn holder(&self, host: &Host) -> Option<LockHolder> {
+        lock::holder(host, &RPM_LOCKS)
     }
 }
 

@@ -9,6 +9,7 @@ mod desktop;
 pub mod distro;
 mod files;
 mod kernel;
+mod lock;
 mod owner;
 pub mod provider;
 mod python;
@@ -22,8 +23,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Host, Launcher, LeftoverKind, Metainfo, PackageRemoval, Platform, ScanContext, Source, SourceKind, SystemInfo,
-    path_dirs,
+    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, ScanContext, Source, SourceKind,
+    SystemInfo, path_dirs,
 };
 
 use crate::distro::Distro;
@@ -93,6 +94,13 @@ impl Platform for LinuxPlatform {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         self.tool.as_deref().and_then(PackageTool::package_removal)
+    }
+
+    /// The package tool's lock, for changes made with that tool (`backend` is its name in plans, `apt`).
+    fn package_lock(&self, backend: &str) -> Option<&dyn PackageLock> {
+        let tool = self.tool.as_deref()?;
+        let name = tool.package_removal()?.tool();
+        (name == backend).then(|| tool.lock()).flatten()
     }
 
     fn sources(&self) -> &[Arc<dyn Source>] {

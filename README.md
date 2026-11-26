@@ -294,8 +294,9 @@ The [build plan](docs/planning/plan.md) has the details. Done: the inventory, id
 duplicates), and removal planning (`remove --dry-run`: the way each installer intended, simulated, protected packages
 blocked, leftovers listed). Next, in order:
 
-1. **Making changes safely:** the privileged helper started through polkit is in place (it removes checked packages);
-   next an operation queue, a history log, leftovers moved to the Trash, and `housekeeper remove` carrying out plans.
+1. **Making changes safely:** the privileged helper started through polkit (it removes checked packages) and the
+   operation queue (one change per package manager at a time, waiting while apt or dnf is busy) are in place; next a
+   history log, leftovers moved to the Trash, and `housekeeper remove` carrying out plans.
 2. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
 3. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.

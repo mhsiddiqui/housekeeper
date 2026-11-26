@@ -57,7 +57,7 @@ source, without root and without changing anything.
 | Chunk | Delivers |
 |---|---|
 | 4.1 ✅ | `housekeeper-helper`: privileged binary run through `pkexec`, polkit policy, one typed JSON operation on stdin, argv only, names checked against the package database (D25, D40); packaged with the CLI at `/usr/lib/housekeeper/` and tested by removing Housekeeper's own package on every distribution (change 0045) |
-| 4.2 | Operation queue: one change per backend at a time, package-manager lock detection and waiting, cancellation |
+| 4.2 ✅ | Operation queue: one change per backend at a time, package-manager lock detection and waiting, cancellation (D41; change 0046) |
 | 4.3 | History log (JSONL under `$XDG_STATE_HOME/housekeeper`), and a record of every item seen installed (key, name, AppStream and launcher IDs, source, when last seen), overwritten by each scan, so leftovers of apps removed outside Housekeeper can be named later (D39) |
 | 4.4 | Leftovers go to the freedesktop Trash, never `rm -rf`: only caches nothing else uses are preselected (D38), and each folder is checked again just before it moves (D37) |
 | 4.5 | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37) |
