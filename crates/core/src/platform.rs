@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::host::Host;
+use crate::leftovers::LeftoverKind;
 use crate::model::{Launcher, Metainfo, SystemInfo};
 use crate::source::{ScanContext, Source};
 
@@ -31,6 +32,17 @@ pub trait Platform: Send + Sync {
     /// standard program directories a session's `PATH` sometimes lacks.
     fn command_dirs(&self, host: &Host) -> Vec<PathBuf> {
         path_dirs(host)
+    }
+
+    /// The per-user folders programs keep their state in, one subfolder per program, with what they hold
+    /// (`~/.config` holds settings). A subfolder named after an item is one of its leftovers.
+    fn leftover_roots(&self, _host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
+        Vec::new()
+    }
+
+    /// The user's shell startup files (logical paths), whose lines can load an installed tool.
+    fn shell_files(&self, _host: &Host) -> Vec<PathBuf> {
+        Vec::new()
     }
 }
 

@@ -100,6 +100,16 @@ if [ "$installed" = yes ]; then
   # The package manager (or the RPM database) was asked what else would go: nothing needs housekeeper.
   grep -q '^ *removes nothing else, says ' /tmp/show.txt \
     || { cat /tmp/show.txt >&2; fail "housekeeper show did not simulate its own removal"; }
+  # A dry run prints the same plan with its leftovers and changes nothing; without --dry-run nothing is removed yet.
+  mkdir -p "$HOME/.config/housekeeper" && echo 'x' > "$HOME/.config/housekeeper/settings"
+  housekeeper remove --dry-run housekeeper > /tmp/dry-run.txt \
+    || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run found nothing for itself"; }
+  grep -q "^Leftovers: *$HOME/.config/housekeeper (settings" /tmp/dry-run.txt \
+    || { cat /tmp/dry-run.txt >&2; fail "housekeeper remove --dry-run did not list its settings folder"; }
+  grep -q '^Nothing was changed' /tmp/dry-run.txt || fail "housekeeper remove --dry-run did not say it changed nothing"
+  if housekeeper remove housekeeper 2>/dev/null; then fail "housekeeper remove without --dry-run did not refuse"; fi
+  command -v housekeeper >/dev/null || fail "housekeeper remove changed something"
+  rm -r "$HOME/.config/housekeeper"
   remove
   # Check the file itself: the shell may still remember where the command was.
   [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"

@@ -1,5 +1,5 @@
 //! `housekeeper show`: one installed item in full: details, launchers, other installs of the same app, files, the
-//! packages that need it and how it would be removed.
+//! packages that need it, how it would be removed and what it would leave behind.
 
 use std::path::{Path, PathBuf};
 
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::group::{Shared, keys};
 use crate::host::{FileType, Host};
 use crate::inventory::{Housekeeper, Selection, SourceStatus};
+use crate::leftovers::{self, Leftovers};
 use crate::model::{Package, SourceInfo};
 use crate::remove::{self, RemovalPlan};
 
@@ -35,6 +36,8 @@ pub struct Details {
     pub needed_by: Option<Vec<Package>>,
     /// How it would be removed; `None` when the source could not make the plan (a warning says why).
     pub removal: Option<RemovalPlan>,
+    /// What it leaves behind outside its own files (D36).
+    pub leftovers: Leftovers,
     /// Sources that could not be read, and questions a source could not answer.
     pub warnings: Vec<String>,
 }
@@ -181,6 +184,7 @@ impl Housekeeper {
             }
         };
 
+        let leftovers = leftovers::find(self.platform.as_ref(), &self.host, &package, &scan.packages);
         Lookup::Found(Box::new(Details {
             package,
             source: info,
@@ -189,6 +193,7 @@ impl Housekeeper {
             files,
             needed_by,
             removal,
+            leftovers,
             warnings,
         }))
     }

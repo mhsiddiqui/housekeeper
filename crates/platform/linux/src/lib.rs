@@ -21,7 +21,9 @@ mod xdg;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use housekeeper_core::{Host, Launcher, Metainfo, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs};
+use housekeeper_core::{
+    Host, Launcher, LeftoverKind, Metainfo, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs,
+};
 
 use crate::distro::Distro;
 use crate::provider::{Context, PackageTool, Provider, ToolProvider};
@@ -105,6 +107,39 @@ impl Platform for LinuxPlatform {
             }
         }
         dirs
+    }
+
+    /// The XDG base directories (settings, caches, data, state), and Flatpak's per-app data in `~/.var/app`, which
+    /// `flatpak uninstall` keeps. Snap's `~/snap/<name>` is not one: `snap remove` takes it along.
+    fn leftover_roots(&self, host: &Host) -> Vec<(PathBuf, LeftoverKind)> {
+        vec![
+            (host.dir_from_var("XDG_CONFIG_HOME", ".config"), LeftoverKind::Config),
+            (host.dir_from_var("XDG_CACHE_HOME", ".cache"), LeftoverKind::Cache),
+            (host.data_home(), LeftoverKind::Data),
+            (host.dir_from_var("XDG_STATE_HOME", ".local/state"), LeftoverKind::State),
+            (host.home().join(".var/app"), LeftoverKind::Data),
+        ]
+    }
+
+    /// bash's, zsh's (in `$ZDOTDIR` when set), the login shell's and fish's startup files.
+    fn shell_files(&self, host: &Host) -> Vec<PathBuf> {
+        let home = host.home();
+        let zdotdir = host
+            .var("ZDOTDIR")
+            .filter(|dir| dir.starts_with('/'))
+            .map_or_else(|| home.to_path_buf(), PathBuf::from);
+        [".bashrc", ".bash_profile", ".bash_login", ".profile"]
+            .iter()
+            .map(|file| home.join(file))
+            .chain(
+                [".zshenv", ".zprofile", ".zshrc", ".zlogin"]
+                    .iter()
+                    .map(|file| zdotdir.join(file)),
+            )
+            .chain(std::iter::once(
+                host.dir_from_var("XDG_CONFIG_HOME", ".config").join("fish/config.fish"),
+            ))
+            .collect()
     }
 }
 

@@ -6,11 +6,12 @@ use std::sync::Arc;
 
 use crate::host::Host;
 use crate::inventory::Housekeeper;
+use crate::leftovers::LeftoverKind;
 use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
 use crate::platform::Platform;
 use crate::remove::{RemovalPlan, Remover, Simulation, Simulator};
 use crate::source::{Dependants, FileList, OwnerLookup, ScanContext, Source, SourceError};
-use crate::testing::{FakeRunner, Fixture};
+use crate::testing::{FakeRunner, Fixture, HOME};
 
 /// A source with fixed packages, install folders and package-database files.
 #[derive(Default)]
@@ -144,6 +145,19 @@ impl Platform for TestPlatform {
     }
     fn metainfo(&self, _: &Host, _: &ScanContext<'_>) -> Vec<Metainfo> {
         self.metainfo.clone()
+    }
+    fn leftover_roots(&self, _: &Host) -> Vec<(PathBuf, LeftoverKind)> {
+        [
+            (".config", LeftoverKind::Config),
+            (".cache", LeftoverKind::Cache),
+            (".local/share", LeftoverKind::Data),
+        ]
+        .into_iter()
+        .map(|(dir, kind)| (Path::new(HOME).join(dir), kind))
+        .collect()
+    }
+    fn shell_files(&self, _: &Host) -> Vec<PathBuf> {
+        vec![Path::new(HOME).join(".bashrc")]
     }
 }
 
