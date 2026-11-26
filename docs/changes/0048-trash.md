@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `feat/trash`, #38
 - **Plan chunks:** 4.4, done
-- **Commits:** 059494b, 5ab33c9
+- **Commits:** 059494b, 5ab33c9, 38c7d8b
 
 ## What changed
 - **New core module `trash.rs`** (decision D43).
