@@ -22,12 +22,14 @@ version=$(cargo metadata --no-deps --format-version 1 \
   | sed -n 's/.*"name":"housekeeper-cli","version":"\([^"]*\)".*/\1/p')
 [ -n "$version" ] || { echo "could not read the version from Cargo.toml" >&2; exit 1; }
 
-# Static musl binary: one file that runs on every distribution, whatever its glibc.
-cargo build --release --locked --target "$target" -p housekeeper-cli
+# Static musl binaries: one file each that runs on every distribution, whatever its glibc.
+cargo build --release --locked --target "$target" -p housekeeper-cli -p housekeeper-helper
 binary="target/$target/release/housekeeper"
+helper="target/$target/release/housekeeper-helper"
 
 mkdir -p dist target/package
 cp "$binary" target/package/housekeeper
+cp "$helper" target/package/housekeeper-helper
 export VERSION="$version" ARCH="$pkg_arch"
 for packager in deb rpm archlinux; do
   "$nfpm" package --config packaging/nfpm.yaml --packager "$packager" --target dist/
@@ -36,7 +38,9 @@ done
 tarball="housekeeper-$version-$arch-linux"
 staging=$(mktemp -d)
 mkdir "$staging/$tarball"
-cp "$binary" LICENSE README.md "$staging/$tarball/"
+# The helper and its polkit action ride along for whoever installs them by hand (/usr/lib/housekeeper and
+# /usr/share/polkit-1/actions, as the packages do).
+cp "$binary" "$helper" packaging/io.github.mhsiddiqui.housekeeper.policy LICENSE README.md "$staging/$tarball/"
 tar -C "$staging" -czf "dist/$tarball.tar.gz" "$tarball"
 rm -rf "$staging"
 

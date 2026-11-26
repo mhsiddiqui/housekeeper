@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Housekeeper's root helper (decision D4). pkexec runs /usr/lib/housekeeper/housekeeper-helper under this action, so
+  the password prompt names Housekeeper instead of a bare program path. An administrator's password is asked every
+  time: nothing is kept between changes.
+-->
+<policyconfig>
+  <vendor>Housekeeper</vendor>
+  <vendor_url>https://github.com/mhsiddiqui/housekeeper</vendor_url>
+  <action id="io.github.mhsiddiqui.housekeeper.helper">
+    <description>Change the software installed on this computer</description>
+    <message>Authentication is required for Housekeeper to change the software installed on this computer</message>
+    <icon_name>system-software-install</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/housekeeper/housekeeper-helper</annotate>
+  </action>
+</policyconfig>
