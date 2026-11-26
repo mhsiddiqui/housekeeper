@@ -58,9 +58,9 @@ source, without root and without changing anything.
 |---|---|
 | 4.1 | `housekeeper-helper`: privileged binary run through `pkexec`, polkit policy, one typed JSON operation on stdin, argv only, names checked against the package database (D25) |
 | 4.2 | Operation queue: one change per backend at a time, package-manager lock detection and waiting, cancellation |
-| 4.3 | History log (JSONL under `$XDG_STATE_HOME/housekeeper`) |
-| 4.4 | Leftovers go to the freedesktop Trash, never `rm -rf` |
-| 4.5 | `housekeeper remove` executes the reviewed plan |
+| 4.3 | History log (JSONL under `$XDG_STATE_HOME/housekeeper`), and a record of every item seen installed (key, name, AppStream and launcher IDs, source, when last seen), overwritten by each scan, so leftovers of apps removed outside Housekeeper can be named later (D39) |
+| 4.4 | Leftovers go to the freedesktop Trash, never `rm -rf`: only caches nothing else uses are preselected (D38), and each folder is checked again just before it moves (D37) |
+| 4.5 | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37) |
 
 ## Phase 5: Install from file ⬜
 | Chunk | Delivers |
@@ -73,7 +73,7 @@ source, without root and without changing anything.
 ## Phase 6: Desktop app (v1 release) ⬜
 | Chunk | Delivers |
 |---|---|
-| 6.1 | Tauri 2 shell, strict CSP, no remote scripts, minimal capabilities; port the mockup's Library view |
+| 6.1 | Tauri 2 shell, strict CSP, no remote scripts, minimal capabilities; port the mockup's Library view, which opens on the last scan and refreshes it in the background (D39) |
 | 6.2 | Install from file (drag and drop), Activity, History views |
 | 6.3 | First-run setup, settings, accessibility, light/dark themes |
 | 6.4 | Desktop app packaging (the CLI is already packaged since 0.4): polkit policy and helper in `.deb`/`.rpm`/Arch, AUR `PKGBUILD`, AppImage (portable mode) |
@@ -92,7 +92,8 @@ Flathub API, snapd `/v2/find`, distro AppStream (`appstreamcli`). Fetched by the
 sanitised text before it reaches the UI; offline snapshot fallback.
 
 ## Phase 10: Housekeeping ⬜
-Storage view, unused apps, caches and orphaned dependencies, default apps and startup apps.
+Storage view, unused apps, caches and orphaned dependencies, default apps and startup apps; leftovers of apps that are
+no longer installed, named from the record of items seen (4.3).
 
 ## Phase 11: Tracked terminal ⬜
 Integrated terminal that records what an install script changed (file snapshot diff) and writes a manifest, so the

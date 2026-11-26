@@ -57,3 +57,4 @@ links back.
 | [0041](0041-leftovers.md) | Leftovers and `housekeeper remove --dry-run` | 3.5 | #31 |
 | [0042](0042-leftover-matching.md) | Find leftovers only in folders the item can use | 3.6 | #32 |
 | [0043](0043-leftover-sizes.md) | Measure leftovers only in `remove --dry-run`, within a budget | 3.6 | #33 |
+| [0044](0044-phase-4-safety.md) | Decide how Phase 4 checks a plan before carrying it out | 4.3–4.5 (design) | #34 |
