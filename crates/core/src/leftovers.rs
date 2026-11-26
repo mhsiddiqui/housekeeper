@@ -1,16 +1,18 @@
 //! Leftovers: what an installed item leaves behind outside its own files: settings, caches and data in the folders the
 //! platform and the item's source keep per-user state in, and lines in shell startup files that load it (decisions
-//! D7, D36). Found only; nothing here changes anything.
+//! D7, D36). Found here; a folder the user chose goes to the Trash only after it is checked again (D37, D43).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::history::unix_now;
 use crate::host::{FileType, Host};
 use crate::inventory::Housekeeper;
 use crate::model::{Package, SourceId, SourceKind};
 use crate::platform::Platform;
+use crate::trash::{TrashError, Trashed, trash};
 
 /// How many files and folders [`Housekeeper::measure_leftovers`] looks at in each leftover folder before it stops
 /// counting: enough for settings and most caches, while a package manager's cache (uv's held 167,000 entries) or a
@@ -44,6 +46,44 @@ pub struct Leftover {
     /// virtual environment), which may use the folder too.
     #[serde(default)]
     pub unseen_copies: bool,
+    /// What the folder was when it was found, to tell it is still the same one before it goes to the Trash (D37);
+    /// `None` where the system does not tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<FileIdentity>,
+}
+
+impl Leftover {
+    /// Whether a removal takes it unless the user says otherwise (D38): a cache that no other install and no unscanned
+    /// copy may use. Everything else waits for the user to choose it.
+    pub fn preselected(&self) -> bool {
+        self.kind == LeftoverKind::Cache && self.also_used_by.is_empty() && !self.unseen_copies
+    }
+}
+
+/// Which file a path named, as the file system tells: the same device, inode and owner mean the same file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileIdentity {
+    pub device: u64,
+    pub inode: u64,
+    pub owner: u32,
+}
+
+impl FileIdentity {
+    /// What is at `path` itself (a symlink counts as the link).
+    #[cfg(unix)]
+    fn of(host: &Host, path: &Path) -> Option<Self> {
+        use std::os::unix::fs::MetadataExt;
+        host.symlink_metadata(path).map(|meta| Self {
+            device: meta.dev(),
+            inode: meta.ino(),
+            owner: meta.uid(),
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn of(_: &Host, _: &Path) -> Option<Self> {
+        None
+    }
 }
 
 /// What a leftover folder holds. Only caches can go without asking; the rest is the user's (D7).
@@ -94,6 +134,27 @@ impl Root {
     }
 }
 
+/// Every folder leftovers are looked for in: the platform's, then each source's own.
+fn roots(platform: &dyn Platform, host: &Host) -> Vec<Root> {
+    platform
+        .leftover_roots(host)
+        .into_iter()
+        .map(|(dir, kind)| Root {
+            dir,
+            kind,
+            source: None,
+        })
+        .chain(platform.sources().iter().flat_map(|source| {
+            let id = source.info().id;
+            source.leftover_roots(host).into_iter().map(move |(dir, kind)| Root {
+                dir,
+                kind,
+                source: Some(id.clone()),
+            })
+        }))
+        .collect()
+}
+
 /// What `package` (one of `installed`) leaves behind on `platform`.
 pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, installed: &[Package]) -> Leftovers {
     let own = names(package);
@@ -113,24 +174,8 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
         let info = source.info();
         info.id == package.source && info.kind == SourceKind::Language
     });
-    let roots = platform
-        .leftover_roots(host)
-        .into_iter()
-        .map(|(dir, kind)| Root {
-            dir,
-            kind,
-            source: None,
-        })
-        .chain(platform.sources().iter().flat_map(|source| {
-            let id = source.info().id;
-            source.leftover_roots(host).into_iter().map(move |(dir, kind)| Root {
-                dir,
-                kind,
-                source: Some(id.clone()),
-            })
-        }));
     let mut folders = Vec::new();
-    for root in roots.filter(|root| root.used_by(package)) {
+    for root in roots(platform, host).iter().filter(|root| root.used_by(package)) {
         let Ok(entries) = host.read_dir(&root.dir) else {
             continue;
         };
@@ -151,6 +196,7 @@ pub(crate) fn find(platform: &dyn Platform, host: &Host, package: &Package, inst
                 .map(Package::key)
                 .collect();
             folders.push(Leftover {
+                identity: FileIdentity::of(host, &entry.path),
                 size_bytes: None,
                 size_complete: false,
                 path: entry.path,
@@ -255,6 +301,47 @@ impl Housekeeper {
             .folders
             .sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes).then_with(|| a.path.cmp(&b.path)));
     }
+
+    /// Moves a leftover folder the user chose to the Trash (D7), after checking it is still the folder that was found
+    /// (D37): nothing on its path is a symlink, it is still directly inside one of the leftover folders, and its
+    /// device, inode and owner are unchanged. Any difference leaves it where it is.
+    pub fn trash_leftover(&self, leftover: &Leftover) -> Result<Trashed, TrashError> {
+        let changed = |reason: &str| TrashError::Changed {
+            path: leftover.path.clone(),
+            reason: reason.to_string(),
+        };
+        let Some(found) = leftover.identity else {
+            return Err(changed(
+                "this system does not tell whether it is still the folder that was found",
+            ));
+        };
+        if self.host.symlink_metadata(&leftover.path).is_none() {
+            return Err(TrashError::Missing(leftover.path.clone()));
+        }
+        if self.host.canonical(&leftover.path) != leftover.path {
+            return Err(changed("a part of its path is now a symbolic link"));
+        }
+        let parent = leftover.path.parent().unwrap_or(Path::new("/"));
+        if !roots(self.platform.as_ref(), &self.host)
+            .iter()
+            .any(|root| root.dir == parent)
+        {
+            return Err(changed(
+                "it is no longer directly inside a folder programs keep their state in",
+            ));
+        }
+        if FileIdentity::of(&self.host, &leftover.path) != Some(found) {
+            return Err(changed("it is not the same folder as when it was found"));
+        }
+        if self
+            .host
+            .symlink_metadata(&leftover.path)
+            .is_none_or(|meta| !meta.is_dir())
+        {
+            return Err(changed("it is no longer a folder"));
+        }
+        trash(&self.host, &leftover.path, unix_now())
+    }
 }
 
 /// Size of the files under `dir`, not following symlinks, from at most `budget` files and folders; folders that cannot
@@ -288,7 +375,7 @@ mod tests {
     use super::*;
     use crate::show::Lookup;
     use crate::stub::{Stub, housekeeper, package};
-    use crate::testing::{Fixture, HOME};
+    use crate::testing::{FakeRunner, Fixture, HOME};
 
     fn leftovers(hk: &crate::inventory::Housekeeper, query: &str) -> Leftovers {
         match hk.show(query) {
@@ -550,5 +637,58 @@ mod tests {
             found.folders[0].unseen_copies,
             "a virtual environment's copy may use it too"
         );
+    }
+
+    fn tool_housekeeper(fixture: &Fixture) -> crate::inventory::Housekeeper {
+        housekeeper(
+            fixture,
+            "/usr/bin",
+            vec![Stub {
+                id: "dpkg",
+                packages: vec![package("dpkg", "tool", None, &[])],
+                ..Stub::default()
+            }],
+        )
+    }
+
+    #[test]
+    fn a_chosen_leftover_goes_to_the_trash_only_while_it_is_the_folder_that_was_found() {
+        let fixture = Fixture::new();
+        fixture.file(&home(".cache/tool/blob"), "x");
+        let hk = tool_housekeeper(&fixture);
+        let found = leftovers(&hk, "dpkg:tool").folders.remove(0);
+        assert!(found.preselected(), "a cache nothing else uses");
+        assert!(found.identity.is_some());
+
+        let trashed = hk.trash_leftover(&found).unwrap();
+        assert_eq!(trashed.to, Path::new(&home(".local/share/Trash/files/tool")));
+        assert!(
+            matches!(hk.trash_leftover(&found), Err(TrashError::Missing(_))),
+            "already gone"
+        );
+    }
+
+    #[test]
+    fn a_leftover_swapped_for_a_symlink_or_another_folder_stays_where_it_is() {
+        let fixture = Fixture::new();
+        fixture
+            .file(&home(".cache/tool/blob"), "x")
+            .file(&home("Documents/precious"), "!");
+        let hk = tool_housekeeper(&fixture);
+        let found = leftovers(&hk, "dpkg:tool").folders.remove(0);
+        let host = fixture.host(FakeRunner::new());
+
+        // Between the plan and the removal, the folder becomes a link to the user's documents.
+        host.rename(home(".cache/tool"), home(".cache/tool-old")).unwrap();
+        fixture.symlink(&home(".cache/tool"), &home("Documents"));
+        let refused = hk.trash_leftover(&found).unwrap_err().to_string();
+        assert!(refused.contains("symbolic link"), "{refused}");
+        assert!(host.exists(home("Documents/precious")));
+
+        // Or another folder of the same name takes its place.
+        host.remove_file(home(".cache/tool")).unwrap();
+        fixture.dir(&home(".cache/tool"));
+        let refused = hk.trash_leftover(&found).unwrap_err().to_string();
+        assert!(refused.contains("not the same folder"), "{refused}");
     }
 }

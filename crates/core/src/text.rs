@@ -1,4 +1,4 @@
-//! Small parsing helpers shared by sources.
+//! Small parsing and formatting helpers shared by sources and services.
 
 /// Parses sizes printed for humans, such as `462.0 MB`, `743.9 kB`, `1.7 GB`, `12 bytes` or `3.2 MiB`.
 ///
@@ -57,6 +57,37 @@ fn unquote(value: &str) -> String {
     out
 }
 
+/// `2026-11-26T14:03:09` for seconds since the Unix epoch, in UTC (ISO 8601 without a zone, as the freedesktop Trash
+/// writes dates).
+pub fn utc_timestamp(secs: i64) -> String {
+    let (days, seconds) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let (year, month, day) = civil_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}",
+        seconds / 3600,
+        seconds % 3600 / 60,
+        seconds % 60
+    )
+}
+
+/// The proleptic Gregorian date of a day count since 1970-01-01 (Howard Hinnant's `civil_from_days`).
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era = (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,5 +116,13 @@ mod tests {
                 ("VARIANT", "Silverblue \"edition\"".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn utc_timestamps() {
+        assert_eq!(utc_timestamp(0), "1970-01-01T00:00:00");
+        assert_eq!(utc_timestamp(1_794_206_843), "2026-11-09T06:47:23");
+        assert_eq!(utc_timestamp(951_782_400), "2000-02-29T00:00:00", "a leap day");
+        assert_eq!(utc_timestamp(-1), "1969-12-31T23:59:59");
     }
 }
