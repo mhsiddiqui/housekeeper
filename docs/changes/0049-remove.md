@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `feat/remove`, #39
 - **Plan chunks:** 4.5, done; Phase 4 done
-- **Commits:** 5c08f7f, 8c78a44, 9185318
+- **Commits:** 5c08f7f, 8c78a44, 9185318, d92b548
 
 ## What changed
 - **New core module `carry.rs`** (decision D44).
