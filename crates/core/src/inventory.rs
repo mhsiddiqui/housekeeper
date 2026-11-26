@@ -8,6 +8,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::group::{AppGroup, group};
+use crate::history;
 use crate::host::Host;
 use crate::identity;
 use crate::model::{Availability, Package, SourceInfo, SystemInfo};
@@ -106,6 +107,8 @@ impl Housekeeper {
     /// Reads every selected source in parallel, then attaches each launcher of the application menu, each command a
     /// package database lists and each catalog entry to its package, derives kinds, titles, icons and AppStream IDs
     /// from them, and groups the apps installed more than once. A source that fails or panics is reported, not fatal.
+    /// The record of items seen is updated with what the scan found (D39); a record that cannot be written is a
+    /// warning.
     pub fn scan(&self, selection: &Selection<'_>) -> Scan {
         self.scan_with(selection, |_, _| {})
     }
@@ -120,7 +123,13 @@ impl Housekeeper {
     /// panicking source (reported as failed). If `on_report` itself panics, that source is treated like a panicking
     /// source: the scan reports it as failed with no packages, and the other sources are unaffected.
     pub fn scan_with(&self, selection: &Selection<'_>, on_report: impl Fn(&SourceReport, &[Package]) + Sync) -> Scan {
-        self.read(selection, true, on_report)
+        let mut scan = self.read(selection, true, on_report);
+        let now = history::unix_now();
+        if let Err(e) = history::remember(&self.host, &scan, now) {
+            scan.warnings
+                .push(format!("could not update the record of installed items: {e}"));
+        }
+        scan
     }
 
     /// The scan, with launchers and commands attached when `identify` is set. Reading them, and asking the package

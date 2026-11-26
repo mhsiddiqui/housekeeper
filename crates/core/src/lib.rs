@@ -5,6 +5,7 @@
 pub mod command;
 pub mod group;
 pub mod helper;
+pub mod history;
 pub mod host;
 mod identity;
 pub mod inventory;
