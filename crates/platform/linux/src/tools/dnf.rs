@@ -1,8 +1,8 @@
 //! dnf, which changes the RPM database on Fedora, RHEL and their rebuilds.
 
-use housekeeper_core::{Host, Package, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
 
-use super::{removal, rpm_simulation};
+use super::{command_for, removal, rpm_installed, rpm_simulation};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Dnf;
@@ -23,12 +23,31 @@ impl PackageTool for Dnf {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+}
+
+impl PackageRemoval for Dnf {
+    fn tool(&self) -> &'static str {
+        "dnf"
+    }
+
+    fn is_installed(&self, host: &Host, package: &str) -> Result<bool, SourceError> {
+        rpm_installed(host, package)
+    }
+
+    /// Without repositories: removing needs only what is installed, and a mirror that is down or slow must not stop it.
+    fn command(&self, packages: &[String]) -> Vec<String> {
+        command_for(&["dnf", "remove", "--assumeyes", "--disablerepo=*"], packages)
+    }
 }
 
 impl Remover for Dnf {
     /// By its full NEVRA, so one of several installed kernels goes and not all of them.
     fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
-        Ok(removal("dnf", &["dnf", "remove", "--assumeyes"], &package.id))
+        Ok(removal(self, &package.id))
     }
 
     fn simulator(&self) -> Option<&dyn Simulator> {

@@ -1,9 +1,9 @@
 //! rpm-ostree, which layers packages on the image of Fedora Silverblue, Kinoite, Bazzite and the other Fedora Atomic
 //! systems (decision D3).
 
-use housekeeper_core::{Host, InstallReason, Package, RemovalPlan, Remover, SourceError, Tier};
+use housekeeper_core::{Host, InstallReason, Package, PackageRemoval, RemovalPlan, Remover, SourceError, Tier};
 
-use super::removal;
+use super::{command_for, removal, rpm_installed};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct RpmOstree;
@@ -24,6 +24,25 @@ impl PackageTool for RpmOstree {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+}
+
+impl PackageRemoval for RpmOstree {
+    fn tool(&self) -> &'static str {
+        "rpm-ostree"
+    }
+
+    /// The booted deployment's RPM database lists it (a layered package is in it, by name).
+    fn is_installed(&self, host: &Host, package: &str) -> Result<bool, SourceError> {
+        rpm_installed(host, package)
+    }
+
+    fn command(&self, packages: &[String]) -> Vec<String> {
+        command_for(&["rpm-ostree", "uninstall"], packages)
+    }
 }
 
 impl Remover for RpmOstree {
@@ -32,9 +51,7 @@ impl Remover for RpmOstree {
     /// which is not removing what the user installed.
     fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
         Ok(match package.reason {
-            InstallReason::Explicit => {
-                removal("rpm-ostree", &["rpm-ostree", "uninstall"], &package.name).needs_restart()
-            }
+            InstallReason::Explicit => removal(self, &package.name).needs_restart(),
             InstallReason::System => RemovalPlan::new(Tier::PackageManager, Vec::new())
                 .blocked("part of the system image; rpm-ostree only uninstalls packages layered on it"),
             InstallReason::Dependency | InstallReason::Unknown => RemovalPlan::new(Tier::PackageManager, Vec::new())

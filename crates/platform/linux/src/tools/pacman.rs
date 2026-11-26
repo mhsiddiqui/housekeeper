@@ -1,8 +1,8 @@
 //! pacman, which changes its own database on Arch Linux and its derivatives.
 
-use housekeeper_core::{Cmd, Host, Package, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{Cmd, Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
 
-use super::removal;
+use super::{command_for, removal};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Pacman;
@@ -23,12 +23,31 @@ impl PackageTool for Pacman {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+}
+
+impl PackageRemoval for Pacman {
+    fn tool(&self) -> &'static str {
+        "pacman"
+    }
+
+    /// `pacman --query` exits 0 only when its local database has the package by that name.
+    fn is_installed(&self, host: &Host, package: &str) -> Result<bool, SourceError> {
+        Ok(host.run(&Cmd::new("pacman").args(["--query", package]))?.success())
+    }
+
+    fn command(&self, packages: &[String]) -> Vec<String> {
+        command_for(&["pacman", "--remove", "--noconfirm"], packages)
+    }
 }
 
 impl Remover for Pacman {
     /// Packages from the AUR are removed the same way: pacman installed them, whichever helper built them.
     fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
-        Ok(removal("pacman", &["pacman", "--remove", "--noconfirm"], &package.id))
+        Ok(removal(self, &package.id))
     }
 
     fn simulator(&self) -> Option<&dyn Simulator> {

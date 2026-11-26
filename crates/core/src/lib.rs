@@ -4,6 +4,7 @@
 
 pub mod command;
 pub mod group;
+pub mod helper;
 pub mod host;
 mod identity;
 pub mod inventory;
@@ -23,6 +24,7 @@ pub mod who;
 
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use group::{AppGroup, Shared};
+pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, carry_out};
 pub use host::{Entry, FileType, Host};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
 pub use leftovers::{Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};

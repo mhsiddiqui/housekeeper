@@ -18,44 +18,53 @@ one() { set -- $1; [ -e "$1" ] || fail "no file matching $1"; echo "$1"; }
 echo "== $PRETTY_NAME ($(uname -m))"
 
 installed=yes
+helper=/usr/lib/housekeeper/housekeeper-helper
 if [ -e /run/ostree-booted ]; then
   native=rpm
+  tool=rpm-ostree
   installed=no
   pkg=$(one "$dist/*.tar.gz")
   tar -xzf "$pkg" -C /tmp
   PATH="$(dirname "$(one "/tmp/housekeeper-*/housekeeper")"):$PATH"
+  helper=$(one "/tmp/housekeeper-*/housekeeper-helper")
 # The package has no dependencies, so it installs without contacting any repository: no mirror or expired-key
-# problem can break the test.
+# problem can break the test. Housekeeper's root helper removes it again at the end, the same way.
 elif command -v apt-get >/dev/null; then
   native=dpkg
+  tool=apt
   pkg=$(one "$dist/*.deb")
   export DEBIAN_FRONTEND=noninteractive
   apt-get install -y -qq "$pkg" >/dev/null
-  remove() { apt-get remove -y -qq housekeeper >/dev/null; }
   planned='apt-get remove --yes housekeeper'
 elif command -v zypper >/dev/null; then
   native=rpm
+  tool=zypper
   pkg=$(one "$dist/*.rpm")
   # --no-remote: zypper would otherwise build its online repositories' caches first (fetching their keys), and a
   # flaky mirror fails the install with exit code 106 although the local package needs nothing from them.
   zypper --non-interactive --no-remote install --allow-unsigned-rpm "$pkg"
-  remove() { zypper --non-interactive --no-remote remove housekeeper; }
-  planned='zypper --non-interactive remove housekeeper-'
+  planned='zypper --non-interactive --no-remote remove housekeeper-'
 elif command -v dnf >/dev/null; then
   native=rpm
+  tool=dnf
   pkg=$(one "$dist/*.rpm")
   dnf install -y --disablerepo='*' "$pkg"
-  remove() { dnf remove -y --disablerepo='*' housekeeper; }
-  planned='dnf remove --assumeyes housekeeper-'
+  planned='dnf remove --assumeyes --disablerepo=\* housekeeper-'
 elif command -v pacman >/dev/null; then
   native=pacman
+  tool=pacman
   pkg=$(one "$dist/*.pkg.tar.zst")
   pacman -U --noconfirm "$pkg"
-  remove() { pacman -R --noconfirm housekeeper; }
   planned='pacman --remove --noconfirm housekeeper'
 else
   fail "no supported package manager"
 fi
+
+# The root helper's request for removing `$1` with this system's package tool.
+request() { printf '{"protocol":1,"operation":{"kind":"remove-packages","tool":"%s","packages":["%s"]}}' "$tool" "$1"; }
+# Runs the helper on that request (the tests run as root, as pkexec would start it), keeping its reply in
+# /tmp/helper.json; prints its exit code.
+run_helper() { code=0; request "$1" | "$helper" > /tmp/helper.json || code=$?; echo "$code"; }
 
 command -v housekeeper >/dev/null || fail "housekeeper is not on PATH after installing $pkg"
 housekeeper --version
@@ -73,6 +82,13 @@ if grep -q '"state": "failed"' /tmp/all.json; then
   grep -B3 -A3 '"state": "failed"' /tmp/all.json >&2
   fail "a source failed"
 fi
+
+# The root helper refuses what is not a plain, installed package of this system's tool, and changes nothing.
+[ "$(run_helper housekeeper-no-such-package)" = 2 ] \
+  && grep -q '"reason":"housekeeper-no-such-package is not installed"' /tmp/helper.json \
+  || { cat /tmp/helper.json >&2; fail "the helper did not refuse a package that is not installed"; }
+[ "$(run_helper --purge)" = 2 ] && grep -q 'is not a package name' /tmp/helper.json \
+  || { cat /tmp/helper.json >&2; fail "the helper did not refuse an option passed as a package name"; }
 
 if [ "$installed" = yes ]; then
   # Housekeeper sees itself, installed by the native package manager.
@@ -112,8 +128,16 @@ if [ "$installed" = yes ]; then
   [ "$refused" = 3 ] || fail "housekeeper remove without --dry-run exited with $refused, not 3 (not available yet)"
   command -v housekeeper >/dev/null || fail "housekeeper remove changed something"
   rm -r "$HOME/.config/housekeeper"
-  remove
-  # Check the file itself: the shell may still remember where the command was.
-  [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after removing the package"
+  [ -f /usr/share/polkit-1/actions/io.github.mhsiddiqui.housekeeper.policy ] \
+    || fail "the package did not install the helper's polkit action"
+  # The helper removes the package, under the id the native source gives it, with the command the plan showed.
+  housekeeper show housekeeper --json > /tmp/show.json
+  id=$(sed -n 's/^    "id": "\(.*\)",$/\1/p' /tmp/show.json | head -n 1)
+  [ -n "$id" ] || { cat /tmp/show.json >&2; fail "no package id in housekeeper show --json"; }
+  [ "$(run_helper "$id")" = 0 ] && grep -q '"outcome":"done"' /tmp/helper.json \
+    || { cat /tmp/helper.json >&2; fail "the helper did not remove $id"; }
+  # Check the files themselves: the shell may still remember where the command was.
+  [ ! -e /usr/bin/housekeeper ] || fail "/usr/bin/housekeeper is still there after the helper removed the package"
+  [ ! -e "$helper" ] || fail "$helper is still there after the helper removed the package"
 fi
 echo "OK: $(basename "$pkg") on $PRETTY_NAME"

@@ -1,8 +1,8 @@
 //! apt, which changes the Debian package database (Debian, Ubuntu, Mint…).
 
-use housekeeper_core::{Cmd, Host, Package, RemovalPlan, Remover, Simulation, Simulator, SourceError};
+use housekeeper_core::{Cmd, Host, Package, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError};
 
-use super::removal;
+use super::{command_for, removal};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct Apt;
@@ -23,12 +23,41 @@ impl PackageTool for Apt {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+}
+
+impl PackageRemoval for Apt {
+    fn tool(&self) -> &'static str {
+        "apt"
+    }
+
+    /// dpkg lists the package, by its exact id, as installed. dpkg-query reads names as patterns, which the helper's
+    /// name check rules out.
+    fn is_installed(&self, host: &Host, package: &str) -> Result<bool, SourceError> {
+        let cmd = Cmd::new("dpkg-query").args([
+            "--show",
+            "--showformat=${binary:Package}\\t${db:Status-Status}\\n",
+            package,
+        ]);
+        // Exits 1 when dpkg has never heard of it.
+        let listing = host.run(&cmd)?.stdout;
+        Ok(listing
+            .lines()
+            .any(|line| line.split_once('\t') == Some((package, "installed"))))
+    }
+
+    fn command(&self, packages: &[String]) -> Vec<String> {
+        command_for(&["apt-get", "remove", "--yes"], packages)
+    }
 }
 
 impl Remover for Apt {
     /// By its dpkg id, which carries the architecture when several are installed (`libc6:i386`).
     fn plan(&self, _: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
-        Ok(removal("apt", &["apt-get", "remove", "--yes"], &package.id))
+        Ok(removal(self, &package.id))
     }
 
     fn simulator(&self) -> Option<&dyn Simulator> {

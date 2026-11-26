@@ -22,7 +22,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Host, Launcher, LeftoverKind, Metainfo, Platform, ScanContext, Source, SourceKind, SystemInfo, path_dirs,
+    Host, Launcher, LeftoverKind, Metainfo, PackageRemoval, Platform, ScanContext, Source, SourceKind, SystemInfo,
+    path_dirs,
 };
 
 use crate::distro::Distro;
@@ -35,6 +36,8 @@ pub struct LinuxPlatform {
     distro: Distro,
     system: SystemInfo,
     sources: Vec<Arc<dyn Source>>,
+    /// What changes the native package database (D24); `None` on a distribution no tool serves.
+    tool: Option<Arc<dyn PackageTool>>,
 }
 
 impl LinuxPlatform {
@@ -74,6 +77,7 @@ impl LinuxPlatform {
             distro,
             system,
             sources,
+            tool,
         }
     }
 
@@ -85,6 +89,10 @@ impl LinuxPlatform {
 impl Platform for LinuxPlatform {
     fn system(&self) -> &SystemInfo {
         &self.system
+    }
+
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        self.tool.as_deref().and_then(PackageTool::package_removal)
     }
 
     fn sources(&self) -> &[Arc<dyn Source>] {
@@ -300,7 +308,8 @@ mod tests {
         assert!(kinds.is_sorted(), "{ids:?}");
     }
 
-    /// The command the native source plans for removing a package it explicitly installed, if any.
+    /// The command the native source plans for removing a package it explicitly installed, if any. The root helper
+    /// must build the very command the plan shows, for the tool the plan names.
     fn removal_command(os_release: &str, image_based: bool) -> Option<String> {
         let fixture = Fixture::new();
         fixture.file("/etc/os-release", os_release);
@@ -317,7 +326,13 @@ mod tests {
         package.reason = InstallReason::Explicit;
         let plan = native.remover()?.plan(&host, &package).ok()?;
         match &plan.steps.first()?.action {
-            Action::RemovePackages { argv, .. } => Some(argv[..argv.len() - 1].join(" ")),
+            Action::RemovePackages { tool, packages, argv } => {
+                let helper = platform
+                    .package_removal()
+                    .expect("a tool that plans removals removes them too");
+                assert_eq!((helper.tool(), helper.command(packages)), (tool.as_str(), argv.clone()));
+                Some(argv[..argv.len() - 1].join(" "))
+            }
             other => panic!("{other:?}"),
         }
     }
@@ -326,17 +341,17 @@ mod tests {
     fn native_packages_are_removed_with_the_distributions_own_tool() {
         let cases = [
             ("ID=ubuntu\nID_LIKE=debian\n", false, Some("apt-get remove --yes")),
-            ("ID=fedora\n", false, Some("dnf remove --assumeyes")),
+            ("ID=fedora\n", false, Some("dnf remove --assumeyes --disablerepo=*")),
             (
                 "ID=almalinux\nID_LIKE=\"rhel centos fedora\"\n",
                 false,
-                Some("dnf remove --assumeyes"),
+                Some("dnf remove --assumeyes --disablerepo=*"),
             ),
             ("ID=fedora\nVARIANT_ID=silverblue\n", true, Some("rpm-ostree uninstall")),
             (
                 "ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n",
                 false,
-                Some("zypper --non-interactive remove"),
+                Some("zypper --non-interactive --no-remote remove"),
             ),
             (
                 "ID=endeavouros\nID_LIKE=arch\n",
