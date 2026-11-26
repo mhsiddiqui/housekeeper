@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use housekeeper_core::{Remover, Source};
+use housekeeper_core::{PackageRemoval, Remover, Source};
 
 use crate::distro::Distro;
 
@@ -85,6 +85,11 @@ fn create<T: LinuxSource>(context: &Context<'_>) -> Arc<dyn Source> {
 /// abilities.
 pub trait PackageTool: Send + Sync {
     fn remover(&self) -> Option<&dyn Remover> {
+        None
+    }
+
+    /// What the root helper removes packages with (D25).
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         None
     }
 }

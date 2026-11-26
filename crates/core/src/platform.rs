@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::helper::PackageRemoval;
 use crate::host::Host;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Launcher, Metainfo, SystemInfo};
@@ -45,6 +46,12 @@ pub trait Platform: Send + Sync {
     /// item's leftover even when an item carries the name.
     fn shared_state_folders(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// How the system's package tool removes packages, for the root helper (D25); `None` when the system has no tool
+    /// Housekeeper can use.
+    fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        None
     }
 
     /// The user's shell startup files (logical paths), whose lines can load an installed tool.

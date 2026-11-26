@@ -183,6 +183,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "housekeeper-helper"
+version = "0.1.0"
+dependencies = [
+ "housekeeper-core",
+ "housekeeper-platform",
+ "serde_json",
+]
+
+[[package]]
 name = "housekeeper-linux"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,22 @@
+[package]
+name = "housekeeper-helper"
+description = "Housekeeper's root helper: carries out one checked change that needs root, started through pkexec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "housekeeper-helper"
+path = "src/main.rs"
+
+[dependencies]
+housekeeper-core.workspace = true
+housekeeper-platform.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
