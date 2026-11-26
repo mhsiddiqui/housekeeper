@@ -49,6 +49,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   packages (the tarball carries them too). `pkexec` starts it, asking for an administrator's password each time; it
   takes one request on standard input and removes only installed packages, named plainly, through the system's own
   package tool. Nothing calls it yet: `housekeeper remove` will.
+- `housekeeper history [--json]`: what Housekeeper changed on this computer, from `history.jsonl` in
+  `~/.local/state/housekeeper`. Each scan (`list`, `show`) also keeps `seen.jsonl` there: every item found, with when
+  it was first and last seen, so the leftovers of something removed outside Housekeeper can be named later. Nothing
+  leaves the computer.
 
 ### Changed
 - Removal plans for dnf and zypper no longer use online repositories (`dnf remove --assumeyes --disablerepo=*`,

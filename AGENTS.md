@@ -11,7 +11,7 @@ part that runs as root).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D41. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D42. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.
@@ -61,7 +61,9 @@ The full "which document to update" table is in [docs/README.md](docs/README.md#
 - **All machine access goes through `Host`**: logical absolute paths (`host.read_to_string`, `host.read_dir`, …) and
   `host.run`/`run_ok` with `Cmd` (argv only, never a shell, always a timeout). No direct `std::fs` or
   `std::process` in sources.
-- **Read-only until Phase 4.** Nothing changes the system until the privileged helper exists (decision D4).
+- **Changes only through reviewed paths.** Housekeeper writes nothing but its own state files (`Host::write_atomic`,
+  `Host::append` under `$XDG_STATE_HOME/housekeeper`, D42); everything else it changes goes through a reviewed plan,
+  the operation queue and, for root, the helper (D4, D40, D41). Sources stay read-only.
 - Prefer stable machine interfaces and files over parsing human output (D1, D12). Each source reports its own failure
   instead of failing the scan (D14).
 - Rust 1.85 is the minimum (`rust-version`): no features newer than that (for example no let-chains).
