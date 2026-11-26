@@ -3,7 +3,7 @@
 - **Date:** 2026-11-26
 - **Branch / PR:** `fix/remove-dry-run`, #33
 - **Plan chunks:** 3.6 (b), done; 3.6 and Phase 3 done
-- **Commits:** 08c958c, f3ce7c6
+- **Commits:** 08c958c, f3ce7c6, 9796160
 
 ## What changed
 The second half of the review of [0041](0041-leftovers.md), after [0042](0042-leftover-matching.md).
