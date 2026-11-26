@@ -45,8 +45,15 @@ the project uses [Semantic Versioning](https://semver.org/).
   `~/.var/app/<id>` (with their size, whether they are your data, and whether another install may still use them),
   and lines in shell startup files that load it. It changes nothing; without `--dry-run` it refuses, because
   removing comes with the root helper. `housekeeper show` counts the leftovers; `--json` has them as `leftovers`.
+- Housekeeper's root helper, `/usr/lib/housekeeper/housekeeper-helper`, and its polkit action are installed with the
+  packages (the tarball carries them too). `pkexec` starts it, asking for an administrator's password each time; it
+  takes one request on standard input and removes only installed packages, named plainly, through the system's own
+  package tool. Nothing calls it yet: `housekeeper remove` will.
 
 ### Changed
+- Removal plans for dnf and zypper no longer use online repositories (`dnf remove --assumeyes --disablerepo=*`,
+  `zypper --non-interactive --no-remote remove`): removing needs only what is installed, and a mirror that is down
+  can no longer stop it.
 - `housekeeper list` shows apps and commands by default. Native packages with neither a menu entry nor a command
   (fonts, firmware, themes, data, plugins) are a new kind, `component`, shown with `--all`. On an Ubuntu desktop the
   default list went from 525 to 210 entries.

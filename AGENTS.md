@@ -6,11 +6,12 @@ section, [docs/](docs/README.md); this file says how to use it and how to keep i
 Housekeeper shows every app installed on a Linux machine, whatever installed it, and (in later phases) removes each one
 the way its own installer intended. Rust workspace: `crates/core` (no OS knowledge), `crates/platform` (picks the OS
 crate for front ends) with one crate per operating system inside it, today `crates/platform/linux` (one `Source` per
-way software gets installed), and `crates/cli` (the `housekeeper` command).
+way software gets installed), `crates/cli` (the `housekeeper` command) and `crates/helper` (the root helper, the only
+part that runs as root).
 
 ## Before you start
 1. Read [docs/README.md](docs/README.md), then:
-   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D39. Do not contradict
+   - [docs/architecture/README.md](docs/architecture/README.md): crates, traits and decisions D1–D40. Do not contradict
      a decision; if one must change, change it there in the same branch and say why.
    - [docs/planning/plan.md](docs/planning/plan.md): find the chunk you are working on and its status.
    - The latest records in [docs/changes/](docs/changes/README.md): what was done last and what was left open.

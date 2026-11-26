@@ -59,6 +59,11 @@ tar -xzf housekeeper-*-x86_64-linux.tar.gz
 install -Dm755 housekeeper-*-x86_64-linux/housekeeper ~/.local/bin/housekeeper
 ```
 
+The packages also install Housekeeper's root helper (`/usr/lib/housekeeper/housekeeper-helper`) and its polkit
+action. Only `pkexec` starts it, asking for an administrator's password each time, and it removes nothing but checked,
+installed packages through the system's own package tool. The tarball carries both files for whoever installs them
+by hand to the same places.
+
 **Uninstall** the same way you installed: `sudo apt remove housekeeper`, `sudo dnf remove housekeeper`,
 `sudo zypper remove housekeeper`, `sudo pacman -R housekeeper`, or delete `~/.local/bin/housekeeper`.
 
@@ -289,8 +294,8 @@ The [build plan](docs/planning/plan.md) has the details. Done: the inventory, id
 duplicates), and removal planning (`remove --dry-run`: the way each installer intended, simulated, protected packages
 blocked, leftovers listed). Next, in order:
 
-1. **Making changes safely:** a small privileged helper started through polkit, an operation queue, a history log, and
-   leftovers moved to the Trash.
+1. **Making changes safely:** the privileged helper started through polkit is in place (it removes checked packages);
+   next an operation queue, a history log, leftovers moved to the Trash, and `housekeeper remove` carrying out plans.
 2. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
 3. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
