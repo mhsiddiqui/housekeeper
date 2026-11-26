@@ -73,6 +73,7 @@ housekeeper list --duplicates                  # apps installed more than once, 
 housekeeper list --json                        # the whole scan as JSON
 housekeeper who vim                            # which source and package a command or file comes from
 housekeeper show code                          # everything about one item: files, what needs it, how it is removed
+housekeeper remove --dry-run code              # how it would be removed and what it would leave behind; changes nothing
 ```
 
 `housekeeper sources` shows what was detected:
@@ -183,8 +184,33 @@ Removal:    through its package manager
   `dnf.conf`), Arch's `base` metapackage and what it depends on, the C library, init system, shell, core commands and
   package managers, snapd and the system's own snaps, and the running kernel (older kernels next to it are not
   protected).
+- **Leftovers** counts what the item would leave behind; `housekeeper remove --dry-run` lists it (below).
 - When a name matches several items, they are listed with their IDs and the command exits with 1; when nothing
   matches, it exits with 2. `--json` prints the same as a document.
+
+### What a removal would take and leave behind
+`housekeeper remove --dry-run` takes the same IDs and names as `show` and prints the removal plan in full, with what
+the item would leave behind. It changes nothing; without `--dry-run` it refuses, because removing comes with
+Housekeeper's root helper (Phase 4).
+
+```text
+$ housekeeper remove --dry-run "Godot Engine"
+Godot Engine
+flatpak:system/app/org.godotengine.Godot/x86_64/stable
+
+Removal:    through its package manager
+            as you: flatpak uninstall --noninteractive --system app/org.godotengine.Godot/x86_64/stable
+Leftovers:  /home/me/.var/app/org.godotengine.Godot (data, 473.5 MB; yours: kept unless you choose it)
+
+Nothing was changed: this is a dry run. Carrying out removals comes with Housekeeper's root helper.
+```
+
+- **Leftovers** are folders named after the item (its name, AppStream ID or menu-entry ID) in `~/.config`,
+  `~/.cache`, `~/.local/share` and `~/.local/state` (or their `XDG_*_HOME` variables), and a Flatpak's
+  `~/.var/app/<id>`. Caches can go; settings and data are yours and are kept unless you choose them. A folder that
+  another installed item could also be using says so, and folders holding installs are never listed.
+- **Shell** lines are lines in `~/.bashrc`, `~/.profile`, the zsh files and fish's `config.fish` that mention the
+  item's own install folder (nvm's `export NVM_DIR="$HOME/.nvm"`). They are not edited yet; remove them by hand.
 
 ### Who installed this?
 `housekeeper who` takes a command on your `PATH` or a path to a file, follows its symlinks, and names the source
@@ -255,16 +281,14 @@ target and [nfpm](https://nfpm.goreleaser.com)). Running the checks and contribu
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Roadmap
-The [build plan](docs/planning/plan.md) has the details. In order:
+The [build plan](docs/planning/plan.md) has the details. Done: the inventory, identity and ownership (`who`, `show`,
+duplicates), and removal planning (`remove --dry-run`: the way each installer intended, simulated, protected packages
+blocked, leftovers listed). Next, in order:
 
-1. **Identity and ownership:** link apps to their desktop entries and icons, group one app installed from several
-   sources, `housekeeper who <command or path>`, `housekeeper show <app>`.
-2. **Removal planning:** for each app, the way its installer intended (its own uninstaller, its package manager, or a
-   reviewed recipe), simulated first, with protected system packages blocked.
-3. **Making changes safely:** a small privileged helper started through polkit, an operation queue, a history log, and
+1. **Making changes safely:** a small privileged helper started through polkit, an operation queue, a history log, and
    leftovers moved to the Trash.
-4. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
-5. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
+2. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
+3. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
 
 ## Documentation

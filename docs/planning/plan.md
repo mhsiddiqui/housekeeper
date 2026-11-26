@@ -43,14 +43,14 @@ source, without root and without changing anything.
 | 2.3 ✅ | Ownership: `OwnerLookup` names the owning packages on native sources (dpkg, rpm, pacman); `housekeeper who <command or path>` follows symlinks and names the source, package and evidence (change 0032) |
 | 2.4 ✅ | `housekeeper show <id>`: details, files, launchers, dependants; how the source knows it is installed, other installs of the same app (change 0035) |
 
-## Phase 3: Removal planning (no changes made) 🚧
+## Phase 3: Removal planning (no changes made) ✅
 | Chunk | Delivers |
 |---|---|
 | 3.1 ✅ | Package tools separate from the package databases (apt, dnf, zypper, rpm-ostree, pacman; decision D24); `Remover` capability and removal tiers 1–6 (own uninstaller → package manager → format convention → recipe → tracked manifest → unknown), each plan step marked as run by the user or by the root helper (D25); plans shown by `housekeeper show` (change 0036) |
 | 3.2 ✅ | Protected packages (dpkg Essential/Protected/Priority required, pacman `base` and its dependencies, dnf `protected_packages`, the running kernel) block the plan, with the reason (change 0037) |
 | 3.3 ✅ | Simulation without root of everything a removal would take: `apt-get --simulate`, `pacman --remove --print`, and for dnf and zypper (whose own simulation needs root on most releases) the RPM database's chain of what requires the package (D33); refusals and protected packages in the result block the plan (change 0038) |
 | 3.4 ✅ | Recipe format (TOML) with an allowlisted action vocabulary (own uninstaller or trash inside the install), holding both detection and removal of a script-installed tool (D26, D34); the manual source's installer list moved into the first ten recipes (change 0039) |
-| 3.5 | Leftover discovery (config, cache, data dirs) and `housekeeper remove --dry-run` |
+| 3.5 ✅ | Leftover discovery (folders named after the item in the XDG config, cache, data and state folders and Flatpak's `~/.var/app`; shell startup lines that load it; D36) and `housekeeper remove --dry-run` (change 0041) |
 
 ## Phase 4: Making changes safely ⬜
 | Chunk | Delivers |
