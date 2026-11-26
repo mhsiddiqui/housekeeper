@@ -52,3 +52,4 @@ links back.
 | [0036](0036-removal-plans.md) | Plan how every installed item is removed | 3.1 | #26 |
 | [0037](0037-protected-packages.md) | Protected packages block their removal, with the reason | 3.2 | #27 |
 | [0038](0038-removal-simulation.md) | Simulate removals without root, and block what would break | 3.3 | #28 |
+| [0039](0039-recipes.md) | Recipes for script-installed tools | 3.4 | `feat/recipes` |
