@@ -18,7 +18,7 @@ const LABEL: usize = 12;
 const NEEDED_BY_SHOWN: usize = 10;
 
 /// How many other packages a simulation names before it only counts them (`--json` lists every one).
-const SIMULATED_SHOWN: usize = 10;
+pub const SIMULATED_SHOWN: usize = 10;
 
 /// The item, then one labelled line per thing known about it. `all_files` lists every file after the summary.
 pub fn render(details: &Details, all_files: bool, out: &mut impl Write) -> io::Result<()> {
@@ -180,13 +180,15 @@ pub fn render_outcome(entry: &HistoryEntry, out: &mut impl Write) -> io::Result<
 }
 
 /// `as root, by Housekeeper's helper: apt-get remove --yes vim`.
-fn step_text(step: &Step) -> String {
+pub fn step_text(step: &Step) -> String {
     let by = match step.by {
         Actor::User => "as you",
         Actor::Helper => "as root, by Housekeeper's helper",
     };
     let what = match &step.action {
-        Action::Run { argv } | Action::RemovePackages { argv, .. } => command_line(argv),
+        Action::Run { argv } | Action::RemovePackages { argv, .. } | Action::InstallPackageFiles { argv, .. } => {
+            command_line(argv)
+        }
         Action::Trash { path } => format!("move {} to the Trash", path.display()),
     };
     format!("{by}: {what}")
