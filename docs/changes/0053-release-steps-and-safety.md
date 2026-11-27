@@ -3,7 +3,7 @@
 - **Date:** 2026-11-28
 - **Branch / PR:** `docs/release-steps-and-safety`, #43
 - **Plan chunks:** none (follow-ups of 0052)
-- **Commits:** (filled in below)
+- **Commits:** 6957375
 
 ## What changed
 - [releasing](../development/releasing.md):
