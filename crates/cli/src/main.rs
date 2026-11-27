@@ -2,12 +2,14 @@
 
 mod filter;
 mod history;
+mod inspect;
 mod show;
 mod table;
 mod who;
 
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Result, bail};
@@ -78,6 +80,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// What a file someone wants to install is (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak bundle, `.snap`,
+    /// AppImage, archive, script), what is inside, and whether it is made for this system. Reads the file; runs and
+    /// installs nothing. Exits 0 when it fits, 1 when it does not, 2 when there is no such file or its format is
+    /// unknown.
+    Inspect {
+        /// The file (`~/Downloads/app.deb`, `./app.AppImage`).
+        file: String,
+        /// Print JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove one installed item the way its installer intended, after showing the plan and asking. Steps that need
     /// root go through Housekeeper's root helper (an administrator's password is asked). Exits 0 when it was removed,
     /// 1 when the name matches several items, 2 when nothing matches, 3 when nothing was changed (blocked, declined,
@@ -131,6 +144,7 @@ fn main() -> Result<ExitCode> {
         }
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
         Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
+        Command::Inspect { file, json } => inspect(&housekeeper, &file, json, &mut out),
         Command::Remove {
             query,
             dry_run,
@@ -345,6 +359,41 @@ fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write)
         }
         Some(found) if found.owner.is_none() => ExitCode::from(1),
         Some(_) => ExitCode::SUCCESS,
+    })
+}
+
+fn inspect(housekeeper: &Housekeeper, file: &str, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    // Core wants absolute paths; a relative one is relative to where the command runs. `components` drops `./`.
+    let path: PathBuf = std::env::current_dir()?.join(file).components().collect();
+    let mut err = io::stderr().lock();
+    let inspection = match housekeeper.inspect(&path) {
+        Ok(Some(inspection)) => inspection,
+        Ok(None) => {
+            writeln!(
+                err,
+                "housekeeper: {} is no installer format Housekeeper knows",
+                path.display()
+            )?;
+            return Ok(ExitCode::from(2));
+        }
+        Err(error) => {
+            writeln!(err, "housekeeper: {error}")?;
+            return Ok(ExitCode::from(2));
+        }
+    };
+    if json {
+        serde_json::to_writer_pretty(&mut *out, &inspection)?;
+        writeln!(out)?;
+    } else {
+        inspect::render(&inspection, housekeeper.system(), out)?;
+    }
+    for warning in &inspection.warnings {
+        writeln!(err, "warning: {warning}")?;
+    }
+    Ok(if matches!(inspection.fit, housekeeper_core::Fit::Fits) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     })
 }
 
