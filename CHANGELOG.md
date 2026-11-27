@@ -11,8 +11,15 @@ the project uses [Semantic Versioning](https://semver.org/).
   name, version and processor where the file or the format's own tool says (`dpkg-deb`, `rpm`, `bsdtar`,
   `unsquashfs`), the source that would list it, and whether it fits this system: another distribution's package, a
   format whose tool is not here (Flatpak, snapd) or a program for another processor does not. It never runs or
-  unpacks the file. Exits 0 when it fits, 1 when it does not, 2 for no such file or an unknown format; `--json` for
-  scripts.
+  unpacks the file. `--json` for scripts.
+- `housekeeper inspect` says how a file that fits would be installed, without installing it: `.deb`, `.rpm` and Arch
+  packages through apt, dnf, zypper, rpm-ostree (after a restart) or pacman, as root through Housekeeper's helper;
+  Flatpak references and bundles with `flatpak install --user`; snaps with `snap ack` and the store's `.assert` file
+  beside them, or with `--dangerous` (flagged) without one. It shows what the package manager would install, need from
+  its repositories or remove with it, asked without root (`apt-get --simulate`, `rpm -U --test`, `pacman --print`),
+  and the version installed now that it would replace. A refusal (a conflict, a newer version installed, an installed
+  package it would break) or a protected package it would remove blocks the install. Exits 0 when the file fits and
+  nothing blocks it, 1 otherwise, 2 for no such file or an unknown format; `--json` has the plan as `install`.
 
 ## 0.2.0 (2026-11-26)
 
