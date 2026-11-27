@@ -97,12 +97,20 @@ housekeeper history | grep -q '^Housekeeper has not changed anything' || fail "h
 
 if [ "$installed" = yes ]; then
   # The package just installed is this system's own format, read with the format's tool (dpkg-deb, rpm, bsdtar),
-  # built for this processor.
+  # built for this processor. Its install plan goes through the package tool and knows this version is installed
+  # already; rpm refuses to install it again, so on RPM systems the plan is blocked (exit 1).
   version=$(housekeeper --version | cut -d' ' -f2)
-  housekeeper inspect "$pkg" > /tmp/inspect.txt \
+  code=0
+  housekeeper inspect "$pkg" > /tmp/inspect.txt || code=$?
+  [ "$code" -le 1 ] || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect exited with $code for $pkg"; }
+  grep -q '^Fits: *yes$' /tmp/inspect.txt \
     || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect says $pkg does not fit this system"; }
   grep -q "^Package: *housekeeper $version" /tmp/inspect.txt \
     || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not read the name and version inside $pkg"; }
+  grep -q "^Install: *as root, by Housekeeper's helper: $tool" /tmp/inspect.txt \
+    || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not plan installing $pkg with $tool"; }
+  grep -q 'this version is installed already' /tmp/inspect.txt \
+    || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not see that $pkg is installed already"; }
 
   # Housekeeper sees itself, installed by the native package manager.
   housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::command::RunError;
 use crate::host::Host;
+use crate::install::FileInstaller;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Availability, Package, SourceInfo};
 use crate::remove::Remover;
@@ -43,6 +44,11 @@ pub trait Source: Send + Sync {
     /// "How is this package removed?", for sources that know (decision D8). Without it, nothing records how its
     /// packages were installed. It only plans; nothing is removed until Phase 4.
     fn remover(&self) -> Option<&dyn Remover> {
+        None
+    }
+
+    /// "How is a file of your formats installed?", for sources whose items come from files people download (D46).
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
         None
     }
 

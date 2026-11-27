@@ -138,6 +138,9 @@ impl Housekeeper {
             (Actor::Helper, Action::Run { .. }) => StepOutcome::Failed {
                 reason: "the root helper does not run commands it is given".into(),
             },
+            (_, Action::InstallPackageFiles { .. }) => StepOutcome::Failed {
+                reason: "installing is not part of a removal".into(),
+            },
         }
     }
 

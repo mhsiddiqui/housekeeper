@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Actor, Availability, Cmd, Dependants, FilePackage, Host, InstallReason, LeftoverKind, Package, PackageKind,
-    RemovalPlan, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, Cmd, Dependants, FileInstaller, FilePackage, Host, InstallFile, InstallPlan, InstallReason,
+    LeftoverKind, Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope, Source, SourceError, SourceId,
+    SourceInfo, SourceKind, Step, Tier,
 };
 
 use super::version_line;
-use crate::formats::{field, nothing_inside};
+use crate::formats::{field, nothing_inside, path_arg};
 use crate::provider::{Context, FileFormat, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("flatpak");
@@ -124,6 +125,48 @@ impl Source for FlatpakSource {
 
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        Some(self)
+    }
+}
+
+impl FileInstaller for FlatpakSource {
+    /// For the user, as the user: no root, and it goes in the user's installation like the product's default (the
+    /// spec's `flatpak install --user`).
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        let (flag, caution) = match file.format {
+            "flatpakref" => {
+                let origin = file
+                    .package
+                    .and_then(|package| package.origin.as_deref())
+                    .unwrap_or("the repository it names");
+                (
+                    "--from",
+                    format!("it is downloaded from {origin}, with the runtime it needs"),
+                )
+            }
+            "flatpak-bundle" => (
+                "--bundle",
+                "the runtime it needs must be installed already, or come from a remote that is set up".to_string(),
+            ),
+            other => {
+                return Err(SourceError::parse(
+                    "Flatpak file format",
+                    format!("not Flatpak's: {other}"),
+                ));
+            }
+        };
+        let argv = [
+            "flatpak".to_string(),
+            "install".into(),
+            "--user".into(),
+            "--noninteractive".into(),
+            flag.into(),
+            path_arg(host, file.path),
+        ];
+        Ok(InstallPlan::new(vec![Step::run(Actor::User, argv)]).caution(caution))
     }
 }
 
@@ -424,9 +467,7 @@ org.gnome.Builder\tx86_64\tstable\tsystem\torg.gnome.Platform/x86_64/47
     fn removal_argv(id: &str) -> Vec<Step> {
         let packages = scan_with(&[]);
         let fixture = Fixture::new();
-        let plan = FlatpakSource
-            .plan(&fixture.host(FakeRunner::new()), find(&packages, id))
-            .unwrap();
+        let plan = Remover::plan(&FlatpakSource, &fixture.host(FakeRunner::new()), find(&packages, id)).unwrap();
         assert_eq!(plan.tier, Tier::PackageManager);
         assert!(plan.blockers.is_empty());
         plan.steps
@@ -516,6 +557,36 @@ org.gnome.Builder\tx86_64\tstable\tsystem\torg.gnome.Platform/x86_64/47
         fn without_flatpak_a_flatpakref_does_not_fit() {
             let found = inspect("ID=ubuntu\n", "calc.flatpakref", REF.as_bytes(), |_| FakeRunner::new()).unwrap();
             assert!(matches!(found.fit, Fit::SourceMissing { .. }), "{:?}", found.fit);
+        }
+
+        #[test]
+        fn a_flatpakref_is_installed_for_the_user_and_names_the_copy_it_replaces() {
+            let flatseal = "[Flatpak Ref]\nName=com.github.tchx84.Flatseal\nBranch=stable\n\
+                            Url=https://dl.flathub.org/repo/\n";
+            let found = inspect("ID=fedora\n", "flatseal.flatpakref", flatseal.as_bytes(), |_| {
+                FakeRunner::new()
+                    .respond("flatpak --version", "Flatpak 1.16.0\n")
+                    .respond(&format!("flatpak list {COLUMNS}"), LISTING)
+            })
+            .unwrap();
+            let plan = found.install.unwrap();
+            let [step] = &plan.steps[..] else {
+                panic!("{:?}", plan.steps);
+            };
+            assert_eq!(step.by, Actor::User);
+            let housekeeper_core::Action::Run { argv } = &step.action else {
+                panic!("{:?}", step.action);
+            };
+            assert_eq!(
+                &argv[..5],
+                ["flatpak", "install", "--user", "--noninteractive", "--from"]
+            );
+            assert!(argv[5].ends_with("/Downloads/flatseal.flatpakref"), "{argv:?}");
+            assert_eq!(plan.replaces.as_deref(), Some("2.3.0"));
+            assert_eq!(
+                plan.cautions,
+                ["it is downloaded from https://dl.flathub.org/repo/, with the runtime it needs"]
+            );
         }
     }
 }

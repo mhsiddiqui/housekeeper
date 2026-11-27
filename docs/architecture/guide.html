@@ -624,6 +624,7 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/core/src/source.rs</code>, <code>platform.rs</code></td><td>The <code>Source</code> and <code>Platform</code> traits</td></tr>
   <tr><td><code>crates/core/src/remove.rs</code></td><td><code>Remover</code> and <code>RemovalPlan</code>: tiers, steps, who runs each (D31)</td></tr>
   <tr><td><code>crates/core/src/inspect.rs</code></td><td><code>Housekeeper::inspect</code>: what an installer file is and whether it fits this system (D45)</td></tr>
+  <tr><td><code>crates/core/src/install.rs</code></td><td><code>FileInstaller</code> and <code>InstallPlan</code>: how a file that fits would be installed, simulated without root (D46)</td></tr>
   <tr><td><code>crates/core/src/host.rs</code>, <code>command.rs</code></td><td><code>Host</code> and <code>CommandRunner</code></td></tr>
   <tr><td><code>crates/core/src/inventory.rs</code></td><td><code>Housekeeper</code>: the parallel scan</td></tr>
   <tr><td><code>crates/core/src/testing.rs</code></td><td><code>Fixture</code> and <code>FakeRunner</code> for tests</td></tr>
@@ -640,7 +641,7 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for; each OS crate sits beside it in <code>crates/platform/&lt;os&gt;/</code> (D35)</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
   <tr><td><code>crates/helper/src/main.rs</code>, <code>crates/core/src/helper.rs</code></td><td>The root helper that <code>pkexec</code> starts: one checked request in, one reply out (D40)</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D45)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D46)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

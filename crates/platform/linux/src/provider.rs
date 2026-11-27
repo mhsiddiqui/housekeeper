@@ -15,7 +15,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use housekeeper_core::{FilePackage, Host, PackageLock, PackageRemoval, Remover, Source, SourceError};
+use housekeeper_core::{FileInstaller, FilePackage, Host, PackageLock, PackageRemoval, Remover, Source, SourceError};
 
 use crate::distro::Distro;
 
@@ -120,6 +120,11 @@ pub trait PackageTool: Send + Sync {
 
     /// What the root helper removes packages with (D25).
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        None
+    }
+
+    /// How the system's own package files are installed (D46).
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
         None
     }
 

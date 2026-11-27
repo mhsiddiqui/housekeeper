@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package, PackageKind,
-    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileInstaller, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package,
+    PackageKind, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
@@ -142,6 +142,10 @@ impl Source for DpkgSource {
 
     fn remover(&self) -> Option<&dyn Remover> {
         self.tool.as_deref().and_then(PackageTool::remover)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        self.tool.as_deref().and_then(PackageTool::file_installer)
     }
 }
 
@@ -656,6 +660,49 @@ old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
 
             let s390x = deb("code\t1.95.3-1731513102\ts390x\n");
             assert_eq!(s390x.fit, Fit::OtherArch { arch: "s390x".into() });
+        }
+
+        #[test]
+        fn apt_installs_it_and_a_protected_package_it_would_remove_blocks_it() {
+            let inspection = inspect(UBUNTU, "sysvinit.deb", b"!<arch>\ndebian-binary   ", |real| {
+                FakeRunner::new()
+                    .respond(
+                        "dpkg-query --version",
+                        "Debian dpkg-query package management program version 1.22.6\n",
+                    )
+                    .respond(
+                        &format!("dpkg-deb --show {DEB_FORMAT} {real}"),
+                        "sysvinit-core\t3.08-6\tall\n",
+                    )
+                    .respond(&format!("dpkg-query --show {FORMAT}"), LISTING)
+                    .respond(
+                        &format!("apt-get --simulate install {real}"),
+                        "NOTE: This is only a simulation!\n\
+                         Inst libselinux1 [3.5-2] (3.7-3 Debian:stable [amd64])\n\
+                         Remv init [1.66ubuntu1]\n\
+                         Inst sysvinit-core (3.08-6 local-deb [amd64])\n",
+                    )
+                    .respond(
+                        "dpkg-query --show --showformat=${binary:Package}\\t${Architecture}\\n init",
+                        "init\tamd64\n",
+                    )
+            })
+            .unwrap();
+            let plan = inspection.install.unwrap();
+            let housekeeper_core::Action::InstallPackageFiles { tool, argv, .. } = &plan.steps[0].action else {
+                panic!("{:?}", plan.steps);
+            };
+            assert_eq!(tool, "apt");
+            assert_eq!(&argv[..3], ["apt-get", "install", "--yes"]);
+            let simulation = plan.simulation.as_ref().unwrap();
+            assert_eq!(simulation.installs, ["libselinux1 3.7-3", "sysvinit-core 3.08-6"]);
+            assert_eq!(simulation.removes, ["init"]);
+            assert_eq!(plan.blockers.len(), 1, "{:?}", plan.blockers);
+            assert!(
+                plan.blockers[0].starts_with("it would remove init, which is protected"),
+                "{:?}",
+                plan.blockers
+            );
         }
     }
 }

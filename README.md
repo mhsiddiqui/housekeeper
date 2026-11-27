@@ -274,25 +274,40 @@ It exits with 0 when an owner is found, 1 when the file exists but nothing on th
 by hand or by a script, outside the folders Housekeeper reads), and 2 when there is no such command or file.
 
 ### What is this file?
-`housekeeper inspect` takes a file you downloaded and says what it is, what is inside and whether it is made for this
-system, before anything installs it. It knows `.deb`, `.rpm`, Arch packages (`.pkg.tar.zst`), `.flatpakref`, Flatpak
-bundles, `.snap`, AppImages, archives (`.tar.*`, `.zip`), scripts and `.run` programs, by their name and their first
-bytes, so a renamed file is still told apart. It reads the package's name, version and processor from the file or
-with the format's own tool where the system has it (`dpkg-deb`, `rpm`, `bsdtar`, `unsquashfs`); it never runs or
-unpacks the file.
+`housekeeper inspect` takes a file you downloaded and says what it is, what is inside, whether it is made for this
+system and how it would be installed, before anything installs it. It knows `.deb`, `.rpm`, Arch packages
+(`.pkg.tar.zst`), `.flatpakref`, Flatpak bundles, `.snap`, AppImages, archives (`.tar.*`, `.zip`), scripts and `.run`
+programs, by their name and their first bytes, so a renamed file is still told apart. It reads the package's name,
+version and processor from the file or with the format's own tool where the system has it (`dpkg-deb`, `rpm`,
+`bsdtar`, `unsquashfs`); it never runs or unpacks the file.
 
 ```text
-$ housekeeper inspect ~/Downloads/hello.rpm
-/home/me/Downloads/hello.rpm
+$ housekeeper inspect ~/Downloads/cowsay.rpm
+/home/me/Downloads/cowsay.rpm
 Format:    RPM package
 Told by:   RPM's lead (`ED AB EE DB`), marked as a binary package
-Package:   hello 2.12.2-2.fc43
-Fits:      no, it is a package for fedora and suse systems; this is Ubuntu 26.04.1 LTS
+Package:   cowsay 3.8.4-3.fc43
+Source:    RPM packages
+Fits:      yes
+Install:   as root, by Housekeeper's helper: dnf install --assumeyes /home/me/Downloads/cowsay.rpm
+           checked with the RPM database (`rpm -U --test`):
+             installs 1 package: cowsay 3.8.4-3.fc43
+             needs from the repositories 8 requirements: /usr/bin/perl, perl(Cwd), perl(File::Basename), …
 ```
 
-It exits with 0 when the file fits, 1 when it does not (another distribution's package, a `.snap` without snapd, a
-program built for another processor), and 2 when there is no such file or Housekeeper does not know its format.
-`--json` prints the same as a document. Installing what fits comes next (see the roadmap).
+For a file that fits, the plan is the one its format calls for: the distribution's package tool for `.deb`, `.rpm` and
+Arch packages (as root, through Housekeeper's helper; on Silverblue `rpm-ostree install`, after a restart),
+`flatpak install --user` for Flatpak files, and `snap install` for snaps: with the store's `.assert` file next to it
+(as `snap download` saves it) it is acknowledged first, without one only `--dangerous` installs it, which the plan
+flags. The package manager is asked, without root, what would come with it: apt and pacman name every package, the
+RPM database names what the repositories must supply. The plan also says which installed version it would replace.
+AppImages, archives and scripts have no plan yet.
+
+It exits with 0 when the file fits and nothing blocks installing it, 1 when it does not fit (another distribution's
+package, a `.snap` without snapd, a program built for another processor) or the package manager refuses (a conflict,
+a newer version installed) or it would remove a protected package, and 2 when there is no such file or Housekeeper
+does not know its format. `--json` prints the same as a document, with the plan as `install`. Installing is the next
+step (see the roadmap).
 
 ### JSON output
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
@@ -358,7 +373,7 @@ listed), and removing safely (`housekeeper remove`: a root helper started throug
 waits for busy package managers, leftovers moved to the Trash, a history). Next, in order:
 
 1. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
-   Telling what such a file is and whether it fits (`housekeeper inspect`) is done.
+   Telling what such a file is, whether it fits and how it would be installed (`housekeeper inspect`) is done.
 2. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
 

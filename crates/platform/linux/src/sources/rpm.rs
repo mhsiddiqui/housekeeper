@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package, PackageKind,
-    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileInstaller, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package,
+    PackageKind, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
@@ -255,6 +255,10 @@ impl Source for RpmSource {
 
     fn remover(&self) -> Option<&dyn Remover> {
         self.tool.as_deref().and_then(PackageTool::remover)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        self.tool.as_deref().and_then(PackageTool::file_installer)
     }
 }
 
@@ -874,20 +878,79 @@ sudo-1.9.15-5.p5.fc41.x86_64\n"
         }
 
         #[test]
-        fn on_fedora_rpm_reads_the_header() {
-            let file = lead(0, "hello-2.12.2-2.fc43");
-            let rpm = inspect("ID=fedora\n", "hello.rpm", &file, |real| {
+        fn on_fedora_dnf_installs_it_and_the_rpm_database_says_what_it_needs() {
+            let file = lead(0, "vim-enhanced-9.1.900-1.fc41");
+            let inspection = inspect("ID=fedora\n", "vim.rpm", &file, |real| {
                 FakeRunner::new()
                     .respond("rpm --version", "RPM version 4.20.0\n")
+                    .respond(&command(), LISTING)
                     .respond(
                         &format!("rpm -qp --nosignature --nodigest --queryformat {RPM_FILE_FORMAT} {real}"),
-                        "hello\t2.12.2-2.fc43\tx86_64\n",
+                        "vim-enhanced\t2:9.1.900-1.fc41\tnoarch\n",
+                    )
+                    .respond_with(
+                        &format!("rpm -U --test --nosignature --nodigest {real}"),
+                        Output {
+                            code: Some(1),
+                            stdout: String::new(),
+                            stderr: "error: Failed dependencies:\n\
+                                     \tvim-common = 2:9.1.900-1.fc41 is needed by vim-enhanced-2:9.1.900-1.fc41.x86_64\n\
+                                     \tlibgpm.so.2()(64bit) is needed by vim-enhanced-2:9.1.900-1.fc41.x86_64\n"
+                                .into(),
+                        },
                     )
             })
             .unwrap();
-            assert_eq!(rpm.source.map(|source| source.id), Some(ID));
-            let package = rpm.package.unwrap();
-            assert_eq!(package.arch.as_deref(), Some("x86_64"));
+            assert_eq!(inspection.fit, housekeeper_core::Fit::Fits);
+            let plan = inspection.install.unwrap();
+            assert_eq!(plan.steps.len(), 1);
+            assert_eq!(plan.steps[0].by, housekeeper_core::Actor::Helper);
+            let housekeeper_core::Action::InstallPackageFiles { tool, argv, .. } = &plan.steps[0].action else {
+                panic!("{:?}", plan.steps[0].action);
+            };
+            assert_eq!(tool, "dnf");
+            assert_eq!(&argv[..3], ["dnf", "install", "--assumeyes"]);
+            assert_eq!(plan.replaces.as_deref(), Some("2:9.1.825-1.fc41"));
+            assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+            let simulation = plan.simulation.unwrap();
+            assert_eq!(
+                simulation.needs,
+                ["vim-common = 2:9.1.900-1.fc41", "libgpm.so.2()(64bit)"]
+            );
+            assert_eq!(simulation.installs, ["vim-enhanced 2:9.1.900-1.fc41"]);
+        }
+
+        #[test]
+        fn an_installed_package_the_new_version_would_break_blocks_it() {
+            let file = lead(0, "glibc-2.41-1.fc41");
+            let inspection = inspect("ID=fedora\n", "glibc.rpm", &file, |real| {
+                FakeRunner::new()
+                    .respond("rpm --version", "RPM version 4.20.0\n")
+                    .respond(&command(), LISTING)
+                    .respond(
+                        &format!("rpm -qp --nosignature --nodigest --queryformat {RPM_FILE_FORMAT} {real}"),
+                        "glibc\t2.41-1.fc41\tnoarch\n",
+                    )
+                    .respond_with(
+                        &format!("rpm -U --test --nosignature --nodigest {real}"),
+                        Output {
+                            code: Some(1),
+                            stdout: String::new(),
+                            stderr: "error: Failed dependencies:\n\
+                                     \tglibc = 2.40-9.fc41 is needed by (installed) glibc-langpack-en-2.40-9.fc41.x86_64\n"
+                                .into(),
+                        },
+                    )
+            })
+            .unwrap();
+            let plan = inspection.install.unwrap();
+            assert_eq!(
+                plan.blockers,
+                [
+                    "the package manager refuses: glibc = 2.40-9.fc41 is needed by (installed) \
+                  glibc-langpack-en-2.40-9.fc41.x86_64"
+                ]
+            );
         }
 
         #[test]

@@ -1,10 +1,11 @@
 //! dnf, which changes the RPM database on Fedora, RHEL and their rebuilds.
 
 use housekeeper_core::{
-    Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+    FileInstaller, Host, InstallFile, InstallPlan, InstallSimulation, InstallSimulator, LockHolder, Package,
+    PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
 };
 
-use super::{RPM_LOCKS, command_for, removal, rpm_installed, rpm_simulation};
+use super::{RPM_LOCKS, command_for, installation, removal, rpm_install_simulation, rpm_installed, rpm_simulation};
 use crate::lock;
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
@@ -31,8 +32,30 @@ impl PackageTool for Dnf {
         Some(self)
     }
 
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        Some(self)
+    }
+
     fn lock(&self) -> Option<&dyn PackageLock> {
         Some(self)
+    }
+}
+
+impl FileInstaller for Dnf {
+    /// `dnf install` with the file's path, which installs what it requires from the repositories too.
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        Ok(installation(self, host, file, &["dnf", "install", "--assumeyes"]))
+    }
+
+    fn simulator(&self) -> Option<&dyn InstallSimulator> {
+        Some(self)
+    }
+}
+
+/// dnf4 will not resolve a transaction without root, so the RPM database answers (D33).
+impl InstallSimulator for Dnf {
+    fn simulate(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallSimulation, SourceError> {
+        rpm_install_simulation(host, file)
     }
 }
 

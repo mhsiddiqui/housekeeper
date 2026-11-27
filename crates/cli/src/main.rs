@@ -81,9 +81,9 @@ enum Command {
         json: bool,
     },
     /// What a file someone wants to install is (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak bundle, `.snap`,
-    /// AppImage, archive, script), what is inside, and whether it is made for this system. Reads the file; runs and
-    /// installs nothing. Exits 0 when it fits, 1 when it does not, 2 when there is no such file or its format is
-    /// unknown.
+    /// AppImage, archive, script), what is inside, whether it is made for this system, and how it would be installed
+    /// (what the package manager would add or remove with it). Reads the file; runs and installs nothing. Exits 0 when
+    /// it fits, 1 when it does not or its install is blocked, 2 when there is no such file or its format is unknown.
     Inspect {
         /// The file (`~/Downloads/app.deb`, `./app.AppImage`).
         file: String,
@@ -390,7 +390,11 @@ fn inspect(housekeeper: &Housekeeper, file: &str, json: bool, out: &mut impl Wri
     for warning in &inspection.warnings {
         writeln!(err, "warning: {warning}")?;
     }
-    Ok(if matches!(inspection.fit, housekeeper_core::Fit::Fits) {
+    let blocked = inspection
+        .install
+        .as_ref()
+        .is_some_and(|plan| !plan.blockers.is_empty());
+    Ok(if inspection.fit == housekeeper_core::Fit::Fits && !blocked {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)
