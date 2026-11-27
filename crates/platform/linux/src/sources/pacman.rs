@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package, PackageKind,
-    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileInstaller, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package,
+    PackageKind, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::formats::{field, is_compressed, is_tar, machine, path_arg};
@@ -183,6 +183,10 @@ impl Source for PacmanSource {
 
     fn remover(&self) -> Option<&dyn Remover> {
         self.tool.as_deref().and_then(PackageTool::remover)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        self.tool.as_deref().and_then(PackageTool::file_installer)
     }
 }
 

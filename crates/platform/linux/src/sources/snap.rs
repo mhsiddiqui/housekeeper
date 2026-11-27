@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use housekeeper_core::{
-    Actor, Availability, Cmd, Dependants, FilePackage, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
-    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, Cmd, Dependants, FileInstaller, FilePackage, Host, InstallFile, InstallPlan, InstallReason,
+    Package, PackageKind, RemovalPlan, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo,
+    SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
@@ -114,6 +115,10 @@ impl Source for SnapSource {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        Some(self)
+    }
 }
 
 impl Remover for SnapSource {
@@ -122,6 +127,33 @@ impl Remover for SnapSource {
         Ok(RemovalPlan::new(
             Tier::PackageManager,
             vec![Step::run(Actor::User, ["snap", "remove", package.name.as_str()])],
+        ))
+    }
+}
+
+impl FileInstaller for SnapSource {
+    /// With the store's signatures for it (the `.assert` file `snap download` saves next to it), they are
+    /// acknowledged first and the snap installs as the store's. Without them only `--dangerous` installs it, which
+    /// skips the signature check; the plan says so. As the user: snapd asks for authorisation itself.
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        let snap = path_arg(host, file.path);
+        let assertions = file.path.with_extension("assert");
+        if host.exists(&assertions) {
+            return Ok(InstallPlan::new(vec![
+                Step::run(
+                    Actor::User,
+                    ["snap".to_string(), "ack".into(), path_arg(host, &assertions)],
+                ),
+                Step::run(Actor::User, ["snap".to_string(), "install".into(), snap]),
+            ]));
+        }
+        Ok(InstallPlan::new(vec![Step::run(
+            Actor::User,
+            ["snap".to_string(), "install".into(), "--dangerous".into(), snap],
+        )])
+        .caution(
+            "installed with --dangerous: no Snap Store signature (no .assert file next to it), so nobody vouches \
+                     for where it came from",
         ))
     }
 }
@@ -443,9 +475,12 @@ mod tests {
     fn removal_runs_snap_remove_as_the_user() {
         let packages = scan();
         let fixture = Fixture::new();
-        let plan = SnapSource
-            .plan(&fixture.host(FakeRunner::new()), find(&packages, "firefox"))
-            .unwrap();
+        let plan = Remover::plan(
+            &SnapSource,
+            &fixture.host(FakeRunner::new()),
+            find(&packages, "firefox"),
+        )
+        .unwrap();
         assert_eq!(
             plan,
             RemovalPlan::new(
@@ -600,5 +635,50 @@ mod tests {
         assert_eq!(only_architecture("architectures: [amd64, arm64]\n"), None);
         assert_eq!(only_architecture("architectures: [all]\n"), Some("all"));
         assert_eq!(only_architecture("name: x\n"), None);
+    }
+
+    #[test]
+    fn a_snap_with_its_store_signatures_is_acknowledged_and_one_without_is_flagged_dangerous() {
+        let fixture = Fixture::new();
+        fixture.file("/home/user/Downloads/hello_29.snap", "hsqs");
+        fixture.file("/home/user/Downloads/hello_29.assert", "type: account-key");
+        fixture.file("/home/user/Downloads/local_1.snap", "hsqs");
+        let host = fixture.host(FakeRunner::new());
+        let plan = |name: &str| {
+            let path = Path::new("/home/user/Downloads").join(name);
+            let file = InstallFile {
+                path: &path,
+                format: "snap",
+                package: None,
+            };
+            FileInstaller::plan(&SnapSource, &host, &file).unwrap()
+        };
+        let real = |name: &str| path_arg(&host, &Path::new("/home/user/Downloads").join(name));
+        let signed = plan("hello_29.snap");
+        assert_eq!(
+            signed.steps,
+            [
+                Step::run(Actor::User, ["snap".to_string(), "ack".into(), real("hello_29.assert")]),
+                Step::run(
+                    Actor::User,
+                    ["snap".to_string(), "install".into(), real("hello_29.snap")]
+                ),
+            ]
+        );
+        assert!(signed.cautions.is_empty());
+        let local = plan("local_1.snap");
+        assert_eq!(
+            local.steps,
+            [Step::run(
+                Actor::User,
+                [
+                    "snap".to_string(),
+                    "install".into(),
+                    "--dangerous".into(),
+                    real("local_1.snap")
+                ]
+            )]
+        );
+        assert_eq!(local.cautions.len(), 1);
     }
 }

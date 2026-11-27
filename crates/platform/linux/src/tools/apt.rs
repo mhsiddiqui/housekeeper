@@ -1,11 +1,12 @@
 //! apt, which changes the Debian package database (Debian, Ubuntu, Mint…).
 
 use housekeeper_core::{
-    Cmd, Host, LockHolder, Package, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator,
-    SourceError,
+    Cmd, FileInstaller, Host, InstallFile, InstallPlan, InstallSimulation, InstallSimulator, LockHolder, Package,
+    PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
 };
 
-use super::{command_for, removal};
+use super::{command_for, installation, removal};
+use crate::formats::path_arg;
 use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
@@ -29,6 +30,10 @@ impl PackageTool for Apt {
     }
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
         Some(self)
     }
 
@@ -119,6 +124,52 @@ impl Simulator for Apt {
     }
 }
 
+impl FileInstaller for Apt {
+    /// `apt-get install` with the file's path, which installs what it depends on from the repositories too.
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        Ok(installation(self, host, file, &["apt-get", "install", "--yes"]))
+    }
+
+    fn simulator(&self) -> Option<&dyn InstallSimulator> {
+        Some(self)
+    }
+}
+
+/// `apt-get --simulate install`, which needs no root: the packages apt would install (the file's among them) and
+/// those it would remove because they conflict.
+impl InstallSimulator for Apt {
+    fn simulate(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallSimulation, SourceError> {
+        let cmd = Cmd::new("apt-get")
+            .args(["--simulate", "install"])
+            .arg(path_arg(host, file.path));
+        let output = host.run(&cmd)?;
+        let by = "`apt-get --simulate install`".to_string();
+        if output.code == Some(100) {
+            let refused = errors(&output.stderr);
+            if !refused.is_empty() {
+                return Ok(InstallSimulation {
+                    by,
+                    refused,
+                    ..InstallSimulation::default()
+                });
+            }
+        }
+        if output.code != Some(0) {
+            return Err(SourceError::CommandFailed {
+                command: cmd.to_string(),
+                code: output.code,
+                stderr: output.stderr.trim().to_string(),
+            });
+        }
+        Ok(InstallSimulation {
+            by,
+            installs: installed(&output.stdout),
+            removes: resolve(host, &removed(&output.stdout), "")?,
+            ..InstallSimulation::default()
+        })
+    }
+}
+
 /// apt's `E:` messages, each with the indented lines that explain it (apt 3's solver says which package forced the
 /// refusal) joined into one line.
 fn errors(stderr: &str) -> Vec<String> {
@@ -145,14 +196,25 @@ fn removed(stdout: &str) -> Vec<&str> {
         .collect()
 }
 
-/// dpkg ids for the names apt printed, the item first. apt leaves out the architecture of the system's own packages,
-/// while dpkg's id carries it for packages installed for several architectures (`libgcc-s1:amd64`); dpkg resolves
-/// those.
+/// dpkg ids for the names apt printed, the item first.
 fn ids(host: &Host, package: &Package, names: &[&str]) -> Result<Vec<String>, SourceError> {
+    let mut ids = vec![package.id.clone()];
+    for id in resolve(host, names, &package.id)? {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// dpkg ids for installed packages apt named, in apt's order, `known` (already an id) left as it is. apt leaves out
+/// the architecture of the system's own packages, while dpkg's id carries it for packages installed for several
+/// architectures (`libgcc-s1:amd64`); dpkg resolves those.
+fn resolve(host: &Host, names: &[&str], known: &str) -> Result<Vec<String>, SourceError> {
     let bare: Vec<&str> = names
         .iter()
         .copied()
-        .filter(|name| !name.contains(':') && *name != package.id)
+        .filter(|name| !name.contains(':') && *name != known)
         .collect();
     let listing = if bare.is_empty() {
         String::new()
@@ -177,9 +239,9 @@ fn ids(host: &Host, package: &Package, names: &[&str]) -> Result<Vec<String>, So
     } else {
         None
     };
-    let mut ids = vec![package.id.clone()];
+    let mut ids: Vec<String> = Vec::new();
     for name in names {
-        let id = if name.contains(':') {
+        let id = if name.contains(':') || *name == known {
             name.to_string()
         } else {
             let own_arch = native.as_deref().map(|arch| format!("{name}:{arch}"));
@@ -194,6 +256,19 @@ fn ids(host: &Host, package: &Package, names: &[&str]) -> Result<Vec<String>, So
         }
     }
     Ok(ids)
+}
+
+/// `name version` for each `Inst <name> [<old version>] (<version> <origin>…)` line, in apt's order.
+fn installed(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter_map(|line| line.strip_prefix("Inst "))
+        .filter_map(|rest| {
+            let name = rest.split_whitespace().next()?;
+            let version = rest.split_once('(')?.1.split_whitespace().next()?;
+            Some(format!("{name} {version}"))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -220,7 +295,7 @@ mod tests {
             )
             .respond("dpkg --print-architecture", "amd64\n");
         let host = Fixture::new().host(runner);
-        let simulation = Apt.simulate(&host, &dpkg("libgcc-s1:amd64", "libgcc-s1")).unwrap();
+        let simulation = Simulator::simulate(&Apt, &host, &dpkg("libgcc-s1:amd64", "libgcc-s1")).unwrap();
         assert_eq!(
             simulation.removes,
             ["libgcc-s1:amd64", "passwd", "libstdc++6:i386", "libsemanage2:amd64"]
@@ -243,7 +318,7 @@ mod tests {
             },
         );
         let host = Fixture::new().host(runner);
-        let simulation = Apt.simulate(&host, &dpkg("python3", "python3")).unwrap();
+        let simulation = Simulator::simulate(&Apt, &host, &dpkg("python3", "python3")).unwrap();
         assert!(simulation.removes.is_empty());
         assert_eq!(
             simulation.refused,

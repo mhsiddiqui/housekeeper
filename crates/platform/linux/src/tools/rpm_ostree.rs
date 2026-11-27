@@ -1,9 +1,12 @@
 //! rpm-ostree, which layers packages on the image of Fedora Silverblue, Kinoite, Bazzite and the other Fedora Atomic
 //! systems (decision D3).
 
-use housekeeper_core::{Host, InstallReason, Package, PackageRemoval, RemovalPlan, Remover, SourceError, Tier};
+use housekeeper_core::{
+    FileInstaller, Host, InstallFile, InstallPlan, InstallReason, InstallSimulation, InstallSimulator, Package,
+    PackageRemoval, RemovalPlan, Remover, SourceError, Tier,
+};
 
-use super::{command_for, removal, rpm_installed};
+use super::{command_for, installation, removal, rpm_install_simulation, rpm_installed};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct RpmOstree;
@@ -26,6 +29,10 @@ impl PackageTool for RpmOstree {
     }
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
         Some(self)
     }
 }
@@ -60,6 +67,27 @@ impl Remover for RpmOstree {
     }
 }
 
+impl FileInstaller for RpmOstree {
+    /// Layered on the image with `rpm-ostree install`, effective after a restart. The product's advice for image-based
+    /// systems is a Flatpak for apps (D3).
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        Ok(installation(self, host, file, &["rpm-ostree", "install"])
+            .needs_restart()
+            .caution("layered packages slow down every system update; for an app, a Flatpak is the usual choice here"))
+    }
+
+    fn simulator(&self) -> Option<&dyn InstallSimulator> {
+        Some(self)
+    }
+}
+
+/// rpm-ostree resolves against the image's RPM database, which `rpm -U --test` reads without root.
+impl InstallSimulator for RpmOstree {
+    fn simulate(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallSimulation, SourceError> {
+        rpm_install_simulation(host, file)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,9 +108,7 @@ mod tests {
     #[test]
     fn layered_packages_are_uninstalled_by_name_after_a_restart_and_image_packages_are_blocked() {
         let host = Fixture::new().host(FakeRunner::new());
-        let layered = RpmOstree
-            .plan(&host, &package("htop", InstallReason::Explicit))
-            .unwrap();
+        let layered = Remover::plan(&RpmOstree, &host, &package("htop", InstallReason::Explicit)).unwrap();
         assert!(layered.restart && layered.blockers.is_empty());
         assert_eq!(layered.steps.len(), 1);
         assert_eq!(layered.steps[0].by, Actor::Helper);
@@ -96,7 +122,7 @@ mod tests {
         );
 
         for reason in [InstallReason::System, InstallReason::Unknown] {
-            let image = RpmOstree.plan(&host, &package("glibc", reason)).unwrap();
+            let image = Remover::plan(&RpmOstree, &host, &package("glibc", reason)).unwrap();
             assert!(image.steps.is_empty(), "{reason:?}");
             assert_eq!(image.blockers.len(), 1, "{reason:?}");
         }
