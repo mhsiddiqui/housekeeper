@@ -66,3 +66,4 @@ links back.
 | [0050](0050-release-0.2.0.md) | Prepare release 0.2.0 | — | #40 |
 | [0051](0051-file-detection.md) | Tell what a downloaded installer file is | 5.1 | #41 |
 | [0052](0052-release-0.2.0-published.md) | Release 0.2.0 published and checked | — | #42 |
+| [0054](0054-install-plans.md) | Plan how a downloaded file would be installed | 5.2 | #44 |
