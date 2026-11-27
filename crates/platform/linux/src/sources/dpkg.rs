@@ -1,18 +1,19 @@
 //! Debian packages (Debian, Ubuntu, Mint, Pop!_OS…), read through `dpkg-query`.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, Remover,
-    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package, PackageKind,
+    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use super::version_line;
+use crate::formats::{path_arg, tab_package};
 use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
+use crate::provider::{Context, Family, FileFormat, LinuxSource, Native, PackageTool, register};
 
 pub const ID: SourceId = SourceId::new("dpkg");
 
@@ -56,6 +57,15 @@ impl LinuxSource for DpkgSource {
         program: "dpkg-query",
     });
 
+    const FILES: &'static [FileFormat] = &[FileFormat {
+        id: "deb",
+        title: "Debian package",
+        suffixes: &[".deb"],
+        matches: is_deb,
+        evidence: "an `ar` archive whose first member is `debian-binary`",
+        read: read_deb,
+    }];
+
     fn create(context: &Context<'_>) -> Self {
         Self {
             tool: context.tool.cloned(),
@@ -63,6 +73,27 @@ impl LinuxSource for DpkgSource {
     }
 }
 register!(DpkgSource);
+
+/// A `.deb` is an `ar` archive whose first member is `debian-binary`.
+fn is_deb(head: &[u8]) -> bool {
+    head.starts_with(b"!<arch>\ndebian-binary")
+}
+
+/// Name, version and processor from a `.deb`'s control file, tab-separated.
+const DEB_FORMAT: &str = "--showformat=${Package}\\t${Version}\\t${Architecture}\\n";
+
+/// What a `.deb` holds, from its control file through `dpkg-deb`; nothing on systems without it.
+fn read_deb(host: &Host, path: &Path, _: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    if !host.has_program("dpkg-deb") {
+        return Ok(None);
+    }
+    let output = host.run_ok(
+        &Cmd::new("dpkg-deb")
+            .args(["--show", DEB_FORMAT])
+            .arg(path_arg(host, path)),
+    )?;
+    Ok(Some(tab_package(&output)))
+}
 
 impl Source for DpkgSource {
     fn info(&self) -> SourceInfo {
@@ -591,6 +622,40 @@ old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
         #[test]
         fn a_package_nothing_needs_has_no_dependants() {
             assert!(dependants("mutt", "mutt").is_empty());
+        }
+    }
+
+    mod files {
+        use super::*;
+        use crate::formats::test_support::inspect;
+        use housekeeper_core::Fit;
+
+        const UBUNTU: &str = "ID=ubuntu\nID_LIKE=debian\n";
+
+        fn deb(control: &str) -> housekeeper_core::Inspection {
+            inspect(UBUNTU, "code.deb", b"!<arch>\ndebian-binary   ", |real| {
+                FakeRunner::new()
+                    .respond(
+                        "dpkg-query --version",
+                        "Debian dpkg-query package management program version 1.22.6\n",
+                    )
+                    .respond(&format!("dpkg-deb --show {DEB_FORMAT} {real}"), control)
+            })
+            .unwrap()
+        }
+
+        #[test]
+        fn a_deb_is_read_with_dpkg_deb_and_checked_against_this_processor() {
+            let any = deb("fonts-noto\t20201225-2\tall\n");
+            assert_eq!(any.fit, Fit::Fits);
+            assert_eq!(any.source.map(|source| source.id), Some(ID));
+            let package = any.package.unwrap();
+            assert_eq!(package.name.as_deref(), Some("fonts-noto"));
+            assert_eq!(package.version.as_deref(), Some("20201225-2"));
+            assert_eq!(package.arch, None);
+
+            let s390x = deb("code\t1.95.3-1731513102\ts390x\n");
+            assert_eq!(s390x.fit, Fit::OtherArch { arch: "s390x".into() });
         }
     }
 }

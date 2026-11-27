@@ -9,6 +9,7 @@ mod desktop;
 pub mod distro;
 mod elevate;
 mod files;
+mod formats;
 mod kernel;
 mod lock;
 mod owner;
@@ -20,15 +21,16 @@ pub mod sources;
 mod tools;
 mod xdg;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, RootHelper, ScanContext, Source,
-    SourceKind, SystemInfo, path_dirs,
+    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, Recognised, RootHelper, ScanContext,
+    Source, SourceError, SourceKind, SystemInfo, path_dirs,
 };
 
 use crate::distro::Distro;
+use crate::formats::{Known, Owner};
 use crate::provider::{Context, PackageTool, Provider, ToolProvider};
 use crate::sources::PROVIDERS;
 use crate::tools::TOOLS;
@@ -40,6 +42,8 @@ pub struct LinuxPlatform {
     sources: Vec<Arc<dyn Source>>,
     /// What changes the native package database (D24); `None` on a distribution no tool serves.
     tool: Option<Arc<dyn PackageTool>>,
+    /// Every installer format a source declares, this system's or another distribution's (D45).
+    formats: Vec<Known>,
 }
 
 impl LinuxPlatform {
@@ -55,12 +59,25 @@ impl LinuxPlatform {
             distro: &distro,
             tool: tool.as_ref(),
         };
-        let mut sources: Vec<Arc<dyn Source>> = native
-            .map(|(provider, _)| provider)
-            .into_iter()
-            .chain(providers.iter().filter(|provider| provider.native.is_none()))
-            .map(|provider| provider.create(&context))
-            .collect();
+        let mut sources: Vec<Arc<dyn Source>> = Vec::new();
+        let mut formats = Vec::new();
+        for provider in providers {
+            let owner = match &provider.native {
+                Some(other) if !native.is_some_and(|(chosen, _)| std::ptr::eq(chosen, provider)) => {
+                    Owner::Foreign(other.families)
+                }
+                _ => {
+                    let source = provider.create(&context);
+                    let id = source.info().id;
+                    sources.push(source);
+                    Owner::Source(id)
+                }
+            };
+            formats.extend(provider.files.iter().map(|format| Known {
+                format,
+                owner: owner.clone(),
+            }));
+        }
         sources.sort_by_key(|source| {
             let info = source.info();
             (kind_order(info.kind), info.id)
@@ -80,6 +97,7 @@ impl LinuxPlatform {
             system,
             sources,
             tool,
+            formats,
         }
     }
 
@@ -177,6 +195,11 @@ impl Platform for LinuxPlatform {
                 host.dir_from_var("XDG_CONFIG_HOME", ".config").join("fish/config.fish"),
             ))
             .collect()
+    }
+
+    /// The formats every source declares, other distributions' native ones included (D45).
+    fn recognise_file(&self, host: &Host, path: &Path) -> Result<Option<Recognised>, SourceError> {
+        formats::recognise(&self.formats, host, path)
     }
 }
 

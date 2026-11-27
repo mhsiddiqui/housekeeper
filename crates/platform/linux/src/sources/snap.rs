@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use housekeeper_core::{
-    Actor, Availability, Dependants, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
-    Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, Cmd, Dependants, FilePackage, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
+    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 use serde::Deserialize;
 
-use crate::provider::{Context, LinuxSource, register};
+use crate::formats::{field, machine, path_arg};
+use crate::provider::{Context, FileFormat, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("snap");
 
@@ -21,11 +22,66 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 pub struct SnapSource;
 
 impl LinuxSource for SnapSource {
+    const FILES: &'static [FileFormat] = &[FileFormat {
+        id: "snap",
+        title: "Snap package",
+        suffixes: &[".snap"],
+        matches: is_squashfs,
+        evidence: "a SquashFS image (`hsqs`) named `.snap`",
+        read: read_snap_file,
+    }];
+
     fn create(_: &Context<'_>) -> Self {
         Self
     }
 }
 register!(SnapSource);
+
+/// A `.snap` is a SquashFS image (little-endian magic `hsqs`).
+fn is_squashfs(head: &[u8]) -> bool {
+    head.starts_with(b"hsqs")
+}
+
+/// What a `.snap` holds, from its `meta/snap.yaml` through `unsquashfs` (squashfs-tools, which snapd needs); nothing
+/// on systems without it.
+fn read_snap_file(host: &Host, path: &Path, _: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    if !host.has_program("unsquashfs") {
+        return Ok(None);
+    }
+    let yaml = host.run_ok(
+        &Cmd::new("unsquashfs")
+            .arg("-cat")
+            .arg(path_arg(host, path))
+            .arg("meta/snap.yaml"),
+    )?;
+    let value = |key: &str| field(&yaml, key, ':').map(str::to_string);
+    Ok(Some(FilePackage {
+        name: value("name"),
+        version: value("version"),
+        title: value("title"),
+        arch: only_architecture(&yaml).and_then(machine),
+        ..FilePackage::default()
+    }))
+}
+
+/// The one processor `snap.yaml`'s `architectures` names (`[amd64]` or a `- amd64` list); `None` for several, none
+/// (snapd then takes the snap for the processor it was built on, which the file does not say) or `all`.
+fn only_architecture(yaml: &str) -> Option<&str> {
+    let mut lines = yaml.lines();
+    let inline = lines.find_map(|line| line.strip_prefix("architectures:"))?.trim();
+    let names: Vec<&str> = if inline.is_empty() {
+        lines
+            .map_while(|line| line.trim_start().strip_prefix('-'))
+            .map(str::trim)
+            .collect()
+    } else {
+        inline.trim_matches(['[', ']']).split(',').map(str::trim).collect()
+    };
+    match names.as_slice() {
+        [name] => Some(name.trim_matches(['\'', '"'])),
+        _ => None,
+    }
+}
 
 impl Source for SnapSource {
     fn info(&self) -> SourceInfo {
@@ -525,5 +581,24 @@ mod tests {
         assert_eq!(parse_rfc3339("0001-01-01T00:00:00Z"), Some(-62_135_596_800));
         assert_eq!(parse_rfc3339("not a date"), None);
         assert_eq!(parse_rfc3339("2026-13-01T00:00:00Z"), None);
+    }
+
+    #[test]
+    fn a_snap_file_is_read_from_its_snap_yaml() {
+        use crate::formats::test_support::inspect;
+        let yaml = "name: hello\nversion: '6.4'\nsummary: says hello\narchitectures:\n  - s390x\napps:\n  hello:\n    \
+                    command: bin/hello\n";
+        let found = inspect("ID=ubuntu\n", "hello_29.snap", b"hsqs\0\0", |real| {
+            FakeRunner::new().respond(&format!("unsquashfs -cat {real} meta/snap.yaml"), yaml)
+        })
+        .unwrap();
+        let package = found.package.unwrap();
+        assert_eq!(package.name.as_deref(), Some("hello"));
+        assert_eq!(package.version.as_deref(), Some("6.4"));
+        assert_eq!(package.arch.as_deref(), Some("s390x"));
+
+        assert_eq!(only_architecture("architectures: [amd64, arm64]\n"), None);
+        assert_eq!(only_architecture("architectures: [all]\n"), Some("all"));
+        assert_eq!(only_architecture("name: x\n"), None);
     }
 }
