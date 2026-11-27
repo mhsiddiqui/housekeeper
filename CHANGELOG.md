@@ -5,6 +5,15 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+### Added
+- `housekeeper inspect <file>`: what a downloaded installer is (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak
+  bundle, `.snap`, AppImage, archive, script, `.run` program), told by its name and first bytes, with the package's
+  name, version and processor where the file or the format's own tool says (`dpkg-deb`, `rpm`, `bsdtar`,
+  `unsquashfs`), the source that would list it, and whether it fits this system: another distribution's package, a
+  format whose tool is not here (Flatpak, snapd) or a program for another processor does not. It never runs or
+  unpacks the file. Exits 0 when it fits, 1 when it does not, 2 for no such file or an unknown format; `--json` for
+  scripts.
+
 ## 0.2.0 (2026-11-26)
 
 Housekeeper can now remove what it lists, the way each app's installer intended: it shows the plan and what would be

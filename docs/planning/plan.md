@@ -62,10 +62,10 @@ source, without root and without changing anything.
 | 4.4 ✅ | Leftovers go to the freedesktop Trash, never `rm -rf`: only caches nothing else uses are preselected (D38), and each folder is checked again just before it moves (D37, D43); `remove --dry-run` marks which go (change 0048) |
 | 4.5 ✅ | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37, D44); the helper also trashes system paths (D40); tested by Housekeeper removing its own package on every distribution (change 0049) |
 
-## Phase 5: Install from file ⬜
+## Phase 5: Install from file 🚧
 | Chunk | Delivers |
 |---|---|
-| 5.1 | File type detection: `.deb`, `.rpm`, `.pkg.tar.zst`, `.flatpakref`, `.flatpak`, `.snap`, AppImage, archives, `.run`/`.sh` |
+| 5.1 ✅ | File type detection: `.deb`, `.rpm`, `.pkg.tar.zst`, `.flatpakref`, `.flatpak`, `.snap`, AppImage, archives, `.run`/`.sh`, by name ending and first bytes, each format declared by its source and recognised on every distribution; what is inside (name, version, processor) and whether it fits this system; `housekeeper inspect` (D45, change 0051) |
 | 5.2 | Install plans per type (dependencies resolved by the native manager, `--dangerous` snaps flagged) |
 | 5.3 | AppImage integration: move to `~/Applications`, desktop entry, icon; removal reverses it |
 | 5.4 | Archives and scripts: run in the tracked mode (Phase 11) or refuse with an explanation |

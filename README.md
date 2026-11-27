@@ -82,6 +82,7 @@ housekeeper show code                          # everything about one item: file
 housekeeper remove --dry-run code              # how it would be removed and what it would leave behind; changes nothing
 housekeeper remove code                        # remove it that way, after asking (root steps ask for a password)
 housekeeper history                            # what Housekeeper changed on this computer
+housekeeper inspect ~/Downloads/app.deb        # what a downloaded installer is, and whether it fits this system
 ```
 
 `housekeeper sources` shows what was detected:
@@ -272,6 +273,27 @@ others are shown as `Hidden:` behind the one that runs. `--json` prints the same
 It exits with 0 when an owner is found, 1 when the file exists but nothing on the machine accounts for it (copied
 by hand or by a script, outside the folders Housekeeper reads), and 2 when there is no such command or file.
 
+### What is this file?
+`housekeeper inspect` takes a file you downloaded and says what it is, what is inside and whether it is made for this
+system, before anything installs it. It knows `.deb`, `.rpm`, Arch packages (`.pkg.tar.zst`), `.flatpakref`, Flatpak
+bundles, `.snap`, AppImages, archives (`.tar.*`, `.zip`), scripts and `.run` programs, by their name and their first
+bytes, so a renamed file is still told apart. It reads the package's name, version and processor from the file or
+with the format's own tool where the system has it (`dpkg-deb`, `rpm`, `bsdtar`, `unsquashfs`); it never runs or
+unpacks the file.
+
+```text
+$ housekeeper inspect ~/Downloads/hello.rpm
+/home/me/Downloads/hello.rpm
+Format:    RPM package
+Told by:   RPM's lead (`ED AB EE DB`), marked as a binary package
+Package:   hello 2.12.2-2.fc43
+Fits:      no, it is a package for fedora and suse systems; this is Ubuntu 26.04.1 LTS
+```
+
+It exits with 0 when the file fits, 1 when it does not (another distribution's package, a `.snap` without snapd, a
+program built for another processor), and 2 when there is no such file or Housekeeper does not know its format.
+`--json` prints the same as a document. Installing what fits comes next (see the roadmap).
+
 ### JSON output
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
 `state` `ok`, `unavailable` or `failed`, and any warnings), every package (`packages`: source, id, name, title,
@@ -328,6 +350,7 @@ listed), and removing safely (`housekeeper remove`: a root helper started throug
 waits for busy package managers, leftovers moved to the Trash, a history). Next, in order:
 
 1. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
+   Telling what such a file is and whether it fits (`housekeeper inspect`) is done.
 2. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
 
