@@ -329,10 +329,18 @@ which keeps the groups it shows and their installs.
   `/opt` and `/usr/local/bin` it owns; those entries are left out rather than listed twice.
 
 ## Privacy and safety
-- **Read-only.** This version never changes the system. It reads package databases and metadata files and runs the
-  package managers' query commands, each with a timeout.
-- **No root.** Run it as yourself; it never asks for a password.
-- **Nothing leaves the machine.** No network access, no account, no telemetry.
+- **Changes only what you approve.** `list`, `show`, `who`, `inspect`, `history` and `remove --dry-run` only read the
+  system: package databases, metadata files and the package managers' query commands, each with a timeout.
+  `housekeeper remove` is the one command that changes the system. It shows the plan first, asks (unless `--yes`),
+  checks the plan again just before acting, and runs the steps the way the item's installer intended.
+- **Root only when a step needs it.** Run Housekeeper as yourself. A step that needs root goes through its root
+  helper, which `pkexec` starts after asking for an administrator's password, every time. The helper takes one
+  request, removes only installed packages through the system's own package tool, or moves a file outside every home
+  folder to root's Trash; it does nothing else.
+- **Housekeeper deletes nothing itself.** Packages are removed by their own tool (apt, dnf, Flatpak, npm…), and
+  leftover folders and AppImages go to the Trash, where you can restore them. Housekeeper writes only its own files in
+  `~/.local/state/housekeeper`: the history of every change and the record of items each scan saw.
+- **Nothing leaves the machine.** Housekeeper makes no network connections, and has no account and no telemetry.
 
 ## Supported distributions
 Every release is installed, run and removed on these, for x86_64 and aarch64, before it is published:
