@@ -3,7 +3,7 @@
 - **Date:** 2026-11-28
 - **Branch / PR:** `feat/install-plans`, #44
 - **Plan chunks:** 5.2 (see [plan](../planning/plan.md)); adds chunk 5.5
-- **Commits:** (filled in below)
+- **Commits:** eaee049, 3733835, 1bce866, d57c61d, e326da6, b67a9d4
 
 ## What changed
 - **Scope, agreed with the owner:** plans only, as Phase 3 did for removal. Nothing is installed. Carrying the plans
