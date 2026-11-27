@@ -1,14 +1,15 @@
-//! "What is this file?": a file someone wants to install, as the platform recognises it, and whether it is made for
-//! this system (decision D45).
+//! "What is this file?": a file someone wants to install, as the platform recognises it, whether it is made for this
+//! system (decision D45), and how it would be installed (D46).
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::host::FileType;
-use crate::inventory::Housekeeper;
+use crate::install::{self, InstallFile, InstallPlan};
+use crate::inventory::{Housekeeper, Selection, SourceStatus};
 use crate::model::{Availability, SourceId, SourceInfo};
-use crate::source::SourceError;
+use crate::source::{Source, SourceError};
 
 /// A kind of file that installs software, as the platform names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +75,8 @@ pub struct Inspection {
     pub source: Option<SourceInfo>,
     pub package: Option<FilePackage>,
     pub fit: Fit,
+    /// How it would be installed, when it fits and its source can say (D46).
+    pub install: Option<InstallPlan>,
     pub warnings: Vec<String>,
 }
 
@@ -90,8 +93,9 @@ pub enum InspectError {
 
 impl Housekeeper {
     /// What the file at `path` (logical, absolute) is, and whether it is made for this system: its own package
-    /// format, the processor it is built for, and the source that installs it being here, in that order. `Ok(None)`
-    /// when the platform knows no installer format the file has. Nothing is installed or run from the file.
+    /// format, the source that installs it being here, and the processor it is built for, in that order. A file that
+    /// fits gets its install plan from its source, simulated where the package manager can without root (D46).
+    /// `Ok(None)` when the platform knows no installer format the file has. Nothing is installed or run from the file.
     pub fn inspect(&self, path: &Path) -> Result<Option<Inspection>, InspectError> {
         match self.host.file_type(path) {
             None => return Err(InspectError::Missing(path.to_path_buf())),
@@ -117,6 +121,22 @@ impl Housekeeper {
                 _ => Fit::Fits,
             }
         };
+        let mut warnings = recognised.warnings;
+        let install = match (&fit, source) {
+            (Fit::Fits, Some(source)) => {
+                let file = InstallFile {
+                    path,
+                    format: &recognised.format.id,
+                    package: recognised.package.as_ref(),
+                };
+                self.plan_install(source.as_ref(), &file, &mut warnings)
+                    .unwrap_or_else(|error| {
+                        warnings.push(format!("could not plan installing it: {error}"));
+                        None
+                    })
+            }
+            _ => None,
+        };
         Ok(Some(Inspection {
             path: path.to_path_buf(),
             format: recognised.format,
@@ -124,7 +144,30 @@ impl Housekeeper {
             source: source.map(|source| source.info()),
             package: recognised.package,
             fit,
-            warnings: recognised.warnings,
+            install,
+            warnings,
         }))
+    }
+
+    /// The source's plan for `file`, checked against what the source has installed now; `None` when the source does
+    /// not install files.
+    fn plan_install(
+        &self,
+        source: &dyn Source,
+        file: &InstallFile<'_>,
+        warnings: &mut Vec<String>,
+    ) -> Result<Option<InstallPlan>, SourceError> {
+        let Some(installer) = source.file_installer() else {
+            return Ok(None);
+        };
+        let info = source.info();
+        let only = [info.id.to_string()];
+        let scan = self.read(&Selection::Only(&only), false, |_, _| {});
+        for report in &scan.sources {
+            if let SourceStatus::Failed { error } = &report.status {
+                warnings.push(format!("could not read {}: {error}", report.info.label));
+            }
+        }
+        install::plan(installer, &self.host, file, &scan.packages, warnings).map(Some)
     }
 }
