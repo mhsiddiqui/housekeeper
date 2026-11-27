@@ -11,7 +11,12 @@ const MAGIC_LEN: usize = 11;
 /// Whether a file is an AppImage (type 1 or 2), judged by its ELF header. Unreadable files are not.
 pub(crate) fn is_appimage(host: &Host, path: &Path) -> bool {
     host.read_head(path, MAGIC_LEN)
-        .is_ok_and(|head| head.starts_with(b"\x7fELF") && matches!(head.get(8..MAGIC_LEN), Some(b"AI\x01" | b"AI\x02")))
+        .is_ok_and(|head| is_appimage_head(&head))
+}
+
+/// Whether a file's first bytes are an AppImage's ELF header.
+pub(crate) fn is_appimage_head(head: &[u8]) -> bool {
+    head.starts_with(b"\x7fELF") && matches!(head.get(8..MAGIC_LEN), Some(b"AI\x01" | b"AI\x02"))
 }
 
 /// Follows a chain of symlinks to the file it ends at (logical path).

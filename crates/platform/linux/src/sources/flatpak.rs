@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 
 use housekeeper_core::text::parse_human_size;
 use housekeeper_core::{
-    Actor, Availability, Cmd, Dependants, Host, InstallReason, LeftoverKind, Package, PackageKind, RemovalPlan,
-    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, Cmd, Dependants, FilePackage, Host, InstallReason, LeftoverKind, Package, PackageKind,
+    RemovalPlan, Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
 use super::version_line;
-use crate::provider::{Context, LinuxSource, register};
+use crate::formats::{field, nothing_inside};
+use crate::provider::{Context, FileFormat, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("flatpak");
 
@@ -25,11 +26,60 @@ const SYSTEM_DIR: &str = "/var/lib/flatpak";
 pub struct FlatpakSource;
 
 impl LinuxSource for FlatpakSource {
+    const FILES: &'static [FileFormat] = &[
+        FileFormat {
+            id: "flatpakref",
+            title: "Flatpak reference",
+            suffixes: &[".flatpakref"],
+            matches: is_flatpakref,
+            evidence: "a `[Flatpak Ref]` group near its start",
+            read: read_flatpakref,
+        },
+        FileFormat {
+            id: "flatpak-bundle",
+            title: "Flatpak bundle",
+            suffixes: &[".flatpak"],
+            matches: is_bundle,
+            evidence: "Flatpak's bundle header (`flatpak` and its version bytes)",
+            read: nothing_inside,
+        },
+    ];
+
     fn create(_: &Context<'_>) -> Self {
         Self
     }
 }
 register!(FlatpakSource);
+
+/// How much of a `.flatpakref` is read: its keys and an embedded signing key fit in a few kilobytes.
+const FLATPAKREF_LEN: usize = 64 * 1024;
+
+/// A `.flatpakref` is a key file whose `[Flatpak Ref]` group starts in its first 256 bytes.
+fn is_flatpakref(head: &[u8]) -> bool {
+    head[..head.len().min(256)]
+        .windows(b"[Flatpak Ref]".len())
+        .any(|window| window == b"[Flatpak Ref]")
+}
+
+/// A single-file bundle (`flatpak build-bundle`) starts with `flatpak` (`xdg-app` before 0.6.10) and fixed bytes.
+fn is_bundle(head: &[u8]) -> bool {
+    [&b"flatpak\x00\x01\x00\x89\xe5"[..], b"xdg-app\x00\x01\x00\x89\xe5"]
+        .iter()
+        .any(|magic| head.starts_with(magic))
+}
+
+/// The app (or runtime) a `.flatpakref` points to, its title and the repository it would come from.
+fn read_flatpakref(host: &Host, path: &Path, _: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    let bytes = host.read_head(path, FLATPAKREF_LEN)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let value = |key: &str| field(&text, key, '=').map(str::to_string);
+    Ok(Some(FilePackage {
+        name: value("Name"),
+        title: value("Title"),
+        origin: value("Url"),
+        ..FilePackage::default()
+    }))
+}
 
 impl Source for FlatpakSource {
     fn info(&self) -> SourceInfo {
@@ -439,5 +489,33 @@ org.gnome.Builder\tx86_64\tstable\tsystem\torg.gnome.Platform/x86_64/47
             FlatpakSource.probe(&fixture.host(FakeRunner::new())),
             Availability::Unavailable { .. }
         ));
+    }
+
+    mod files {
+        use super::*;
+        use crate::formats::test_support::inspect;
+        use housekeeper_core::Fit;
+
+        const REF: &str = "[Flatpak Ref]\nName=org.gnome.Calculator\nBranch=stable\nTitle=Calculator\n\
+                           Url=https://dl.flathub.org/repo/\nIsRuntime=false\n";
+
+        #[test]
+        fn a_flatpakref_names_the_app_and_its_repository() {
+            let found = inspect("ID=fedora\n", "calc.flatpakref", REF.as_bytes(), |_| {
+                FakeRunner::new().respond("flatpak --version", "Flatpak 1.16.0\n")
+            })
+            .unwrap();
+            assert_eq!(found.fit, Fit::Fits);
+            let package = found.package.unwrap();
+            assert_eq!(package.name.as_deref(), Some("org.gnome.Calculator"));
+            assert_eq!(package.title.as_deref(), Some("Calculator"));
+            assert_eq!(package.origin.as_deref(), Some("https://dl.flathub.org/repo/"));
+        }
+
+        #[test]
+        fn without_flatpak_a_flatpakref_does_not_fit() {
+            let found = inspect("ID=ubuntu\n", "calc.flatpakref", REF.as_bytes(), |_| FakeRunner::new()).unwrap();
+            assert!(matches!(found.fit, Fit::SourceMissing { .. }), "{:?}", found.fit);
+        }
     }
 }

@@ -96,6 +96,14 @@ housekeeper history | grep -q '^Housekeeper has not changed anything' || fail "h
   || { cat /tmp/helper.json >&2; fail "the helper did not refuse an option passed as a package name"; }
 
 if [ "$installed" = yes ]; then
+  # The package just installed is this system's own format, read with the format's tool (dpkg-deb, rpm, bsdtar),
+  # built for this processor.
+  version=$(housekeeper --version | cut -d' ' -f2)
+  housekeeper inspect "$pkg" > /tmp/inspect.txt \
+    || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect says $pkg does not fit this system"; }
+  grep -q "^Package: *housekeeper $version" /tmp/inspect.txt \
+    || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not read the name and version inside $pkg"; }
+
   # Housekeeper sees itself, installed by the native package manager.
   housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \
     || fail "housekeeper does not list its own package"

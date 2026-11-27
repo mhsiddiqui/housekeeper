@@ -5,12 +5,13 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Actor, Availability, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
-    Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, FilePackage, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
+    ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
-use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{Context, LinuxSource, register};
+use crate::files::{is_appimage, is_appimage_head, looks_like_version, resolve_symlinks, scope_of};
+use crate::formats::elf_machine;
+use crate::provider::{Context, FileFormat, LinuxSource, register};
 
 pub const ID: SourceId = SourceId::new("appimage");
 
@@ -29,11 +30,33 @@ const PLATFORM_WORDS: &[&str] = &[
 pub struct AppImageSource;
 
 impl LinuxSource for AppImageSource {
+    const FILES: &'static [FileFormat] = &[FileFormat {
+        id: "appimage",
+        title: "AppImage",
+        suffixes: &[],
+        matches: is_appimage_head,
+        evidence: "an ELF program marked `AI` in its header, whatever its name",
+        read: read_appimage_file,
+    }];
+
     fn create(_: &Context<'_>) -> Self {
         Self
     }
 }
 register!(AppImageSource);
+
+/// The name and version its file name gives (as the source lists it once kept), and the processor its ELF header
+/// names. Nothing inside is run or unpacked.
+fn read_appimage_file(_: &Host, path: &Path, head: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    let file_name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+    let (name, version) = name_and_version(&file_name);
+    Ok(Some(FilePackage {
+        name: Some(name),
+        version,
+        arch: elf_machine(head),
+        ..FilePackage::default()
+    }))
+}
 
 impl Source for AppImageSource {
     fn info(&self) -> SourceInfo {

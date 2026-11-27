@@ -1,19 +1,20 @@
 //! RPM packages (Fedora, RHEL and rebuilds, openSUSE, Silverblue), read through `rpm --queryformat`.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Availability, Cmd, Dependants, FileList, Host, InstallReason, OwnerLookup, Package, PackageKind, Remover,
-    ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Cmd, Dependants, FileList, FilePackage, Host, InstallReason, OwnerLookup, Package, PackageKind,
+    Remover, ScanContext, Scope, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 use serde::Deserialize;
 
 use super::version_line;
+use crate::formats::{path_arg, tab_package};
 use crate::kernel::protect_running_kernel;
 use crate::owner::{OwnerQuery, args};
-use crate::provider::{Context, Family, LinuxSource, Native, PackageTool, register};
+use crate::provider::{Context, Family, FileFormat, LinuxSource, Native, PackageTool, register};
 use crate::rpmdb::{ID_FORMAT, direct_dependants};
 
 pub const ID: SourceId = SourceId::new("rpm");
@@ -96,6 +97,15 @@ impl LinuxSource for RpmSource {
         program: "rpm",
     });
 
+    const FILES: &'static [FileFormat] = &[FileFormat {
+        id: "rpm",
+        title: "RPM package",
+        suffixes: &[".rpm"],
+        matches: is_rpm,
+        evidence: "RPM's lead (`ED AB EE DB`), marked as a binary package",
+        read: read_rpm,
+    }];
+
     fn create(context: &Context<'_>) -> Self {
         Self {
             tool: context.tool.cloned(),
@@ -104,6 +114,45 @@ impl LinuxSource for RpmSource {
     }
 }
 register!(RpmSource);
+
+/// An `.rpm` starts with RPM's lead: its magic, the format version, then the type, 0 for a binary package (1 is a
+/// source package, which installs nothing).
+fn is_rpm(head: &[u8]) -> bool {
+    head.starts_with(b"\xed\xab\xee\xdb") && head.get(6..8) == Some(&[0, 0][..])
+}
+
+/// Name, `[epoch:]version-release` and processor from an `.rpm`'s header, tab-separated.
+const RPM_FILE_FORMAT: &str = "%{NAME}\\t%|EPOCH?{%{EPOCH}:}|%{VERSION}-%{RELEASE}\\t%{ARCH}\\n";
+
+/// The lead's name field: `name-version-release`, NUL-padded.
+const LEAD_NAME: std::ops::Range<usize> = 10..76;
+
+/// What an `.rpm` holds, from its header through `rpm` where there is one (it is on many Debian systems too), else
+/// the name and version its lead spells out.
+fn read_rpm(host: &Host, path: &Path, head: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    if !host.has_program("rpm") {
+        return Ok(lead_package(head));
+    }
+    let output = host.run_ok(
+        &Cmd::new("rpm")
+            .args(["-qp", "--nosignature", "--nodigest", "--queryformat", RPM_FILE_FORMAT])
+            .arg(path_arg(host, path)),
+    )?;
+    Ok(Some(tab_package(&output)))
+}
+
+/// `name-version-release` from the lead; the name may hold `-`, the version and release cannot.
+fn lead_package(head: &[u8]) -> Option<FilePackage> {
+    let field = head.get(LEAD_NAME)?;
+    let text = std::str::from_utf8(&field[..field.iter().position(|&b| b == 0).unwrap_or(field.len())]).ok()?;
+    let mut parts = text.rsplitn(3, '-');
+    let (release, version, name) = (parts.next()?, parts.next()?, parts.next()?);
+    Some(FilePackage {
+        name: Some(name.to_string()),
+        version: Some(format!("{version}-{release}")),
+        ..FilePackage::default()
+    })
+}
 
 impl RpmSource {
     pub fn new(image_based: bool) -> Self {
@@ -789,5 +838,65 @@ sudo-1.9.15-5.p5.fc41.x86_64\n"
                 "sudo-1.9.15-5.p5.fc41.x86_64"
             ]
         );
+    }
+
+    mod files {
+        use super::*;
+        use crate::formats::test_support::inspect;
+        use housekeeper_core::Fit;
+
+        /// RPM's lead: magic, version 3.0, `kind` (0 binary, 1 source), architecture 1, then the name field.
+        fn lead(kind: u8, name: &str) -> Vec<u8> {
+            let mut lead = vec![0xed, 0xab, 0xee, 0xdb, 3, 0, 0, kind, 0, 1];
+            let mut field = name.as_bytes().to_vec();
+            field.resize(66, 0);
+            lead.extend(field);
+            lead.resize(96, 0);
+            lead
+        }
+
+        #[test]
+        fn without_rpm_the_lead_names_the_package_of_another_system() {
+            let file = lead(0, "google-chrome-stable-131.0.6778.85-1");
+            let rpm = inspect("ID=ubuntu\nID_LIKE=debian\n", "chrome.rpm", &file, |_| {
+                FakeRunner::new()
+            })
+            .unwrap();
+            assert_eq!(
+                rpm.fit,
+                Fit::OtherSystem {
+                    families: vec!["fedora".into(), "suse".into()]
+                }
+            );
+            let package = rpm.package.unwrap();
+            assert_eq!(package.name.as_deref(), Some("google-chrome-stable"));
+            assert_eq!(package.version.as_deref(), Some("131.0.6778.85-1"));
+        }
+
+        #[test]
+        fn on_fedora_rpm_reads_the_header() {
+            let file = lead(0, "hello-2.12.2-2.fc43");
+            let rpm = inspect("ID=fedora\n", "hello.rpm", &file, |real| {
+                FakeRunner::new()
+                    .respond("rpm --version", "RPM version 4.20.0\n")
+                    .respond(
+                        &format!("rpm -qp --nosignature --nodigest --queryformat {RPM_FILE_FORMAT} {real}"),
+                        "hello\t2.12.2-2.fc43\tx86_64\n",
+                    )
+            })
+            .unwrap();
+            assert_eq!(rpm.source.map(|source| source.id), Some(ID));
+            let package = rpm.package.unwrap();
+            assert_eq!(package.arch.as_deref(), Some("x86_64"));
+        }
+
+        #[test]
+        fn a_source_package_is_not_an_installer() {
+            let file = lead(1, "hello-2.12.2-2.fc43");
+            assert_eq!(
+                inspect("ID=fedora\n", "hello.src.rpm", &file, |_| FakeRunner::new()),
+                None
+            );
+        }
     }
 }

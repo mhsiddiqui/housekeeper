@@ -4,16 +4,18 @@
 //! [`LinuxSource`], and call `register!(<Type>);` next to the `impl LinuxSource`.** The build script declares every
 //! file in that folder as a module and lists its `PROVIDER` constant, which `register!` defines; no other file
 //! changes. A file without `register!` fails to compile. A distribution's own package manager additionally declares
-//! [`LinuxSource::NATIVE`], which is how a new distribution gets supported.
+//! [`LinuxSource::NATIVE`], which is how a new distribution gets supported. A source whose items come from files
+//! someone downloads (`.deb`, `.flatpakref`) declares those formats in [`LinuxSource::FILES`] (decision D45).
 //!
 //! **A package tool (apt, dnf…) is the same: one file in `src/tools/` with a type that implements [`PackageTool`]
 //! and [`LinuxTool`], and `register_package_tool!(<Type>);`** (decision D24).
 //!
 //! Sources never import from each other; code two sources share lives in a module outside `src/sources/`.
 
+use std::path::Path;
 use std::sync::Arc;
 
-use housekeeper_core::{PackageLock, PackageRemoval, Remover, Source};
+use housekeeper_core::{FilePackage, Host, PackageLock, PackageRemoval, Remover, Source, SourceError};
 
 use crate::distro::Distro;
 
@@ -40,11 +42,37 @@ pub struct Context<'a> {
     pub tool: Option<&'a Arc<dyn PackageTool>>,
 }
 
+/// A kind of file that installs what a source lists (decision D45): how to tell it, and how to read what is inside.
+pub struct FileFormat {
+    /// Stable key, `deb`.
+    pub id: &'static str,
+    /// For people, `Debian package`.
+    pub title: &'static str,
+    /// File-name endings, lowercase, one of which the file must have (`.deb`); empty when its first bytes alone tell
+    /// it. When several formats match, the one with the longest matching ending wins (`.pkg.tar.zst` over `.tar.zst`).
+    pub suffixes: &'static [&'static str],
+    /// Whether the file's first bytes (its first kilobyte at most) are this format's.
+    pub matches: fn(&[u8]) -> bool,
+    /// How the format is told, for people.
+    pub evidence: &'static str,
+    /// What is inside the file.
+    pub read: ReadFile,
+}
+
+/// Reads what is inside a file of a format (`path` logical, `head` its first bytes), from the file or the format's own
+/// tool; `Ok(None)` when nothing can be read here, such as when the tool is missing. Never runs anything inside the
+/// file.
+pub type ReadFile = fn(&Host, &Path, &[u8]) -> Result<Option<FilePackage>, SourceError>;
+
 /// Implemented, next to [`Source`], by every Linux source.
 pub trait LinuxSource: Source + Sized + 'static {
     /// `Some` for a distribution's own package manager; `None` (the default) for sources that work on every
     /// distribution, such as Flatpak or npm.
     const NATIVE: Option<Native> = None;
+
+    /// The installer files whose software this source lists once installed. A native source's formats are
+    /// recognised on every distribution, so a `.deb` on Fedora is named as Debian's (D45).
+    const FILES: &'static [FileFormat] = &[];
 
     fn create(context: &Context<'_>) -> Self;
 }
@@ -52,6 +80,7 @@ pub trait LinuxSource: Source + Sized + 'static {
 /// One registered source type. Each file in `src/sources/` defines one with `register!`.
 pub struct Provider {
     pub native: Option<Native>,
+    pub files: &'static [FileFormat],
     create: fn(&Context<'_>) -> Arc<dyn Source>,
 }
 
@@ -67,6 +96,7 @@ impl Provider {
     pub const fn of<T: LinuxSource>() -> Self {
         Self {
             native: T::NATIVE,
+            files: T::FILES,
             create: create::<T>,
         }
     }

@@ -6,12 +6,13 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Entry, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover, ScanContext,
-    Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Entry, FilePackage, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
+    ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
-use crate::files::{is_appimage, looks_like_version, resolve_symlinks, scope_of};
-use crate::provider::{Context, LinuxSource, register};
+use crate::files::{is_appimage, is_appimage_head, looks_like_version, resolve_symlinks, scope_of};
+use crate::formats::{elf_machine, is_compressed, is_tar, nothing_inside};
+use crate::provider::{Context, FileFormat, LinuxSource, register};
 use crate::recipe::{Recipe, recipes};
 
 pub const ID: SourceId = SourceId::new("manual");
@@ -36,11 +37,62 @@ const SCRIPT_HEAD_LEN: usize = 1024;
 pub struct ManualSource;
 
 impl LinuxSource for ManualSource {
+    /// What someone unpacks or runs by hand; what it installs is listed here, if anywhere.
+    const FILES: &'static [FileFormat] = &[
+        FileFormat {
+            id: "archive",
+            title: "Archive",
+            suffixes: &[
+                ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tar", ".zip",
+            ],
+            matches: is_archive,
+            evidence: "a tar archive (compressed or not) or a zip, by its name and first bytes",
+            read: nothing_inside,
+        },
+        FileFormat {
+            id: "script",
+            title: "Script",
+            suffixes: &[],
+            matches: is_script,
+            evidence: "a script (`#!` on its first line), whatever its name",
+            read: nothing_inside,
+        },
+        FileFormat {
+            id: "program",
+            title: "Installer program",
+            suffixes: &[".run", ".bin"],
+            matches: is_program,
+            evidence: "an ELF program named `.run` or `.bin`",
+            read: read_program,
+        },
+    ];
+
     fn create(_: &Context<'_>) -> Self {
         Self
     }
 }
 register!(ManualSource);
+
+fn is_archive(head: &[u8]) -> bool {
+    is_compressed(head) || is_tar(head) || head.starts_with(b"PK\x03\x04")
+}
+
+fn is_script(head: &[u8]) -> bool {
+    head.starts_with(b"#!")
+}
+
+/// An ELF program that is not an AppImage (those are the AppImage source's).
+fn is_program(head: &[u8]) -> bool {
+    head.starts_with(b"\x7fELF") && !is_appimage_head(head)
+}
+
+/// The processor its ELF header names.
+fn read_program(_: &Host, _: &Path, head: &[u8]) -> Result<Option<FilePackage>, SourceError> {
+    Ok(Some(FilePackage {
+        arch: elf_machine(head),
+        ..FilePackage::default()
+    }))
+}
 
 impl Source for ManualSource {
     fn info(&self) -> SourceInfo {

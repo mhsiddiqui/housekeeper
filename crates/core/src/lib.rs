@@ -9,6 +9,7 @@ pub mod helper;
 pub mod history;
 pub mod host;
 mod identity;
+pub mod inspect;
 pub mod inventory;
 pub mod leftovers;
 pub mod model;
@@ -31,6 +32,7 @@ pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use group::{AppGroup, Shared};
 pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, RootHelper, carry_out};
 pub use host::{Entry, FileType, Host};
+pub use inspect::{FilePackage, Fit, FormatInfo, InspectError, Inspection, Recognised};
 pub use inventory::{Housekeeper, Scan, Selection, SourceReport, SourceStatus};
 pub use leftovers::{FileIdentity, Leftover, LeftoverKind, Leftovers, MEASURE_BUDGET, ShellLine};
 pub use model::{

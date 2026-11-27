@@ -525,7 +525,11 @@ register!(ApkSource);
 
 <span class="k">impl</span> OwnerLookup <span class="k">for</span> ApkSource {
     <span class="c">// one batched query: `apk info --who-owns &lt;paths…&gt;`, parse "&lt;path&gt; is owned by &lt;pkg&gt;" into path → package names</span>
-}</code></pre></li>
+}</code></pre>
+  If its packages also come as files people download (Alpine's <code>.apk</code>), the same <code>impl LinuxSource</code>
+  declares them in <code>FILES</code>: the file-name ending, how the first bytes look, and how to read the name and
+  version inside. <code>housekeeper inspect</code> then recognises them on every distribution, and names them as
+  Alpine's on the others (D45).</li>
 
   <li><strong>Test it without an Alpine machine</strong>: a <code>Fixture</code> with a sample
   <code>/lib/apk/db/installed</code> and <code>/etc/apk/world</code>, and a <code>FakeRunner</code> answering the
@@ -619,13 +623,15 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/core/src/model.rs</code></td><td><code>Package</code>, <code>SourceInfo</code>, <code>SystemInfo</code>, kinds, reasons, scopes</td></tr>
   <tr><td><code>crates/core/src/source.rs</code>, <code>platform.rs</code></td><td>The <code>Source</code> and <code>Platform</code> traits</td></tr>
   <tr><td><code>crates/core/src/remove.rs</code></td><td><code>Remover</code> and <code>RemovalPlan</code>: tiers, steps, who runs each (D31)</td></tr>
+  <tr><td><code>crates/core/src/inspect.rs</code></td><td><code>Housekeeper::inspect</code>: what an installer file is and whether it fits this system (D45)</td></tr>
   <tr><td><code>crates/core/src/host.rs</code>, <code>command.rs</code></td><td><code>Host</code> and <code>CommandRunner</code></td></tr>
   <tr><td><code>crates/core/src/inventory.rs</code></td><td><code>Housekeeper</code>: the parallel scan</td></tr>
   <tr><td><code>crates/core/src/testing.rs</code></td><td><code>Fixture</code> and <code>FakeRunner</code> for tests</td></tr>
   <tr><td><code>crates/platform/linux/src/distro.rs</code></td><td><code>os-release</code> parsing (<code>ID</code>, <code>ID_LIKE</code>, image-based)</td></tr>
-  <tr><td><code>crates/platform/linux/src/provider.rs</code></td><td><code>LinuxSource</code>, <code>Native</code>, <code>Family</code>, <code>Context</code>: the contract every Linux source implements; <code>PackageTool</code>, <code>LinuxTool</code>, <code>Serves</code> for package tools</td></tr>
+  <tr><td><code>crates/platform/linux/src/provider.rs</code></td><td><code>LinuxSource</code>, <code>Native</code>, <code>Family</code>, <code>FileFormat</code>, <code>Context</code>: the contract every Linux source implements; <code>PackageTool</code>, <code>LinuxTool</code>, <code>Serves</code> for package tools</td></tr>
   <tr><td><code>crates/platform/linux/build.rs</code></td><td>Declares every file in <code>src/sources/</code> and <code>src/tools/</code> as a module and generates the <code>PROVIDERS</code> and <code>TOOLS</code> lists, and compiles in the recipes</td></tr>
   <tr><td><code>crates/platform/linux/src/files.rs</code>, <code>python.rs</code>, <code>kernel.rs</code></td><td>Helpers shared by several sources (AppImage detection, symlinks, <code>.dist-info</code> names, protecting the running kernel)</td></tr>
+  <tr><td><code>crates/platform/linux/src/formats.rs</code></td><td>Telling an installer file's format from its name and first bytes, across every source's <code>FILES</code> (D45)</td></tr>
   <tr><td><code>crates/platform/linux/src/lib.rs</code></td><td><code>LinuxPlatform</code>: picks the native source and its package tool and assembles all sources</td></tr>
   <tr><td><code>crates/platform/linux/src/sources/*.rs</code></td><td>One file per source; <code>dpkg.rs</code> is the reference to copy</td></tr>
   <tr><td><code>crates/platform/linux/src/tools/*.rs</code></td><td>One file per package tool (apt, dnf, zypper, rpm-ostree, pacman)</td></tr>
@@ -634,7 +640,7 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for; each OS crate sits beside it in <code>crates/platform/&lt;os&gt;/</code> (D35)</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
   <tr><td><code>crates/helper/src/main.rs</code>, <code>crates/core/src/helper.rs</code></td><td>The root helper that <code>pkexec</code> starts: one checked request in, one reply out (D40)</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D44)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D45)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 
