@@ -3,7 +3,7 @@
 - **Date:** 2026-11-28
 - **Branch / PR:** `docs/release-0.2.0-done`, #42
 - **Plan chunks:** none (release of the work prepared in 0050)
-- **Commits:** (filled in below)
+- **Commits:** 336a8fb
 
 ## What changed
 - This record only; no code or other document changed.
