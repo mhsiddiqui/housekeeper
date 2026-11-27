@@ -1,14 +1,15 @@
 //! An operating system: what it is and which sources it has.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::helper::{PackageRemoval, RootHelper};
 use crate::host::Host;
+use crate::inspect::Recognised;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Launcher, Metainfo, SystemInfo};
 use crate::queue::PackageLock;
-use crate::source::{ScanContext, Source};
+use crate::source::{ScanContext, Source, SourceError};
 
 /// Implemented once per operating system (`LinuxPlatform`, later macOS and Windows).
 pub trait Platform: Send + Sync {
@@ -81,6 +82,13 @@ pub trait Platform: Send + Sync {
     /// The user's shell startup files (logical paths), whose lines can load an installed tool.
     fn shell_files(&self, _host: &Host) -> Vec<PathBuf> {
         Vec::new()
+    }
+
+    /// What an installer file is (`path` logical, absolute, a regular file), told from its name and first bytes, with
+    /// what is inside as far as the file or its format's own tool says (D45); `Ok(None)` when it has no installer
+    /// format the platform knows. Nothing in the file is run.
+    fn recognise_file(&self, _host: &Host, _path: &Path) -> Result<Option<Recognised>, SourceError> {
+        Ok(None)
     }
 }
 
