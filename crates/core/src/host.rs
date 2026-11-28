@@ -10,6 +10,8 @@ use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
 use crate::command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 use crate::source::SourceError;
 
@@ -191,6 +193,43 @@ impl Host {
         fs::create_dir_all(self.real_path(path)).map_err(|e| SourceError::io(path, e))
     }
 
+    /// Creates the folder at `path` and its parents; those it creates are writable by their owner alone (mode 755 on
+    /// Unix, whatever the umask allows besides).
+    pub fn create_owner_dir(&self, path: impl AsRef<Path>) -> Result<(), SourceError> {
+        let path = path.as_ref();
+        let mut builder = fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o755);
+        builder
+            .create(self.real_path(path))
+            .map_err(|e| SourceError::io(path, e))
+    }
+
+    /// The SHA-256 checksum of the file at `path`, in lowercase hexadecimal as `sha256sum` prints it.
+    pub fn sha256(&self, path: impl AsRef<Path>) -> Result<String, SourceError> {
+        let path = path.as_ref();
+        let file = fs::File::open(self.resolve(path)).map_err(|e| SourceError::io(path, e))?;
+        copy_hashing(file, io::sink()).map_err(|e| SourceError::io(path, e))
+    }
+
+    /// Copies the file at `from` to a new file at `to` (nothing may be there yet; on Unix it gets mode 644), and
+    /// returns the SHA-256 checksum of what was copied. A copy that fails is removed.
+    pub fn copy_new(&self, from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<String, SourceError> {
+        let (from, to) = (from.as_ref(), to.as_ref());
+        let source = fs::File::open(self.resolve(from)).map_err(|e| SourceError::io(from, e))?;
+        let real = self.real_path(to);
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o644);
+        let target = options.open(&real).map_err(|e| SourceError::io(to, e))?;
+        copy_hashing(source, target).map_err(|e| {
+            let _ = fs::remove_file(&real);
+            SourceError::io(to, e)
+        })
+    }
+
     /// First `len` bytes of a file (fewer if the file is shorter).
     pub fn read_head(&self, path: impl AsRef<Path>, len: usize) -> Result<Vec<u8>, SourceError> {
         let path = path.as_ref();
@@ -327,6 +366,30 @@ fn file_type_of(meta: &fs::Metadata) -> FileType {
     } else {
         FileType::Other
     }
+}
+
+/// Copies everything `from` reads to `to`, and returns its SHA-256 checksum in lowercase hexadecimal.
+fn copy_hashing(mut from: impl Read, mut to: impl Write) -> io::Result<String> {
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0; 64 * 1024];
+    loop {
+        let read = match from.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        hasher.update(&buffer[..read]);
+        to.write_all(&buffer[..read])?;
+    }
+    to.flush()?;
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut hex = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        hex.push(char::from(HEX[usize::from(byte >> 4)]));
+        hex.push(char::from(HEX[usize::from(byte & 0xf)]));
+    }
+    Ok(hex)
 }
 
 /// Whether a file may be run: any of the Unix execute bits is set.

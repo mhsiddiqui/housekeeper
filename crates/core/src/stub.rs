@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::helper::{HelperReply, HelperRequest, RootHelper};
 use crate::host::Host;
+use crate::inspect::{FilePackage, FormatInfo, Recognised};
+use crate::install::{FileInstaller, InstallFile, InstallPlan};
 use crate::inventory::Housekeeper;
 use crate::leftovers::LeftoverKind;
 use crate::model::{Availability, Launcher, Metainfo, Package, Scope, SourceId, SourceInfo, SourceKind, SystemInfo};
@@ -40,6 +42,8 @@ pub struct Stub {
     pub simulation: Option<Simulation>,
     /// Its simulation fails.
     pub simulation_fails: bool,
+    /// What its file installer plans for every file; `None` means it installs no files.
+    pub install: Option<InstallPlan>,
 }
 
 impl Source for Stub {
@@ -71,6 +75,9 @@ impl Source for Stub {
     }
     fn remover(&self) -> Option<&dyn Remover> {
         (self.plan.is_some() || self.plan_fails).then_some(self as &dyn Remover)
+    }
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        self.install.is_some().then_some(self as &dyn FileInstaller)
     }
     fn install_roots(&self, _: &Host) -> Vec<PathBuf> {
         self.roots.iter().map(PathBuf::from).collect()
@@ -142,6 +149,14 @@ impl Simulator for Stub {
     }
 }
 
+impl FileInstaller for Stub {
+    fn plan(&self, _: &Host, _: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        self.install
+            .clone()
+            .ok_or_else(|| SourceError::parse("install plan", "none"))
+    }
+}
+
 /// A root helper that gives one reply to everything and remembers what it was asked.
 pub struct FakeHelper {
     reply: HelperReply,
@@ -194,6 +209,27 @@ impl Platform for TestPlatform {
     }
     fn root_helper(&self) -> Option<&dyn RootHelper> {
         self.helper.as_deref().map(|helper| helper as &dyn RootHelper)
+    }
+    /// A file named `<name>.pkg` holds the package `<name>` 1.0, which the first source lists once installed.
+    fn recognise_file(&self, _: &Host, path: &Path) -> Result<Option<Recognised>, SourceError> {
+        let Some(name) = path.to_str().and_then(|path| path.strip_suffix(".pkg")) else {
+            return Ok(None);
+        };
+        Ok(Some(Recognised {
+            format: FormatInfo {
+                id: "pkg".into(),
+                title: "Stub package".into(),
+            },
+            evidence: "its name".into(),
+            source: self.sources.first().map(|source| source.info().id),
+            made_for: Vec::new(),
+            package: Some(FilePackage {
+                name: name.rsplit('/').next().map(str::to_string),
+                version: Some("1.0".into()),
+                ..FilePackage::default()
+            }),
+            warnings: Vec::new(),
+        }))
     }
 }
 

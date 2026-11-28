@@ -28,10 +28,12 @@ pub mod text;
 pub mod trash;
 pub mod who;
 
-pub use carry::Removal;
+pub use carry::Recorded;
 pub use command::{Cmd, CommandRunner, Output, RunError, SystemRunner};
 pub use group::{AppGroup, Shared};
-pub use helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageRemoval, RootHelper, carry_out};
+pub use helper::{
+    HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, PackageInstall, PackageRemoval, RootHelper, carry_out,
+};
 pub use host::{Entry, FileType, Host};
 pub use inspect::{FilePackage, Fit, FormatInfo, InspectError, Inspection, Recognised};
 pub use install::{FileInstaller, InstallFile, InstallPlan, InstallSimulation, InstallSimulator};

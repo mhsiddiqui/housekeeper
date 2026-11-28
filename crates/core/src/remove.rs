@@ -223,11 +223,12 @@ pub enum Action {
         packages: Vec<String>,
         argv: Vec<String>,
     },
-    /// Installs package files through the system's package tool (D24, D46). Planned only: the root helper has no
-    /// install operation yet (plan chunk 5.5). `argv` is the command, for review.
-    InstallPackageFiles {
+    /// Installs a package file through the system's package tool (D24, D46). The root helper is given `tool`, `file`
+    /// and the file's checksum when it was inspected, installs its own copy and builds the command itself (D47);
+    /// `argv` is that command with the file's path, for review.
+    InstallPackageFile {
         tool: String,
-        files: Vec<PathBuf>,
+        file: PathBuf,
         argv: Vec<String>,
     },
 }

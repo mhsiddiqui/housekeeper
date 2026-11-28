@@ -1,10 +1,11 @@
-//! What Housekeeper's root helper does (decisions D4, D25, D31, D40): one typed operation in, one reply out.
+//! What Housekeeper's root helper does (decisions D4, D25, D31, D40, D47): one typed operation in, one reply out.
 //!
 //! The helper binary reads a [`HelperRequest`] as JSON on its standard input, hands it to [`carry_out`] and prints the
 //! [`HelperReply`]. Everything it is given is checked here: the package tool must be this system's, every package name
 //! must be a plain name the package database lists as installed, and the helper builds the command itself; a path to
-//! trash must be a plain one, no package's, and not part of the system. Nothing from the caller ever becomes an option
-//! or a shell string.
+//! trash must be a plain one, no package's, and not part of the system; a package file is installed from the helper's
+//! own copy, only when the copy is the file that was inspected and a package of the system's own format. Nothing from
+//! the caller ever becomes an option or a shell string.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -25,8 +26,9 @@ pub const HELPER_PROTOCOL: u32 = 1;
 /// Most packages one request may remove.
 pub const MAX_PACKAGES: usize = 100;
 
-/// How long a package tool may take to remove packages before it is stopped.
-pub const REMOVAL_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// How long one step of a change (a package tool removing or installing, an uninstaller) may take before it is
+/// stopped.
+pub const STEP_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// What a front end asks the helper to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +49,15 @@ pub enum HelperOperation {
     /// Moves a file or folder outside every home folder to root's Trash: a plan's
     /// [`Action::Trash`](crate::remove::Action::Trash) step for the helper (an AppImage in `/opt`, a recipe's folder).
     Trash { path: PathBuf },
+    /// Installs a package file of the system's own format through the system's package tool: the `tool` and `file` of
+    /// a plan's [`Action::InstallPackageFile`](crate::remove::Action::InstallPackageFile) step, and the SHA-256
+    /// checksum the file had when it was inspected (D47). The helper installs its own copy, and only if the copy has
+    /// that checksum.
+    InstallPackageFile {
+        tool: String,
+        file: PathBuf,
+        sha256: String,
+    },
 }
 
 /// How a front end reaches the root helper: through `pkexec`, which asks for an administrator's password, or directly
@@ -114,6 +125,17 @@ pub trait PackageRemoval: Send + Sync {
     fn command(&self, packages: &[String]) -> Vec<String>;
 }
 
+/// What the root helper needs to install package files with the system's package tool (D46, D47): the formats it
+/// installs and the command that installs one file. The same command is shown in install plans.
+pub trait PackageInstall: PackageRemoval {
+    /// The formats it installs, as `FormatInfo::id` (`deb`).
+    fn formats(&self) -> &'static [&'static str];
+
+    /// The command that installs the file at `file` (logical, absolute): the tool's fixed arguments, then the file's
+    /// path. May read the file (whether it is signed) to pick the arguments.
+    fn install_command(&self, host: &Host, file: &Path) -> Result<Vec<String>, SourceError>;
+}
+
 /// Checks `request` against `platform` and carries it out on `host`.
 pub fn carry_out(platform: &dyn Platform, host: &Host, request: &HelperRequest) -> HelperReply {
     if request.protocol != HELPER_PROTOCOL {
@@ -125,18 +147,25 @@ pub fn carry_out(platform: &dyn Platform, host: &Host, request: &HelperRequest) 
     match &request.operation {
         HelperOperation::RemovePackages { tool, packages } => remove_packages(platform, host, tool, packages),
         HelperOperation::Trash { path } => trash_system_path(platform, host, path),
+        HelperOperation::InstallPackageFile { tool, file, sha256 } => {
+            install_package_file(platform, host, tool, file, sha256)
+        }
     }
+}
+
+/// An absolute path without `.` or `..` in it.
+fn is_plain(path: &Path) -> bool {
+    path.is_absolute()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)))
 }
 
 /// Trashes `path` when it is a plain absolute path at least two folders deep, holds no symbolic link, is not (and
 /// holds no) folder the system is made of, and no package owns it (a package's files go with the package).
 fn trash_system_path(platform: &dyn Platform, host: &Host, path: &Path) -> HelperReply {
     let shown = path.display();
-    let plain = path.is_absolute()
-        && path
-            .components()
-            .all(|c| matches!(c, Component::RootDir | Component::Normal(_)));
-    if !plain {
+    if !is_plain(path) {
         return HelperReply::refused(format!("{shown} is not a plain absolute path"));
     }
     if path.components().count() < 3 {
@@ -210,11 +239,111 @@ fn remove_packages(platform: &dyn Platform, host: &Host, tool: &str, packages: &
             Err(e) => return HelperReply::refused(format!("could not check whether {name} is installed: {e}")),
         }
     }
-    let command = removal.command(packages);
+    run_tool(host, tool, removal.command(packages))
+}
+
+/// Installs the package file at `file` with the system's package tool, from the helper's own copy in the platform's
+/// staging folder, which only root may write to (D47). The copy must have the checksum the file had when it was
+/// inspected, and be a package of a format the tool installs, made for this system. The copy is removed afterwards,
+/// whatever happened.
+fn install_package_file(platform: &dyn Platform, host: &Host, tool: &str, file: &Path, sha256: &str) -> HelperReply {
+    let Some(install) = platform.package_install() else {
+        return HelperReply::refused("this system has no package tool Housekeeper can install packages with");
+    };
+    if tool != install.tool() {
+        return HelperReply::refused(format!(
+            "this system's packages are installed with {}, not {tool}",
+            install.tool()
+        ));
+    }
+    if !is_sha256(sha256) {
+        return HelperReply::refused(format!("{sha256:?} is not a SHA-256 checksum"));
+    }
+    let shown = file.display();
+    let name = match file.file_name() {
+        Some(name) if is_plain(file) => name.to_string_lossy(),
+        _ => return HelperReply::refused(format!("{shown} is not a plain absolute path")),
+    };
+    let Some(staging) = platform.helper_staging().map(Path::new) else {
+        return HelperReply::refused("this system has no folder for the helper's copies of the files it installs");
+    };
+    if let Err(reason) = owner_only_folder(host, staging) {
+        return HelperReply::refused(reason);
+    }
+    // Only the helper writes here: a copy already there was left by an earlier helper with the same process ID.
+    let copy = staging.join(format!("{}-{name}", std::process::id()));
+    if host.symlink_metadata(&copy).is_some() {
+        let _ = host.remove_file(&copy);
+    }
+    let reply = match host.copy_new(file, &copy) {
+        Ok(copied) if copied == sha256 => install_copy(platform, install, host, &copy),
+        Ok(copied) => HelperReply::refused(format!(
+            "{shown} changed since it was inspected: its SHA-256 checksum is {copied}, not {sha256}"
+        )),
+        Err(e) => HelperReply::refused(format!("could not copy {shown}: {e}")),
+    };
+    // A copy that cannot be removed stays where only root can change it, until a helper with its process ID comes.
+    let _ = host.remove_file(&copy);
+    reply
+}
+
+/// Installs `copy` when it is a package of a format `install` takes, made for this system.
+fn install_copy(platform: &dyn Platform, install: &dyn PackageInstall, host: &Host, copy: &Path) -> HelperReply {
+    let tool = install.tool();
+    match platform.recognise_file(host, copy) {
+        Ok(Some(found)) if found.made_for.is_empty() && install.formats().contains(&found.format.id.as_str()) => {}
+        Ok(Some(found)) => {
+            return HelperReply::refused(format!(
+                "{} files are not installed with {tool} here",
+                found.format.title
+            ));
+        }
+        Ok(None) => return HelperReply::refused("it is no package file"),
+        Err(e) => return HelperReply::refused(format!("could not tell what it is: {e}")),
+    }
+    match install.install_command(host, copy) {
+        Ok(command) => run_tool(host, tool, command),
+        Err(e) => HelperReply::refused(format!("{tool} gave no command for it: {e}")),
+    }
+}
+
+/// Makes `dir` if it is missing, and checks that it is a real folder (no symbolic link on its path) that only its
+/// owner, who also owns the folder it is in, may change; otherwise says why it cannot be used.
+fn owner_only_folder(host: &Host, dir: &Path) -> Result<(), String> {
+    let shown = dir.display();
+    host.create_owner_dir(dir)
+        .map_err(|e| format!("could not make {shown}: {e}"))?;
+    if host.canonical(dir) != dir {
+        return Err(format!("{shown} has a symbolic link in its path"));
+    }
+    let parent = dir.parent().and_then(|parent| host.symlink_metadata(parent));
+    match (host.symlink_metadata(dir), parent) {
+        (Some(meta), Some(parent)) if meta.is_dir() && changed_by_owner_alone(&meta, &parent) => Ok(()),
+        _ => Err(format!(
+            "{shown} may be changed by others than the owner of the folder it is in"
+        )),
+    }
+}
+
+/// Owned by the owner of `parent`, and writable by its owner alone.
+#[cfg(unix)]
+fn changed_by_owner_alone(meta: &std::fs::Metadata, parent: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    meta.uid() == parent.uid() && meta.mode() & 0o022 == 0
+}
+
+/// Systems without Unix permissions have nothing finer to check.
+#[cfg(not(unix))]
+fn changed_by_owner_alone(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    true
+}
+
+/// Runs `command`, a package tool's (named `tool`), within [`STEP_TIMEOUT`].
+fn run_tool(host: &Host, tool: &str, command: Vec<String>) -> HelperReply {
     let Some((program, args)) = command.split_first() else {
         return HelperReply::refused(format!("{tool} gave no command"));
     };
-    let cmd = Cmd::new(program).args(args).timeout(REMOVAL_TIMEOUT);
+    let cmd = Cmd::new(program).args(args).timeout(STEP_TIMEOUT);
     match host.run(&cmd) {
         Ok(output) if output.success() => HelperReply::Done {
             command,
@@ -236,6 +365,11 @@ fn remove_packages(platform: &dyn Platform, host: &Host, tool: &str, packages: &
     }
 }
 
+/// 64 lowercase hexadecimal digits, as [`Host::sha256`] writes a checksum.
+fn is_sha256(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 /// A package name as package databases write them (`libc6:i386`, `bash-5.3.20-11.1.x86_64`, `gtk+3`, `kernel-1:6.1`):
 /// letters, digits and `+ - . _ : ~ ^ @`, starting with a letter or digit, so it can never be read as an option, a
 /// pattern (`*`, `?`, `[`) or a path.
@@ -253,6 +387,7 @@ mod tests {
 
     use super::*;
     use crate::command::Output;
+    use crate::inspect::{FormatInfo, Recognised};
     use crate::model::SystemInfo;
     use crate::source::Source;
     use crate::testing::{FakeRunner, Fixture};
@@ -280,6 +415,16 @@ mod tests {
         }
     }
 
+    /// Installs `pkg` files with `tool install <file>`.
+    impl PackageInstall for Tool {
+        fn formats(&self) -> &'static [&'static str] {
+            &["pkg"]
+        }
+        fn install_command(&self, _: &Host, file: &Path) -> Result<Vec<String>, SourceError> {
+            Ok(vec!["tool".into(), "install".into(), file.display().to_string()])
+        }
+    }
+
     struct System {
         system: SystemInfo,
         tool: Option<Tool>,
@@ -295,11 +440,37 @@ mod tests {
         fn package_removal(&self) -> Option<&dyn PackageRemoval> {
             self.tool.as_ref().map(|tool| tool as &dyn PackageRemoval)
         }
+        fn package_install(&self) -> Option<&dyn PackageInstall> {
+            self.tool.as_ref().map(|tool| tool as &dyn PackageInstall)
+        }
+        fn helper_staging(&self) -> Option<&'static str> {
+            Some("/var/cache/housekeeper")
+        }
         fn system_paths(&self) -> &'static [&'static str] {
             &["/opt", "/usr", "/usr/share"]
         }
         fn home_paths(&self) -> &'static [&'static str] {
             &["/home", "/root"]
+        }
+        /// A file starting `PKG` is this system's package; one starting `DEB` another system's.
+        fn recognise_file(&self, host: &Host, path: &Path) -> Result<Option<Recognised>, SourceError> {
+            let head = host.read_head(path, 3)?;
+            let (id, made_for) = match head.as_slice() {
+                b"PKG" => ("pkg", Vec::new()),
+                b"DEB" => ("deb", vec!["debian".to_string()]),
+                _ => return Ok(None),
+            };
+            Ok(Some(Recognised {
+                format: FormatInfo {
+                    id: id.into(),
+                    title: id.to_uppercase(),
+                },
+                evidence: "its first bytes".into(),
+                source: None,
+                made_for,
+                package: None,
+                warnings: Vec::new(),
+            }))
         }
     }
 
@@ -464,6 +635,69 @@ mod tests {
         assert!(refused("/opt/link/Tool.AppImage").contains("symbolic link"));
         assert!(refused("/opt/gone").contains("not there"));
         assert!(host.exists("/home/user/precious") && host.exists("/opt/real/Tool.AppImage"));
+    }
+
+    const APP: &str = "/home/user/Downloads/app.pkg";
+    /// `sha256sum` of `PKG app 1.0`.
+    const APP_SHA256: &str = "e9dd8097fe79de71a19aa8c28bce427c6173ec5f8d9b0d863471bd155fdd15e1";
+
+    fn install_request(file: &str, sha256: &str) -> HelperRequest {
+        HelperRequest {
+            protocol: HELPER_PROTOCOL,
+            operation: HelperOperation::InstallPackageFile {
+                tool: "tool".into(),
+                file: file.into(),
+                sha256: sha256.into(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_package_file_is_installed_from_the_helpers_own_copy_which_then_goes() {
+        let fixture = Fixture::new();
+        fixture.file(APP, "PKG app 1.0");
+        let copy = format!("/var/cache/housekeeper/{}-app.pkg", std::process::id());
+        let runner = FakeRunner::new().respond(&format!("tool install {copy}"), "Installing app\n");
+        let host = fixture.host(runner);
+        let reply = carry_out(&system(Some(VIM)), &host, &install_request(APP, APP_SHA256));
+        assert_eq!(
+            reply,
+            HelperReply::Done {
+                command: vec!["tool".into(), "install".into(), copy.clone()],
+                stdout: "Installing app\n".into(),
+                stderr: String::new(),
+            }
+        );
+        assert!(!host.exists(&copy), "the copy is removed once installed");
+        assert!(host.exists(APP), "the user's file stays");
+    }
+
+    #[test]
+    fn a_changed_file_or_another_systems_package_is_refused_before_anything_runs() {
+        let fixture = Fixture::new();
+        fixture
+            .file(APP, "PKG app 1.0, changed after it was inspected")
+            .file("/home/user/Downloads/app.deb", "DEB app 1.0");
+        let host = fixture.host(FakeRunner::new());
+        let refused = |request: HelperRequest| refusal(carry_out(&system(Some(VIM)), &host, &request));
+        assert!(refused(install_request(APP, APP_SHA256)).contains("changed since it was inspected"));
+        let deb = host.sha256("/home/user/Downloads/app.deb").unwrap();
+        assert_eq!(
+            refused(install_request("/home/user/Downloads/app.deb", &deb)),
+            "DEB files are not installed with tool here"
+        );
+        assert!(refused(install_request(APP, "E9DD")).contains("not a SHA-256 checksum"));
+        assert!(refused(install_request("Downloads/app.pkg", APP_SHA256)).contains("not a plain absolute path"));
+        let mut other_tool = install_request(APP, APP_SHA256);
+        if let HelperOperation::InstallPackageFile { tool, .. } = &mut other_tool.operation {
+            *tool = "dnf".into();
+        }
+        assert!(refused(other_tool).contains("installed with tool, not dnf"));
+        assert_eq!(
+            host.read_dir("/var/cache/housekeeper").unwrap(),
+            [],
+            "no copy is left behind"
+        );
     }
 
     #[test]

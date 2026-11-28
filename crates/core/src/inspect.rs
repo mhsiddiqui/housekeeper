@@ -69,6 +69,9 @@ pub enum Fit {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Inspection {
     pub path: PathBuf,
+    /// The file's SHA-256 checksum, lowercase hexadecimal: to compare with the one its publisher gives, and what the
+    /// root helper checks its copy against before installing it (D47).
+    pub sha256: String,
     pub format: FormatInfo,
     pub evidence: String,
     /// The source that would list it once installed; `None` for another system's own package format.
@@ -78,6 +81,50 @@ pub struct Inspection {
     /// How it would be installed, when it fits and its source can say (D46).
     pub install: Option<InstallPlan>,
     pub warnings: Vec<String>,
+}
+
+impl Inspection {
+    /// The name of the package inside, or else the file's name.
+    pub fn package_name(&self) -> String {
+        self.package
+            .as_ref()
+            .and_then(|package| package.name.clone())
+            .unwrap_or_else(|| {
+                self.path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            })
+    }
+
+    /// What it installs, for people: the package's title when the file has one, otherwise [`Self::package_name`].
+    pub fn display_name(&self) -> String {
+        self.package
+            .as_ref()
+            .and_then(|package| package.title.clone())
+            .unwrap_or_else(|| self.package_name())
+    }
+
+    /// Why the file is not installed as inspected: it does not fit this system, or its install plan is missing,
+    /// blocked or empty. `None` when its plan can be carried out.
+    pub fn refusal(&self) -> Option<String> {
+        match (&self.fit, &self.install) {
+            (Fit::OtherSystem { families }, _) => {
+                Some(format!("it is a package for {} systems", families.join(" and ")))
+            }
+            (Fit::SourceMissing { reason }, _) => Some(format!("what installs it is not here: {reason}")),
+            (Fit::OtherArch { arch }, _) => Some(format!("it is built for {arch}")),
+            (Fit::Fits, None) => Some(format!(
+                "Housekeeper has no install plan for {} files yet",
+                self.format.title
+            )),
+            (Fit::Fits, Some(plan)) if !plan.blockers.is_empty() => {
+                Some(format!("the plan is blocked: {}", plan.blockers.join("; ")))
+            }
+            (Fit::Fits, Some(plan)) if plan.steps.is_empty() => Some("nothing says how it is installed".into()),
+            (Fit::Fits, Some(_)) => None,
+        }
+    }
 }
 
 /// Why a file could not be inspected.
@@ -95,7 +142,8 @@ impl Housekeeper {
     /// What the file at `path` (logical, absolute) is, and whether it is made for this system: its own package
     /// format, the source that installs it being here, and the processor it is built for, in that order. A file that
     /// fits gets its install plan from its source, simulated where the package manager can without root (D46).
-    /// `Ok(None)` when the platform knows no installer format the file has. Nothing is installed or run from the file.
+    /// `Ok(None)` when the platform knows no installer format the file has. Nothing is installed or run from the file;
+    /// it is read whole once, for its checksum.
     pub fn inspect(&self, path: &Path) -> Result<Option<Inspection>, InspectError> {
         match self.host.file_type(path) {
             None => return Err(InspectError::Missing(path.to_path_buf())),
@@ -105,6 +153,7 @@ impl Housekeeper {
         let Some(recognised) = self.platform.recognise_file(&self.host, path)? else {
             return Ok(None);
         };
+        let sha256 = self.host.sha256(path)?;
         let source = recognised
             .source
             .as_ref()
@@ -139,6 +188,7 @@ impl Housekeeper {
         };
         Ok(Some(Inspection {
             path: path.to_path_buf(),
+            sha256,
             format: recognised.format,
             evidence: recognised.evidence,
             source: source.map(|source| source.info()),

@@ -1,9 +1,11 @@
-//! Carrying out a reviewed removal (plan 4.5, decisions D37, D41, D44): the plan's steps in order through the operation
-//! queue, as the user or through the root helper, then the leftovers the user chose, then one history entry.
+//! Carrying out a reviewed change (decisions D37, D41, D44, D47): a removal (plan 4.5) or an install from a file (5.5).
+//! The plan's steps run in order as one job of the operation queue, as the user or through the root helper; a removal
+//! then moves the leftovers the user chose to the Trash; one history entry records how it went.
 
 use crate::command::Cmd;
-use crate::helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, REMOVAL_TIMEOUT};
+use crate::helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, STEP_TIMEOUT};
 use crate::history::{Change, ChangeOutcome, HistoryEntry, StepOutcome, StepRecord, record, unix_now};
+use crate::inspect::Inspection;
 use crate::inventory::Housekeeper;
 use crate::leftovers::Leftover;
 use crate::queue::{Cancel, Event, Job, Outcome, Queue};
@@ -11,9 +13,9 @@ use crate::remove::{Action, Actor, RemovalPlan, Step};
 use crate::show::{Details, Lookup};
 use crate::trash::{TrashError, trash};
 
-/// What came of a removal.
+/// What came of a change.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Removal {
+pub struct Recorded {
     /// As written to the history.
     pub entry: HistoryEntry,
     /// Why the entry could not be written to the history, if it could not.
@@ -43,6 +45,27 @@ impl Housekeeper {
         Ok(())
     }
 
+    /// Whether `reviewed` still describes the file and the system (D37, D47): the file has the same contents (its
+    /// checksum), still fits, and planning its install again (simulation included) gives the same plan. `Err` says
+    /// what changed.
+    pub fn still_as_inspected(&self, reviewed: &Inspection) -> Result<(), String> {
+        let now = match self.inspect(&reviewed.path) {
+            Ok(Some(now)) => now,
+            Ok(None) => return Err("it is no longer a file Housekeeper knows".into()),
+            Err(e) => return Err(e.to_string()),
+        };
+        if now.sha256 != reviewed.sha256 {
+            return Err("the file changed (its SHA-256 checksum is not the same)".into());
+        }
+        if now.fit != reviewed.fit {
+            return Err("whether it fits this system changed".into());
+        }
+        if now.install != reviewed.install {
+            return Err("planning its install again gives a different plan (what it would take changed)".into());
+        }
+        Ok(())
+    }
+
     /// Carries out `reviewed`'s removal plan, then moves `leftovers` (the folders the user chose) to the Trash, and
     /// records the outcome in the history. Steps run in order and stop at the first that fails; leftovers go only when
     /// every step was done. The change waits in the operation queue while its backend's lock is held; `cancel` stops it
@@ -53,7 +76,7 @@ impl Housekeeper {
         leftovers: &[Leftover],
         cancel: &Cancel,
         events: &(dyn Fn(Event) + Sync),
-    ) -> Removal {
+    ) -> Recorded {
         let plan = reviewed.removal.clone().unwrap_or_else(RemovalPlan::unknown);
         let package = &reviewed.package;
         let refusal = if !plan.blockers.is_empty() {
@@ -63,54 +86,94 @@ impl Housekeeper {
         } else {
             None
         };
+        let job = ChangeJob {
+            housekeeper: self,
+            backend: backend(&plan.steps).unwrap_or(package.source.as_str()).to_string(),
+            steps: &plan.steps,
+            sha256: None,
+            leftovers,
+        };
+        let entry = HistoryEntry {
+            at: 0,
+            change: Change::Remove,
+            item: package.key(),
+            title: package.display_name().to_string(),
+            file: None,
+            steps: Vec::new(),
+            outcome: ChangeOutcome::NotDone,
+        };
+        self.carry(entry, job, refusal, cancel, events)
+    }
+
+    /// Carries out `reviewed`'s install plan and records the outcome in the history (D47). Steps run in order and stop
+    /// at the first that fails; a step for the root helper has it install its own copy of the file, and only if the
+    /// copy has the checksum the inspection read. The change waits in the operation queue while its backend's lock is
+    /// held; `cancel` stops it before it starts. A file that does not fit, or whose plan is missing, blocked or empty,
+    /// is not installed.
+    pub fn install(&self, reviewed: &Inspection, cancel: &Cancel, events: &(dyn Fn(Event) + Sync)) -> Recorded {
+        let steps = reviewed.install.as_ref().map_or(&[][..], |plan| plan.steps.as_slice());
+        let source = reviewed.source.as_ref().map_or("", |source| source.id.as_str());
+        let job = ChangeJob {
+            housekeeper: self,
+            backend: backend(steps).unwrap_or(source).to_string(),
+            steps,
+            sha256: Some(&reviewed.sha256),
+            leftovers: &[],
+        };
+        let entry = HistoryEntry {
+            at: 0,
+            change: Change::Install,
+            item: format!("{source}:{}", reviewed.package_name()),
+            title: reviewed.display_name(),
+            file: Some(reviewed.path.clone()),
+            steps: Vec::new(),
+            outcome: ChangeOutcome::NotDone,
+        };
+        self.carry(entry, job, reviewed.refusal(), cancel, events)
+    }
+
+    /// Runs `job` through the operation queue, unless `refusal` says why not, and records how it went in `entry`,
+    /// which is then added to the history.
+    fn carry(
+        &self,
+        mut entry: HistoryEntry,
+        job: ChangeJob<'_>,
+        refusal: Option<String>,
+        cancel: &Cancel,
+        events: &(dyn Fn(Event) + Sync),
+    ) -> Recorded {
+        let (steps, leftovers) = (job.steps, job.leftovers);
         let records = match refusal {
-            Some(reason) => skipped(&plan.steps, leftovers, &reason),
-            None => {
-                let job = RemovalJob {
-                    housekeeper: self,
-                    backend: backend(&plan.steps).unwrap_or(package.source.as_str()).to_string(),
-                    steps: &plan.steps,
-                    leftovers,
-                };
-                match Queue::new(vec![job])
-                    .run(self.platform.as_ref(), &self.host, cancel, events)
-                    .pop()
-                {
-                    Some(Outcome::Ran(records)) => records,
-                    Some(Outcome::LockTimeout(holder)) => {
-                        let who = holder.program.unwrap_or_else(|| "another program".into());
-                        let reason = format!("{who} held {} for longer than Housekeeper waits", holder.lock.display());
-                        skipped(&plan.steps, leftovers, &reason)
-                    }
-                    Some(Outcome::Cancelled) | None => skipped(&plan.steps, leftovers, "cancelled before it started"),
+            Some(reason) => skipped(steps, leftovers, &reason),
+            None => match Queue::new(vec![job])
+                .run(self.platform.as_ref(), &self.host, cancel, events)
+                .pop()
+            {
+                Some(Outcome::Ran(records)) => records,
+                Some(Outcome::LockTimeout(holder)) => {
+                    let who = holder.program.unwrap_or_else(|| "another program".into());
+                    let reason = format!("{who} held {} for longer than Housekeeper waits", holder.lock.display());
+                    skipped(steps, leftovers, &reason)
                 }
-            }
+                Some(Outcome::Cancelled) | None => skipped(steps, leftovers, "cancelled before it started"),
+            },
         };
         // Done when every step of the plan was; a leftover that changed since it was found and stayed does not undo it.
-        let outcome = if records.iter().any(|r| matches!(r.outcome, StepOutcome::Failed { .. })) {
+        entry.outcome = if records.iter().any(|r| matches!(r.outcome, StepOutcome::Failed { .. })) {
             ChangeOutcome::Failed
-        } else if records[..plan.steps.len()]
-            .iter()
-            .all(|r| r.outcome == StepOutcome::Done)
-            && !plan.steps.is_empty()
-        {
+        } else if !steps.is_empty() && records[..steps.len()].iter().all(|r| r.outcome == StepOutcome::Done) {
             ChangeOutcome::Done
         } else {
             ChangeOutcome::NotDone
         };
-        let entry = HistoryEntry {
-            at: unix_now(),
-            change: Change::Remove,
-            item: package.key(),
-            title: package.display_name().to_string(),
-            steps: records,
-            outcome,
-        };
+        entry.steps = records;
+        entry.at = unix_now();
         let history_error = record(&self.host, &entry).err().map(|e| e.to_string());
-        Removal { entry, history_error }
+        Recorded { entry, history_error }
     }
 
-    fn run_step(&self, step: &Step) -> StepOutcome {
+    /// Carries out one step. A package file is installed only with `sha256`, its checksum when it was inspected.
+    fn run_step(&self, step: &Step, sha256: Option<&str>) -> StepOutcome {
         match (&step.by, &step.action) {
             (Actor::User, Action::Run { argv }) => {
                 let Some((program, args)) = argv.split_first() else {
@@ -118,7 +181,7 @@ impl Housekeeper {
                         reason: "the step has no command".into(),
                     };
                 };
-                match self.host.run(&Cmd::new(program).args(args).timeout(REMOVAL_TIMEOUT)) {
+                match self.host.run(&Cmd::new(program).args(args).timeout(STEP_TIMEOUT)) {
                     Ok(output) if output.success() => StepOutcome::Done,
                     Ok(output) => StepOutcome::Failed {
                         reason: failure(output.code, &output.stderr),
@@ -135,11 +198,18 @@ impl Housekeeper {
                 tool: tool.clone(),
                 packages: packages.clone(),
             }),
+            (_, Action::InstallPackageFile { tool, file, .. }) => match sha256 {
+                Some(sha256) => self.ask_helper(HelperOperation::InstallPackageFile {
+                    tool: tool.clone(),
+                    file: file.clone(),
+                    sha256: sha256.to_string(),
+                }),
+                None => StepOutcome::Failed {
+                    reason: "a package file is installed only after it is inspected".into(),
+                },
+            },
             (Actor::Helper, Action::Run { .. }) => StepOutcome::Failed {
                 reason: "the root helper does not run commands it is given".into(),
-            },
-            (_, Action::InstallPackageFiles { .. }) => StepOutcome::Failed {
-                reason: "installing is not part of a removal".into(),
             },
         }
     }
@@ -167,15 +237,17 @@ impl Housekeeper {
     }
 }
 
-/// One item's removal for the queue.
-struct RemovalJob<'a> {
+/// One change for the queue: a removal's or an install's steps, then the leftovers a removal takes.
+struct ChangeJob<'a> {
     housekeeper: &'a Housekeeper,
     backend: String,
     steps: &'a [Step],
+    /// The checksum an install's file had when it was inspected.
+    sha256: Option<&'a str>,
     leftovers: &'a [Leftover],
 }
 
-impl Job for RemovalJob<'_> {
+impl Job for ChangeJob<'_> {
     type Output = Vec<StepRecord>;
 
     fn backend(&self) -> &str {
@@ -191,7 +263,7 @@ impl Job for RemovalJob<'_> {
                     reason: "an earlier step failed".into(),
                 }
             } else {
-                self.housekeeper.run_step(step)
+                self.housekeeper.run_step(step, self.sha256)
             };
             failed |= matches!(outcome, StepOutcome::Failed { .. });
             records.push(StepRecord {
@@ -225,7 +297,7 @@ impl Job for RemovalJob<'_> {
 /// The package tool the plan changes packages with, which is the backend whose lock it waits for.
 fn backend(steps: &[Step]) -> Option<&str> {
     steps.iter().find_map(|step| match &step.action {
-        Action::RemovePackages { tool, .. } => Some(tool.as_str()),
+        Action::RemovePackages { tool, .. } | Action::InstallPackageFile { tool, .. } => Some(tool.as_str()),
         _ => None,
     })
 }
@@ -259,8 +331,11 @@ fn failure(code: Option<i32>, stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::history::history;
+    use crate::install::InstallPlan;
     use crate::remove::Tier;
     use crate::stub::{Stub, housekeeper_removing, package};
     use crate::testing::{FakeRunner, Fixture, HOME};
@@ -300,8 +375,8 @@ mod tests {
         }
     }
 
-    fn outcomes(removal: &Removal) -> Vec<&StepOutcome> {
-        removal.entry.steps.iter().map(|record| &record.outcome).collect()
+    fn outcomes(recorded: &Recorded) -> Vec<&StepOutcome> {
+        recorded.entry.steps.iter().map(|record| &record.outcome).collect()
     }
 
     #[test]
@@ -385,5 +460,70 @@ mod tests {
         details.package.version = Some("1.0".into());
         let change = hk.still_as_reviewed(&details).unwrap_err();
         assert!(change.contains("version changed from 1.0"), "{change}");
+    }
+
+    /// `stub`, which installs `.pkg` files through the system's package tool, run by the root helper.
+    fn installer() -> Stub {
+        Stub {
+            id: "stub",
+            install: Some(InstallPlan::new(vec![Step::install_package_file(
+                "apt",
+                home("Downloads/app.pkg"),
+                vec!["apt-get".into(), "install".into()],
+            )])),
+            ..Stub::default()
+        }
+    }
+
+    fn inspected(hk: &Housekeeper) -> Inspection {
+        hk.inspect(Path::new(&home("Downloads/app.pkg"))).unwrap().unwrap()
+    }
+
+    #[test]
+    fn an_inspected_file_is_installed_by_the_helper_only_with_the_checksum_it_had_and_recorded() {
+        let fixture = Fixture::new();
+        fixture.file(&home("Downloads/app.pkg"), "PKG app 1.0");
+        let (hk, helper) = housekeeper_removing(&fixture, vec![installer()], FakeRunner::new(), done());
+        let inspection = inspected(&hk);
+        assert_eq!(hk.still_as_inspected(&inspection), Ok(()));
+
+        let installed = hk.install(&inspection, &Cancel::default(), &|_| {});
+        assert_eq!(installed.entry.outcome, ChangeOutcome::Done);
+        assert_eq!(
+            helper.asked.lock().unwrap()[0].operation,
+            HelperOperation::InstallPackageFile {
+                tool: "apt".into(),
+                file: home("Downloads/app.pkg").into(),
+                sha256: "e9dd8097fe79de71a19aa8c28bce427c6173ec5f8d9b0d863471bd155fdd15e1".into(),
+            },
+            "the helper is given the tool, the file and its checksum when inspected, not the command"
+        );
+        assert_eq!(
+            (installed.entry.item.as_str(), installed.entry.change),
+            ("stub:app", Change::Install)
+        );
+        assert_eq!(history(&fixture.host(FakeRunner::new())).unwrap(), [installed.entry]);
+    }
+
+    #[test]
+    fn a_file_changed_since_it_was_inspected_is_not_installed() {
+        let fixture = Fixture::new();
+        fixture.file(&home("Downloads/app.pkg"), "PKG app 1.0");
+        let (hk, helper) = housekeeper_removing(&fixture, vec![installer()], FakeRunner::new(), done());
+        let inspection = inspected(&hk);
+        fixture.file(&home("Downloads/app.pkg"), "PKG app 1.0, and something else");
+        let change = hk.still_as_inspected(&inspection).unwrap_err();
+        assert!(change.contains("SHA-256 checksum"), "{change}");
+
+        let mut blocked = inspection;
+        if let Some(plan) = &mut blocked.install {
+            plan.blockers.push("the package manager refuses: a conflict".into());
+        }
+        let installed = hk.install(&blocked, &Cancel::default(), &|_| {});
+        assert_eq!(installed.entry.outcome, ChangeOutcome::NotDone);
+        assert!(
+            helper.asked.lock().unwrap().is_empty(),
+            "a blocked plan asks nothing of the helper"
+        );
     }
 }
