@@ -1,12 +1,14 @@
 //! rpm-ostree, which layers packages on the image of Fedora Silverblue, Kinoite, Bazzite and the other Fedora Atomic
 //! systems (decision D3).
 
+use std::path::Path;
+
 use housekeeper_core::{
     FileInstaller, Host, InstallFile, InstallPlan, InstallReason, InstallSimulation, InstallSimulator, Package,
-    PackageRemoval, RemovalPlan, Remover, SourceError, Tier,
+    PackageInstall, PackageRemoval, RemovalPlan, Remover, SourceError, Tier,
 };
 
-use super::{command_for, installation, removal, rpm_install_simulation, rpm_installed};
+use super::{command_for, install_command_for, installation, removal, rpm_install_simulation, rpm_installed};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
 pub struct RpmOstree;
@@ -29,6 +31,10 @@ impl PackageTool for RpmOstree {
     }
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
         Some(self)
     }
 
@@ -67,11 +73,22 @@ impl Remover for RpmOstree {
     }
 }
 
+/// Layered on the image with `rpm-ostree install`, which imports the file then, so the copy the helper installs may go
+/// before the restart.
+impl PackageInstall for RpmOstree {
+    fn formats(&self) -> &'static [&'static str] {
+        &["rpm"]
+    }
+
+    fn install_command(&self, host: &Host, file: &Path) -> Result<Vec<String>, SourceError> {
+        Ok(install_command_for(&["rpm-ostree", "install"], host, file))
+    }
+}
+
 impl FileInstaller for RpmOstree {
-    /// Layered on the image with `rpm-ostree install`, effective after a restart. The product's advice for image-based
-    /// systems is a Flatpak for apps (D3).
+    /// Effective after a restart. The product's advice for image-based systems is a Flatpak for apps (D3).
     fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
-        Ok(installation(self, host, file, &["rpm-ostree", "install"])
+        Ok(installation(self, host, file)?
             .needs_restart()
             .caution("layered packages slow down every system update; for an app, a Flatpak is the usual choice here"))
     }

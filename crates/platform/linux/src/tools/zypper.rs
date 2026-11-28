@@ -1,11 +1,16 @@
 //! zypper, which changes the RPM database on openSUSE and SUSE Linux Enterprise.
 
+use std::path::Path;
+
 use housekeeper_core::{
     FileInstaller, Host, InstallFile, InstallPlan, InstallSimulation, InstallSimulator, LockHolder, Package,
-    PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+    PackageInstall, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
 };
 
-use super::{RPM_LOCKS, command_for, installation, removal, rpm_install_simulation, rpm_installed, rpm_simulation};
+use super::{
+    RPM_LOCKS, command_for, install_command_for, installation, removal, rpm_install_simulation, rpm_installed,
+    rpm_signed, rpm_simulation,
+};
 use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
@@ -32,6 +37,10 @@ impl PackageTool for Zypper {
         Some(self)
     }
 
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
+        Some(self)
+    }
+
     fn file_installer(&self) -> Option<&dyn FileInstaller> {
         Some(self)
     }
@@ -41,15 +50,34 @@ impl PackageTool for Zypper {
     }
 }
 
+/// `zypper install` with the file's path, which installs what it requires from the repositories too. zypper refuses a
+/// package nobody signed unless told `--allow-unsigned-rpm`, which the plan then says.
+impl PackageInstall for Zypper {
+    fn formats(&self) -> &'static [&'static str] {
+        &["rpm"]
+    }
+
+    fn install_command(&self, host: &Host, file: &Path) -> Result<Vec<String>, SourceError> {
+        let command: &[&str] = if rpm_signed(host, file)? {
+            &["zypper", "--non-interactive", "install"]
+        } else {
+            &["zypper", "--non-interactive", "install", "--allow-unsigned-rpm"]
+        };
+        Ok(install_command_for(command, host, file))
+    }
+}
+
 impl FileInstaller for Zypper {
-    /// `zypper install` with the file's path, which installs what it requires from the repositories too.
     fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
-        Ok(installation(
-            self,
-            host,
-            file,
-            &["zypper", "--non-interactive", "install"],
-        ))
+        let plan = installation(self, host, file)?;
+        Ok(if rpm_signed(host, file.path)? {
+            plan
+        } else {
+            plan.caution(
+                "it is not signed, so nobody vouches for where it came from; zypper installs it only with \
+                 --allow-unsigned-rpm",
+            )
+        })
     }
 
     fn simulator(&self) -> Option<&dyn InstallSimulator> {

@@ -1,11 +1,13 @@
 //! pacman, which changes its own database on Arch Linux and its derivatives.
 
+use std::path::Path;
+
 use housekeeper_core::{
     Cmd, FileInstaller, Host, InstallFile, InstallPlan, InstallSimulation, InstallSimulator, LockHolder, Package,
-    PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+    PackageInstall, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
 };
 
-use super::{command_for, installation, removal};
+use super::{command_for, install_command_for, installation, removal};
 use crate::formats::path_arg;
 use crate::lock::{self, LockFile};
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
@@ -30,6 +32,10 @@ impl PackageTool for Pacman {
     }
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        Some(self)
+    }
+
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
         Some(self)
     }
 
@@ -120,10 +126,20 @@ impl Simulator for Pacman {
     }
 }
 
+/// `pacman --upgrade` with the file's path, which installs what it depends on from the sync repositories too.
+impl PackageInstall for Pacman {
+    fn formats(&self) -> &'static [&'static str] {
+        &["pacman"]
+    }
+
+    fn install_command(&self, host: &Host, file: &Path) -> Result<Vec<String>, SourceError> {
+        Ok(install_command_for(&["pacman", "--upgrade", "--noconfirm"], host, file))
+    }
+}
+
 impl FileInstaller for Pacman {
-    /// `pacman --upgrade` with the file's path, which installs what it depends on from the sync repositories too.
     fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
-        Ok(installation(self, host, file, &["pacman", "--upgrade", "--noconfirm"]))
+        installation(self, host, file)
     }
 
     fn simulator(&self) -> Option<&dyn InstallSimulator> {

@@ -905,7 +905,7 @@ sudo-1.9.15-5.p5.fc41.x86_64\n"
             let plan = inspection.install.unwrap();
             assert_eq!(plan.steps.len(), 1);
             assert_eq!(plan.steps[0].by, housekeeper_core::Actor::Helper);
-            let housekeeper_core::Action::InstallPackageFiles { tool, argv, .. } = &plan.steps[0].action else {
+            let housekeeper_core::Action::InstallPackageFile { tool, argv, .. } = &plan.steps[0].action else {
                 panic!("{:?}", plan.steps[0].action);
             };
             assert_eq!(tool, "dnf");
@@ -960,6 +960,51 @@ sudo-1.9.15-5.p5.fc41.x86_64\n"
                 inspect("ID=fedora\n", "hello.src.rpm", &file, |_| FakeRunner::new()),
                 None
             );
+        }
+
+        #[test]
+        fn on_opensuse_zypper_takes_an_unsigned_package_only_when_told_and_the_plan_says_so() {
+            let file = lead(0, "hello-2.12.1-1.1");
+            let plan = |signatures: &'static str| {
+                let suse = "ID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n";
+                inspect(suse, "hello.rpm", &file, |real| {
+                    FakeRunner::new()
+                        .respond("rpm --version", "RPM version 4.20.0\n")
+                        .respond(&command(), LISTING)
+                        .respond(
+                            &format!("rpm -qp --nosignature --nodigest --queryformat {RPM_FILE_FORMAT} {real}"),
+                            "hello\t2.12.1-1.1\tnoarch\n",
+                        )
+                        .respond(
+                            &format!(
+                                "rpm -qp --nosignature --nodigest --queryformat {} {real}",
+                                crate::tools::RPM_SIGNATURES
+                            ),
+                            signatures,
+                        )
+                        .respond(&format!("rpm -U --test --nosignature --nodigest {real}"), "")
+                })
+                .unwrap()
+                .install
+                .unwrap()
+            };
+            let argv = |plan: &housekeeper_core::InstallPlan| match &plan.steps[0].action {
+                housekeeper_core::Action::InstallPackageFile { argv, .. } => argv[..argv.len() - 1].join(" "),
+                other => panic!("{other:?}"),
+            };
+
+            let unsigned = plan("(none)\n(none)\n(none)\n(none)\n");
+            assert_eq!(argv(&unsigned), "zypper --non-interactive install --allow-unsigned-rpm");
+            assert!(
+                unsigned.cautions[0].starts_with("it is not signed"),
+                "{:?}",
+                unsigned.cautions
+            );
+
+            let signed =
+                plan("RSA/SHA256, Tue Oct  1 12:00:00 2024, Key ID 35a2f86e29b700a4\n(none)\n(none)\n(none)\n");
+            assert_eq!(argv(&signed), "zypper --non-interactive install");
+            assert!(signed.cautions.is_empty(), "{:?}", signed.cautions);
         }
     }
 }

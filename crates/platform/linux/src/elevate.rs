@@ -4,14 +4,14 @@
 
 use std::time::Duration;
 
-use housekeeper_core::helper::{REMOVAL_TIMEOUT, effective_uid};
+use housekeeper_core::helper::{STEP_TIMEOUT, effective_uid};
 use housekeeper_core::{Cmd, HelperReply, HelperRequest, Host, RootHelper};
 
 /// Where the packages install the helper (and where its polkit action points).
 pub(crate) const HELPER: &str = "/usr/lib/housekeeper/housekeeper-helper";
 
-/// The helper's own limit, plus time for the password prompt.
-const ASK_TIMEOUT: Duration = Duration::from_secs(REMOVAL_TIMEOUT.as_secs() + 15 * 60);
+/// The helper's own limit, plus time for the password prompt (and for copying a file it installs).
+const ASK_TIMEOUT: Duration = Duration::from_secs(STEP_TIMEOUT.as_secs() + 15 * 60);
 
 pub(crate) struct Pkexec;
 

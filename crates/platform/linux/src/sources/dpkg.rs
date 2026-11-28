@@ -689,7 +689,7 @@ old-mailer\told-mailer\trc \t\tlibc6 (>= 2.17), mail-transport-agent\t
             })
             .unwrap();
             let plan = inspection.install.unwrap();
-            let housekeeper_core::Action::InstallPackageFiles { tool, argv, .. } = &plan.steps[0].action else {
+            let housekeeper_core::Action::InstallPackageFile { tool, argv, .. } = &plan.steps[0].action else {
                 panic!("{:?}", plan.steps);
             };
             assert_eq!(tool, "apt");

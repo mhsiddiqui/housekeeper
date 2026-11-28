@@ -4,9 +4,11 @@
 //! its `TOOL`. Each file must call `register_package_tool!(<Type>);` for its `impl LinuxTool for <Type>` (see
 //! [`crate::provider`]). Tools never import from each other; what they share is below.
 
+use std::path::Path;
+
 use housekeeper_core::{
-    Cmd, Host, InstallFile, InstallPlan, InstallSimulation, Package, PackageRemoval, RemovalPlan, Simulation,
-    SourceError, Step, Tier,
+    Cmd, Host, InstallFile, InstallPlan, InstallSimulation, Package, PackageInstall, PackageRemoval, RemovalPlan,
+    Simulation, SourceError, Step, Tier,
 };
 
 use crate::formats::path_arg;
@@ -56,19 +58,41 @@ pub(crate) fn rpm_simulation(host: &Host, package: &Package) -> Result<Simulatio
     })
 }
 
-/// Installing `file` with `command` followed by its path: one step for the root helper (D46), named by `tool`'s name.
+/// Installing `file` with `tool`'s command: one step for the root helper (D46), which builds the same command for its
+/// own copy of the file (D47).
 pub(crate) fn installation(
-    tool: &dyn PackageRemoval,
+    tool: &dyn PackageInstall,
     host: &Host,
     file: &InstallFile<'_>,
-    command: &[&str],
-) -> InstallPlan {
-    let argv = command_for(command, &[path_arg(host, file.path)]);
-    InstallPlan::new(vec![Step::install_package_files(
+) -> Result<InstallPlan, SourceError> {
+    let argv = tool.install_command(host, file.path)?;
+    Ok(InstallPlan::new(vec![Step::install_package_file(
         tool.tool(),
-        vec![file.path.to_path_buf()],
+        file.path,
         argv,
-    )])
+    )]))
+}
+
+/// `command` followed by the real path of `file`.
+pub(crate) fn install_command_for(command: &[&str], host: &Host, file: &Path) -> Vec<String> {
+    command_for(command, &[path_arg(host, file)])
+}
+
+/// rpm's signature tags, one per line: header-only RSA and DSA, and header-and-payload PGP and GPG. rpm prints
+/// `(none)` for each the package lacks.
+pub(crate) const RPM_SIGNATURES: &str =
+    r"%{RSAHEADER:pgpsig}\n%{DSAHEADER:pgpsig}\n%{SIGPGP:pgpsig}\n%{SIGGPG:pgpsig}\n";
+
+/// Whether the `.rpm` at `file` is signed, by anyone: whether the key is trusted is the installing tool's to check.
+pub(crate) fn rpm_signed(host: &Host, file: &Path) -> Result<bool, SourceError> {
+    let cmd = Cmd::new("rpm")
+        .args(["-qp", "--nosignature", "--nodigest", "--queryformat", RPM_SIGNATURES])
+        .arg(path_arg(host, file));
+    let output = host.run_ok(&cmd)?;
+    Ok(output
+        .lines()
+        .map(str::trim)
+        .any(|line| !line.is_empty() && line != "(none)"))
 }
 
 /// What installing an `.rpm` would take, from the RPM database (`rpm -U --test`, which needs no root): the
