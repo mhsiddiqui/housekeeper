@@ -3,7 +3,7 @@
 - **Date:** 2026-11-29
 - **Branch / PR:** `chore/release-0.3.0`, #48
 - **Plan chunks:** none (release of the Phase 5 work since 0.2.0; see [plan](../planning/plan.md))
-- **Commits:** filled in below before merging
+- **Commits:** 3e1e7f7
 
 ## What changed
 - `Cargo.toml`: `version = "0.3.0"` under `[workspace.package]`; `Cargo.lock` updated by `cargo check`.
