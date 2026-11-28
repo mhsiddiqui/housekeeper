@@ -163,6 +163,165 @@ impl Remover for AppImageSource {
     }
 }
 
+/// An AppImage is installed by its convention, as the user (D48): moved into `~/Applications` (unless it is there
+/// already), made executable, its icon taken out of its image into a folder of its own, and a menu entry written that
+/// starts it, made from the entry it carries. Installing it does not touch other copies of the same app.
+impl FileInstaller for AppImageSource {
+    fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        let applications = host.home().join(APPLICATIONS);
+        let file_name = file
+            .path
+            .file_name()
+            .ok_or_else(|| SourceError::parse("AppImage path", file.path.display().to_string()))?;
+        let target = if file.path.starts_with(&applications) {
+            file.path.to_path_buf()
+        } else {
+            applications.join(file_name)
+        };
+        let name = file
+            .package
+            .and_then(|package| package.name.clone())
+            .unwrap_or_else(|| file_name.to_string_lossy().into_owned());
+        let slug = slug(&name);
+        let entry_path = host
+            .data_home()
+            .join("applications")
+            .join(format!("appimage-{slug}.desktop"));
+        let icon_dir = host.data_home().join(ICONS).join(&slug);
+        let mut steps = Vec::new();
+        let mut blockers = Vec::new();
+        let mut cautions = Vec::new();
+        let taken = |path: &Path| format!("{} is there already; remove what is there first", path.display());
+        if target != file.path {
+            if host.symlink_metadata(&target).is_some() {
+                blockers.push(taken(&target));
+            } else if !same_file_system(host, file.path, &applications) {
+                blockers.push(format!(
+                    "it is on another file system than {}, where it would be kept; move it into your home folder first",
+                    applications.display()
+                ));
+            }
+            steps.push(Step::move_file(Actor::User, file.path, &target));
+        }
+        steps.push(Step::run(
+            Actor::User,
+            ["chmod".to_string(), "u+x".into(), path_arg(host, &target)],
+        ));
+        let inside = inside(host, file.path).unwrap_or_else(|why| {
+            cautions.push(format!("its menu entry is named after its file and has no icon: {why}"));
+            Inside::default()
+        });
+        let icon = inside.icon.map(|(offset, member)| {
+            if host.symlink_metadata(&icon_dir).is_some() {
+                blockers.push(taken(&icon_dir));
+            }
+            // unsquashfs makes its destination folder, but not the folders above it.
+            let icons = host.data_home().join(ICONS);
+            steps.push(Step::run(
+                Actor::User,
+                ["mkdir".to_string(), "-p".into(), path_arg(host, &icons)],
+            ));
+            steps.push(Step::run(
+                Actor::User,
+                [
+                    "unsquashfs".to_string(),
+                    "-o".into(),
+                    offset.to_string(),
+                    "-q".into(),
+                    "-n".into(),
+                    "-no-xattrs".into(),
+                    "-d".into(),
+                    path_arg(host, &icon_dir),
+                    path_arg(host, &target),
+                    member.clone(),
+                ],
+            ));
+            icon_dir.join(member)
+        });
+        if host.symlink_metadata(&entry_path).is_some() {
+            blockers.push(taken(&entry_path));
+        }
+        let contents = appimage_entry(inside.entry.as_deref(), &target, &name, icon.as_deref());
+        steps.push(Step::write_file(Actor::User, &entry_path, contents));
+        let mut plan = InstallPlan::new(steps);
+        plan.blockers = blockers;
+        plan.cautions = cautions;
+        Ok(plan)
+    }
+
+    fn replaces_installed(&self) -> bool {
+        false
+    }
+}
+
+/// What an AppImage carries that its menu entry uses: its own desktop entry, and its icon as a file of its image with
+/// the image's offset.
+#[derive(Debug, Default)]
+struct Inside {
+    entry: Option<String>,
+    icon: Option<(u64, String)>,
+}
+
+/// Reads, with `unsquashfs`, the desktop entry at the root of a type 2 AppImage's image and the icon its `Icon` names
+/// there (any of [`ICON_EXTENSIONS`]), or else its `.DirIcon`; links inside the image are followed. `Err` says why
+/// nothing could be read.
+fn inside(host: &Host, path: &Path) -> Result<Inside, String> {
+    if !host.has_program("unsquashfs") {
+        return Err("unsquashfs (from squashfs-tools) is not installed to read inside it".into());
+    }
+    let head = host.read_head(path, 64).map_err(|e| e.to_string())?;
+    if head.get(10) != Some(&2) {
+        return Err("it is a type 1 AppImage, whose ISO 9660 image Housekeeper does not read".into());
+    }
+    let offset = squashfs::elf_end(&head).ok_or("its ELF header ends early")?;
+    let members = squashfs::list(host, path, offset).map_err(|e| e.to_string())?;
+    let entry = members
+        .iter()
+        .find(|member| !member.path.contains('/') && member.path.ends_with(".desktop"))
+        .map(|member| squashfs::cat(host, path, offset, &member.path))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let named = entry
+        .as_deref()
+        .and_then(icon_of)
+        .filter(|icon| !icon.contains('/'))
+        .map(|icon| ICON_EXTENSIONS.map(|extension| format!("{icon}.{extension}")))
+        .into_iter()
+        .flatten();
+    let icon = named
+        .chain([".DirIcon".to_string()])
+        .find_map(|candidate| squashfs::resolve(&members, &candidate))
+        .map(|member| (offset, member));
+    Ok(Inside { entry, icon })
+}
+
+/// Whether `file` is on the file system of `dir`, or of the nearest folder above it that exists; `true` when that
+/// cannot be told.
+fn same_file_system(host: &Host, file: &Path, dir: &Path) -> bool {
+    let device = |path: &Path| host.metadata(path).map(|meta| meta.dev());
+    let folder = dir.ancestors().find(|folder| host.is_dir(folder));
+    match (device(file), folder.and_then(device)) {
+        (Some(file), Some(folder)) => file == folder,
+        _ => true,
+    }
+}
+
+/// A name for files made for an app: lowercase letters and digits, other runs of characters as one `-`.
+fn slug(name: &str) -> String {
+    let mut slug = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() { "app".into() } else { slug }
+}
+
 fn package(host: &Host, path: &Path) -> Package {
     let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
     let (name, version) = name_and_version(&file_name);
@@ -420,5 +579,186 @@ mod tests {
         let package = package(&host, Path::new("/opt/Tool.AppImage"));
         let plan = Remover::plan(&AppImageSource, &host, &package).unwrap();
         assert_eq!(plan.steps, [Step::trash(Actor::Helper, "/opt/Tool.AppImage")]);
+    }
+
+    mod install {
+        use std::sync::Arc;
+
+        use housekeeper_core::{Action, CommandRunner, Housekeeper, InstallPlan};
+
+        use super::*;
+        use crate::LinuxPlatform;
+
+        const FILE: &str = "Krita-5.2.6-x86_64.AppImage";
+        /// Where the image starts in [`appimage`]: section headers at 1000, 10 of 64 bytes.
+        const OFFSET: u64 = 1640;
+
+        /// The first bytes of a type 2 AppImage built for this computer's processor.
+        fn appimage() -> Vec<u8> {
+            let mut head = vec![0u8; 64];
+            head[..11].copy_from_slice(b"\x7fELF\x02\x01\x01\x00AI\x02");
+            let machine: u16 = if std::env::consts::ARCH == "aarch64" {
+                0xb7
+            } else {
+                0x3e
+            };
+            head[18..20].copy_from_slice(&machine.to_le_bytes());
+            head[0x28..0x30].copy_from_slice(&1000u64.to_le_bytes());
+            head[0x3a..0x3c].copy_from_slice(&64u16.to_le_bytes());
+            head[0x3c..0x3e].copy_from_slice(&10u16.to_le_bytes());
+            head
+        }
+
+        /// The plan for `~/Downloads/<FILE>` on Ubuntu, with `prepare` adding files first; `runner` is given the real
+        /// path of the fixture's root.
+        fn plan(prepare: impl FnOnce(&Fixture), runner: impl FnOnce(&str) -> FakeRunner) -> InstallPlan {
+            let fixture = Fixture::new();
+            fixture.file("/etc/os-release", "ID=ubuntu\nID_LIKE=debian\n");
+            let path = format!("{HOME}/Downloads/{FILE}");
+            fixture.file(&path, appimage());
+            prepare(&fixture);
+            let root = fixture.host(FakeRunner::new()).real_path("/");
+            let runner: Arc<dyn CommandRunner> = Arc::new(runner(root.to_string_lossy().trim_end_matches('/')));
+            let vars = [("HOME".to_string(), HOME.to_string())].into_iter().collect();
+            let host = Host::new(root, HOME, vars, runner);
+            let platform = LinuxPlatform::detect(&host);
+            let inspection = Housekeeper::new(Box::new(platform), host)
+                .inspect(Path::new(&path))
+                .unwrap()
+                .unwrap();
+            inspection.install.unwrap()
+        }
+
+        const LISTING: &str = "\
+-rw-r--r-- root/root 29032 2026-11-12 15:41 squashfs-root/.DirIcon
+lrwxrwxrwx root/root    38 2026-11-12 15:41 squashfs-root/org.kde.krita.desktop -> usr/share/applications/org.kde.krita.desktop
+lrwxrwxrwx root/root    48 2026-11-12 15:41 squashfs-root/krita.png -> usr/share/icons/hicolor/256x256/apps/krita.png
+-rw-r--r-- root/root  6532 2026-11-12 15:41 squashfs-root/usr/share/icons/hicolor/256x256/apps/krita.png
+";
+
+        const ENTRY: &str = "[Desktop Entry]\nType=Application\nName=Krita\nExec=krita %F\nTryExec=krita\nIcon=krita\n\
+                             Categories=Qt;KDE;Graphics;\n\n[Desktop Action new-window]\nName=New Window\n\
+                             Exec=krita --new-window %F\n";
+
+        #[test]
+        fn a_downloaded_appimage_is_kept_in_applications_with_its_own_menu_entry_and_icon() {
+            let plan = plan(
+                |_| {},
+                |root| {
+                    let real = format!("{root}{HOME}/Downloads/{FILE}");
+                    FakeRunner::new()
+                        .respond(&format!("unsquashfs -o {OFFSET} -lls {real}"), LISTING)
+                        .respond(
+                            &format!("unsquashfs -o {OFFSET} -cat {real} org.kde.krita.desktop"),
+                            ENTRY,
+                        )
+                },
+            );
+            assert!(plan.blockers.is_empty() && plan.cautions.is_empty(), "{plan:?}");
+            assert_eq!(
+                plan.steps[0],
+                Step::move_file(
+                    Actor::User,
+                    format!("{HOME}/Downloads/{FILE}"),
+                    format!("{HOME}/Applications/{FILE}")
+                )
+            );
+            let argv = |n: usize| match &plan.steps[n].action {
+                Action::Run { argv } => argv.iter().map(|arg| arg.rsplit(HOME).next().unwrap_or(arg)).collect(),
+                other => panic!("{other:?}"),
+            };
+            let chmod: Vec<&str> = argv(1);
+            assert_eq!(chmod, ["chmod", "u+x", &format!("/Applications/{FILE}")]);
+            let mkdir: Vec<&str> = argv(2);
+            assert_eq!(mkdir, ["mkdir", "-p", "/.local/share/icons/appimage"]);
+            let unsquashfs: Vec<&str> = argv(3);
+            assert_eq!(
+                unsquashfs,
+                [
+                    "unsquashfs",
+                    "-o",
+                    "1640",
+                    "-q",
+                    "-n",
+                    "-no-xattrs",
+                    "-d",
+                    "/.local/share/icons/appimage/krita",
+                    &format!("/Applications/{FILE}"),
+                    "usr/share/icons/hicolor/256x256/apps/krita.png",
+                ],
+                "the icon the entry names, followed to the file its link ends at"
+            );
+            let Action::WriteFile { path, contents } = &plan.steps[4].action else {
+                panic!("{:?}", plan.steps[4]);
+            };
+            assert_eq!(
+                path,
+                Path::new(&format!("{HOME}/.local/share/applications/appimage-krita.desktop"))
+            );
+            let lines: Vec<&str> = contents.lines().collect();
+            let exec = format!("Exec={HOME}/Applications/{FILE}");
+            assert!(lines.contains(&format!("{exec} %F").as_str()), "{contents}");
+            assert!(
+                lines.contains(&format!("{exec} --new-window %F").as_str()),
+                "{contents}"
+            );
+            assert!(
+                lines.contains(
+                    &format!(
+                        "Icon={HOME}/.local/share/icons/appimage/krita/usr/share/icons/hicolor/256x256/apps/krita.png"
+                    )
+                    .as_str()
+                ),
+                "{contents}"
+            );
+            assert!(!contents.contains("TryExec"), "{contents}");
+            assert!(lines.contains(&"Categories=Qt;KDE;Graphics;"), "{contents}");
+        }
+
+        #[test]
+        fn without_unsquashfs_the_entry_is_plain_and_what_is_in_the_way_blocks_it() {
+            let plan = plan(
+                |fixture| {
+                    fixture.executable(&format!("{HOME}/Applications/{FILE}"), appimage());
+                    fixture.executable(&format!("{HOME}/Applications/Krita-5.1.0-x86_64.AppImage"), appimage());
+                },
+                |_| FakeRunner::new(),
+            );
+            assert_eq!(
+                plan.blockers,
+                [format!(
+                    "{HOME}/Applications/{FILE} is there already; remove what is there first"
+                )]
+            );
+            assert!(
+                plan.cautions[0].contains("unsquashfs (from squashfs-tools) is not installed"),
+                "{:?}",
+                plan.cautions
+            );
+            assert!(
+                plan.cautions[1..].iter().any(|caution| caution.starts_with(&format!(
+                    "Krita 5.1.0 stays installed at {HOME}/Applications/Krita-5.1.0-x86_64.AppImage"
+                ))),
+                "other copies stay, and the file being installed is not one: {:?}",
+                plan.cautions
+            );
+            assert_eq!(plan.replaces, None);
+            let kinds: Vec<&str> = plan
+                .steps
+                .iter()
+                .map(|step| match &step.action {
+                    Action::Move { .. } => "move",
+                    Action::Run { .. } => "run",
+                    Action::WriteFile { .. } => "write",
+                    _ => "other",
+                })
+                .collect();
+            assert_eq!(kinds, ["move", "run", "write"]);
+            let Action::WriteFile { contents, .. } = &plan.steps[2].action else {
+                unreachable!()
+            };
+            assert!(contents.contains("\nName=Krita\n"), "{contents}");
+            assert!(!contents.contains("Icon="), "{contents}");
+        }
     }
 }

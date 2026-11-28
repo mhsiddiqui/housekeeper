@@ -266,6 +266,46 @@ pub(crate) fn appimage_entry(entry: Option<&str>, program: &Path, name: &str, ic
     out
 }
 
+/// One argument of an `Exec` line: in double quotes when it holds a character the specification reserves, with `"`,
+/// `` ` ``, `$` and `\` escaped inside them. A `literal` path has its `%` doubled, which would otherwise start a field
+/// code; an argument copied from another `Exec` keeps its field codes.
+fn exec_arg(arg: &str, literal: bool) -> String {
+    let text = if literal {
+        arg.replace('%', "%%")
+    } else {
+        arg.to_string()
+    };
+    let reserved = |c: char| " \t\n\"'\\><~|&;$*?#()`".contains(c);
+    if !text.contains(reserved) {
+        return text;
+    }
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for c in text.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    quoted
+}
+
+/// A string value for a desktop entry: `\`, newlines, tabs and carriage returns escaped, as [`unescape`] reads them.
+fn escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Splits an `Exec` value into arguments. Double quotes group an argument; inside them `\"`, `` \` ``, `\$` and `\\`
 /// stand for the character. `None` when a quote is left open.
 fn split(exec: &str) -> Option<Vec<String>> {
@@ -454,5 +494,34 @@ mod tests {
         assert_eq!(launchers.len(), 1);
         assert_eq!(launchers[0].name, "Tool");
         assert_eq!(launchers[0].program, None, "tool is not installed");
+    }
+
+    #[test]
+    fn an_appimage_entry_starts_the_appimage_wherever_it_is_and_shows_its_icon() {
+        let appimage = Path::new(r#"/home/user/Applications/My "100%" App $1\.AppImage"#);
+        let icon = Path::new("/home/user/.local/share/icons/appimage/my-app/icon.png");
+        let carried = "[Desktop Entry]\nType=Application\nName=My App\nExec=env LANG=C app --open %U\n\
+                       TryExec=app\nIcon=app\nDBusActivatable=true\n\n[Desktop Action new]\nName=New\nExec=app --new\n";
+        let made = appimage_entry(Some(carried), appimage, "My", Some(icon));
+        let read = parse(&made).unwrap();
+        assert_eq!(read.name, "My App");
+        assert_eq!(read.icon.as_deref(), Some(icon.to_str().unwrap()));
+        let exec = read.exec.unwrap();
+        assert_eq!(program(&exec).as_deref(), appimage.to_str());
+        assert!(exec.ends_with(" --open %U"), "{exec}");
+        assert!(!made.contains("TryExec") && !made.contains("DBusActivatable"), "{made}");
+        assert!(made.contains("[Desktop Action new]\nName=New\nExec=\""), "{made}");
+
+        let plain = parse(&appimage_entry(
+            None,
+            Path::new("/home/user/Applications/x.AppImage"),
+            "X",
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            (plain.name.as_str(), plain.exec.as_deref(), plain.icon),
+            ("X", Some("/home/user/Applications/x.AppImage"), None)
+        );
     }
 }
