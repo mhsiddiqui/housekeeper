@@ -3,7 +3,8 @@
 - **Date:** 2026-11-29
 - **Branch / PR:** `feat/appimage-integration`, #46
 - **Plan chunks:** 5.3 (see [plan](../planning/plan.md))
-- **Commits:** filled in below before merging
+- **Commits:** 61eeb34, 548024f, e628209, c7100b7, 85b49d1, e923f31 (completes 548024f, which left out the new
+  files)
 
 ## What changed
 - **Decision D48** (new): how an AppImage is installed and removed. The architecture's installer-files section and the
