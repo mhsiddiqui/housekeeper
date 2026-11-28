@@ -18,6 +18,7 @@ mod python;
 mod recipe;
 mod rpmdb;
 pub mod sources;
+mod squashfs;
 mod tools;
 mod xdg;
 

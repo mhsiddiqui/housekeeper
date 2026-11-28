@@ -1,22 +1,34 @@
-//! AppImages: single-file apps found in the places people usually keep them.
+//! AppImages: single-file apps found in the places people usually keep them, and installed by keeping them in
+//! `~/Applications` with a menu entry and their icon (decision D48).
 
 use std::collections::HashMap;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Actor, Availability, FilePackage, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
-    ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
+    Actor, Availability, FileInstaller, FilePackage, FileType, Host, InstallFile, InstallPlan, InstallReason, Package,
+    PackageKind, RemovalPlan, Remover, ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind, Step, Tier,
 };
 
+use crate::desktop::{appimage_entry, icon_of};
 use crate::files::{is_appimage, is_appimage_head, looks_like_version, resolve_symlinks, scope_of};
-use crate::formats::elf_machine;
+use crate::formats::{elf_machine, path_arg};
 use crate::provider::{Context, FileFormat, LinuxSource, register};
+use crate::squashfs;
 
 pub const ID: SourceId = SourceId::new("appimage");
 
 /// Directories scanned for AppImages, relative to the home directory. Their files only, not subdirectories.
 const HOME_DIRS: &[&str] = &["Applications", "AppImages", ".local/bin", "bin", "Downloads", "Desktop"];
+
+/// Where an installed AppImage is kept, relative to the home directory.
+const APPLICATIONS: &str = "Applications";
+
+/// Below `$XDG_DATA_HOME`: the icons taken out of the AppImages Housekeeper installs, one folder each.
+const ICONS: &str = "icons/appimage";
+
+/// Where an AppImage's own icon may be, at the root of its image, after the name its entry's `Icon` gives.
+const ICON_EXTENSIONS: [&str; 4] = ["png", "svg", "svgz", "xpm"];
 
 /// Home directories that are on the PATH, so an AppImage in (or linked from) them is a command.
 const PATH_DIRS: &[&str] = &[".local/bin", "bin"];
@@ -106,11 +118,15 @@ impl Source for AppImageSource {
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
     }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        Some(self)
+    }
 }
 
 /// An AppImage is removed by its convention: the file itself, then the launchers made for it (those that start it,
-/// directly or through a symlink). Launcher files they hide are left alone: they were not made for this file and may
-/// belong to a package.
+/// directly or through a symlink) and the icon folders Housekeeper made for those. Launcher files they hide are left
+/// alone: they were not made for this file and may belong to a package.
 impl Remover for AppImageSource {
     fn plan(&self, host: &Host, package: &Package) -> Result<RemovalPlan, SourceError> {
         let file = package.location.clone().unwrap_or_else(|| PathBuf::from(&package.id));
@@ -128,9 +144,21 @@ impl Remover for AppImageSource {
                 .as_deref()
                 .is_some_and(|program| program == file || resolve_symlinks(host, program) == file)
         });
+        let icons = host.data_home().join(ICONS);
+        let mut folders: Vec<PathBuf> = Vec::new();
         for launcher in launchers {
             steps.push(Step::trash(by(&launcher.path), &launcher.path));
+            let folder = launcher
+                .icon
+                .as_deref()
+                .and_then(|icon| Path::new(icon).strip_prefix(&icons).ok())
+                .and_then(|inside| inside.components().next())
+                .map(|first| icons.join(first));
+            if let Some(folder) = folder.filter(|folder| !folders.contains(folder) && host.exists(folder)) {
+                folders.push(folder);
+            }
         }
+        steps.extend(folders.iter().map(|folder| Step::trash(Actor::User, folder)));
         Ok(RemovalPlan::new(Tier::FormatConvention, steps))
     }
 }
@@ -342,27 +370,33 @@ mod tests {
     }
 
     #[test]
-    fn home_appimage_trashes_its_file_and_its_own_launchers_as_the_user() {
+    fn home_appimage_trashes_its_file_its_own_launchers_and_the_icons_made_for_them_as_the_user() {
         let fixture = Fixture::new();
         let file = format!("{HOME}/Applications/Obsidian-1.6.7.AppImage");
+        let icons = format!("{HOME}/.local/share/icons/appimage");
         fixture.executable(&file, TYPE2);
         fixture.symlink(&format!("{HOME}/.local/bin/obsidian"), &file);
+        fixture.file(&format!("{icons}/obsidian/obsidian.png"), "png");
+        fixture.file(&format!("{icons}/other/other.png"), "png");
         let host = fixture.host(FakeRunner::new());
         let mut package = package(&host, Path::new(&file));
         let mut own = launcher(&format!("{HOME}/.local/share/applications/obsidian.desktop"), &file);
         own.shadows = vec![PathBuf::from("/usr/share/applications/obsidian.desktop")];
+        own.icon = Some(format!("{icons}/obsidian/obsidian.png"));
+        let mut other = launcher(
+            &format!("{HOME}/.local/share/applications/other.desktop"),
+            "/usr/bin/other",
+        );
+        other.icon = Some(format!("{icons}/other/other.png"));
         package.launchers = vec![
             own,
             launcher(
                 &format!("{HOME}/.local/share/applications/cli.desktop"),
                 &format!("{HOME}/.local/bin/obsidian"),
             ),
-            launcher(
-                &format!("{HOME}/.local/share/applications/other.desktop"),
-                "/usr/bin/other",
-            ),
+            other,
         ];
-        let plan = AppImageSource.plan(&host, &package).unwrap();
+        let plan = Remover::plan(&AppImageSource, &host, &package).unwrap();
         assert_eq!(plan.tier, Tier::FormatConvention);
         assert_eq!(
             plan.steps,
@@ -373,6 +407,7 @@ mod tests {
                     format!("{HOME}/.local/share/applications/obsidian.desktop")
                 ),
                 Step::trash(Actor::User, format!("{HOME}/.local/share/applications/cli.desktop")),
+                Step::trash(Actor::User, format!("{icons}/obsidian")),
             ]
         );
     }
@@ -383,7 +418,7 @@ mod tests {
         fixture.executable("/opt/Tool.AppImage", TYPE2);
         let host = fixture.host(FakeRunner::new());
         let package = package(&host, Path::new("/opt/Tool.AppImage"));
-        let plan = AppImageSource.plan(&host, &package).unwrap();
+        let plan = Remover::plan(&AppImageSource, &host, &package).unwrap();
         assert_eq!(plan.steps, [Step::trash(Actor::Helper, "/opt/Tool.AppImage")]);
     }
 }
