@@ -32,6 +32,9 @@ the project uses [Semantic Versioning](https://semver.org/).
   executable, with a menu entry made from the one it carries and its icon (taken out with `unsquashfs` where
   squashfs-tools is installed). Nothing already there is replaced; other copies of the app stay and the plan names
   them. `housekeeper remove` takes the AppImage, its menu entry and its icon away together.
+- `housekeeper inspect` and `install` explain why an archive, a script or a `.run` program is not installed, and what
+  to do instead (unpack it yourself, read the script first, look for the program's own uninstaller); nothing is
+  unpacked or run.
 
 ## 0.2.0 (2026-11-26)
 

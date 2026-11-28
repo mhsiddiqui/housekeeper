@@ -6,8 +6,8 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use housekeeper_core::{
-    Availability, Entry, FilePackage, FileType, Host, InstallReason, Package, PackageKind, RemovalPlan, Remover,
-    ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind,
+    Availability, Entry, FileInstaller, FilePackage, FileType, Host, InstallFile, InstallPlan, InstallReason, Package,
+    PackageKind, RemovalPlan, Remover, ScanContext, Source, SourceError, SourceId, SourceInfo, SourceKind,
 };
 
 use crate::files::{is_appimage, is_appimage_head, looks_like_version, resolve_symlinks, scope_of};
@@ -213,6 +213,51 @@ impl Source for ManualSource {
 
     fn remover(&self) -> Option<&dyn Remover> {
         Some(self)
+    }
+
+    fn file_installer(&self) -> Option<&dyn FileInstaller> {
+        Some(self)
+    }
+}
+
+/// Archives, scripts and installer programs are not installed (plan 5.4, D49): nothing in them records where their
+/// files go, so nothing could remove them the way they were installed. The plan says why and what to do instead, and
+/// has no steps.
+impl FileInstaller for ManualSource {
+    fn plan(&self, _: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
+        let tracked = "Installing it so that Housekeeper records what it changes, and can undo it, comes with the \
+                       tracked terminal (plan Phase 11)";
+        let why = match file.format {
+            "archive" => format!(
+                "an archive is not an installer: nothing in it says where its files go or how they are removed, so \
+                 Housekeeper does not unpack it. Unpack it yourself (`tar -xf` or `unzip`) and follow the \
+                 instructions inside; what you put in /opt, /usr/local/bin or ~/.local/bin is listed as installed by \
+                 hand. {tracked}."
+            ),
+            "script" => {
+                let known: Vec<&str> = recipes().iter().flatten().map(|recipe| recipe.title.as_str()).collect();
+                format!(
+                    "a script can change anything it is allowed to and keeps no record of it, so Housekeeper does not \
+                     run it: nothing could remove what it installed. Read it before you run it yourself. If it \
+                     installs a tool Housekeeper knows ({}), Housekeeper finds that tool afterwards and removes it the \
+                     way its recipe says. {tracked}.",
+                    known.join(", ")
+                )
+            }
+            "program" => format!(
+                "an installer program can change anything it is allowed to and keeps no record Housekeeper can read, \
+                 so Housekeeper does not run it. Many come with their own uninstaller (an `--uninstall` option, or a \
+                 script left where they install); look for it in the program's documentation before you run it \
+                 yourself. {tracked}."
+            ),
+            other => {
+                return Err(SourceError::parse(
+                    "file format",
+                    format!("not one the manual source knows: {other}"),
+                ));
+            }
+        };
+        Ok(InstallPlan::new(Vec::new()).blocked(why))
     }
 }
 
@@ -680,7 +725,7 @@ if __name__ == \"__main__\":
         fixture.executable("/srv/cargo/bin/rustup", ELF);
         let host = fixture.host_with_vars(FakeRunner::new(), &[("CARGO_HOME", "/srv/cargo")]);
         let (packages, _) = scan_with(&host, Vec::new());
-        let plan = ManualSource.plan(&host, find(&packages, "installer/rustup")).unwrap();
+        let plan = Remover::plan(&ManualSource, &host, find(&packages, "installer/rustup")).unwrap();
         assert_eq!(plan.tier, Tier::OwnUninstaller);
         assert_eq!(
             plan.steps,
@@ -697,7 +742,33 @@ if __name__ == \"__main__\":
         fixture.executable("/opt/tool/tool", ELF);
         let host = fixture.host(FakeRunner::new());
         let (packages, _) = scan_with(&host, Vec::new());
-        let plan = ManualSource.plan(&host, find(&packages, "/opt/tool")).unwrap();
+        let plan = Remover::plan(&ManualSource, &host, find(&packages, "/opt/tool")).unwrap();
         assert_eq!(plan, RemovalPlan::unknown());
+    }
+
+    #[test]
+    fn archives_scripts_and_installer_programs_are_refused_with_what_to_do_instead() {
+        use crate::formats::test_support::inspect;
+
+        let elf = b"\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00";
+        let refusal = |name: &str, content: &[u8]| {
+            let inspection = inspect("ID=ubuntu\nID_LIKE=debian\n", name, content, |_| FakeRunner::new()).unwrap();
+            let plan = inspection.install.clone().unwrap();
+            assert!(plan.steps.is_empty(), "{name}: {plan:?}");
+            inspection.refusal().unwrap()
+        };
+        let archive = refusal("tool-1.0.tar.gz", b"\x1f\x8b\x08\x00");
+        assert!(archive.contains("Unpack it yourself"), "{archive}");
+        let script = refusal("install.sh", b"#!/bin/sh\necho installing\n");
+        assert!(
+            script.contains("does not run it") && script.contains("rustup"),
+            "a known installer's tool is named: {script}"
+        );
+        let program = refusal("driver.run", elf);
+        assert!(program.contains("their own uninstaller"), "{program}");
+        for refusal in [archive, script, program] {
+            assert!(refusal.starts_with("the plan is blocked: "), "{refusal}");
+            assert!(refusal.contains("tracked terminal"), "{refusal}");
+        }
     }
 }

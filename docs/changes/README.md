@@ -70,3 +70,4 @@ links back.
 | [0054](0054-install-plans.md) | Plan how a downloaded file would be installed | 5.2 | #44 |
 | [0055](0055-install.md) | Install a downloaded file the way its plan says | 5.5 | #45 |
 | [0056](0056-appimage-install.md) | Install an AppImage into the menu, and remove it the same way | 5.3 | #46 |
+| [0057](0057-refuse-archives-and-scripts.md) | Refuse archives, scripts and installer programs, saying why | 5.4 | #47 |

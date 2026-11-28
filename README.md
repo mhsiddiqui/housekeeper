@@ -13,8 +13,7 @@ It is a front door to the native tools, not a replacement for them: it reads wha
 changes something, it asks them to do it.
 
 > **Status:** early development. Housekeeper lists software, removes it, and installs downloaded package files,
-> Flatpak and Snap files and AppImages. Archives and scripts, and the desktop app, are planned; see the
-> [build plan](docs/planning/plan.md).
+> Flatpak and Snap files and AppImages. The desktop app is next; see the [build plan](docs/planning/plan.md).
 
 ## Why
 Linux software arrives through many channels, and each keeps its own list. `apt list --installed` knows nothing about
@@ -306,8 +305,9 @@ Arch packages (as root, through Housekeeper's helper; on Silverblue `rpm-ostree 
 (as `snap download` saves it) it is acknowledged first, without one only `--dangerous` installs it, which the plan
 flags. The package manager is asked, without root, what would come with it: apt and pacman name every package, the
 RPM database names what the repositories must supply. The plan also says which installed version it would replace.
-An AppImage is kept in `~/Applications` with a menu entry and its icon (below). Archives and scripts have no plan yet.
-`SHA-256` is the file's checksum, to compare with the one its publisher gives.
+An AppImage is kept in `~/Applications` with a menu entry and its icon (below). Archives, scripts and `.run` programs
+are not installed: the plan says why (nothing in them records where their files go, so nothing could remove them) and
+what to do instead. `SHA-256` is the file's checksum, to compare with the one its publisher gives.
 
 It exits with 0 when the file fits and nothing blocks installing it, 1 when it does not fit (another distribution's
 package, a `.snap` without snapd, a program built for another processor) or the package manager refuses (a conflict,
@@ -338,6 +338,10 @@ done:     as root, by Housekeeper's helper: dnf install --assumeyes /home/me/Dow
   `~/.local/share/icons/appimage/<name>` (this needs `unsquashfs`, from squashfs-tools; without it the entry is named
   after the file and has no icon). Nothing already there is replaced, and other copies of the app stay where they are;
   `housekeeper remove` takes the AppImage, its entry and its icon away together.
+- Archives, scripts and `.run` programs are refused with an explanation: unpack an archive yourself and follow its
+  instructions, read a script before you run it, look for an installer program's own uninstaller. What a script
+  installs is found afterwards when Housekeeper knows the tool (rustup, nvm, Homebrew…). Recording what an install
+  script changes, so it can be undone, comes with the tracked terminal.
 - Every install is written to the history (`housekeeper history`). Exit codes: 0 installed, 2 no such file or an
   unknown format, 3 nothing was changed (it does not fit, has no plan, is blocked, you declined, or it changed since it
   was inspected), 4 a step failed. `--json` prints what was done, as the history keeps it.
@@ -406,12 +410,12 @@ target and [nfpm](https://nfpm.goreleaser.com)). Running the checks and contribu
 The [build plan](docs/planning/plan.md) has the details. Done: the inventory, identity and ownership (`who`, `show`,
 duplicates), removal planning (the way each installer intended, simulated, protected packages blocked, leftovers
 listed), removing safely (`housekeeper remove`: a root helper started through polkit, an operation queue that waits
-for busy package managers, leftovers moved to the Trash, a history), and installing package, Flatpak and Snap files
-and AppImages (`housekeeper inspect`, `housekeeper install`). Next, in order:
+for busy package managers, leftovers moved to the Trash, a history), and installing downloaded files (`housekeeper
+inspect`, `housekeeper install`: package, Flatpak and Snap files and AppImages; archives and scripts refused with why).
+Next, in order:
 
-1. **The rest of installing downloaded files**: archives and scripts.
-2. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
-   scripts.
+1. **Desktop app** (v1).
+2. Updates, environment and PATH, discovery, cleanup, and a tracked terminal for install scripts.
 
 ## Documentation
 All documentation lives in [docs/](docs/README.md), grouped by section:

@@ -110,6 +110,11 @@ impl InstallPlan {
         self.restart = true;
         self
     }
+
+    pub fn blocked(mut self, reason: impl Into<String>) -> Self {
+        self.blockers.push(reason.into());
+        self
+    }
 }
 
 impl Step {
@@ -126,19 +131,20 @@ impl Step {
     }
 }
 
-/// `file`'s plan from `installer`, simulated when it can be. A refusal blocks it, and so does a protected package of
-/// the source (`installed`) that it would remove. The installed copy of the same package, if any, is what it replaces,
-/// and the same version installed already is a caution; for an installer that installs beside other copies, each copy
-/// that stays is a caution instead. The file itself, when its source lists it where it is, is no other copy. A
-/// simulation that fails leaves the plan without one and says why in `warnings`.
-pub(crate) fn plan(
+/// `plan`, `installer`'s plan for `file`, checked against the source's packages (`installed`) and simulated when it
+/// can be. A refusal blocks it, and so does a protected package of the source that it would remove. The installed copy
+/// of the same package, if any, is what it replaces, and the same version installed already is a caution; for an
+/// installer that installs beside other copies, each copy that stays is a caution instead. The file itself, when its
+/// source lists it where it is, is no other copy. A simulation that fails leaves the plan without one and says why in
+/// `warnings`.
+pub(crate) fn check(
     installer: &dyn FileInstaller,
+    mut plan: InstallPlan,
     host: &Host,
     file: &InstallFile<'_>,
     installed: &[Package],
     warnings: &mut Vec<String>,
-) -> Result<InstallPlan, SourceError> {
-    let mut plan = installer.plan(host, file)?;
+) -> InstallPlan {
     let name = file.package.and_then(|package| package.name.as_deref());
     let mut copies = installed.iter().filter(|p| {
         p.location.as_deref() != Some(file.path)
@@ -165,7 +171,7 @@ pub(crate) fn plan(
         }
     }
     let Some(simulator) = installer.simulator() else {
-        return Ok(plan);
+        return plan;
     };
     match simulator.simulate(host, file) {
         Ok(simulation) => {
@@ -187,5 +193,5 @@ pub(crate) fn plan(
             file.path.display()
         )),
     }
-    Ok(plan)
+    plan
 }
