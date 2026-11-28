@@ -5,6 +5,13 @@ the project uses [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.3.0 (2026-11-29)
+
+Housekeeper can now install what you download, the way each format intends: it tells what a file is and whether it
+fits this system, shows the plan (what the package manager would add or remove with it), asks, and checks the file
+again just before acting. Package files are installed by the root helper only if they are still the file you
+reviewed; AppImages get a menu entry and their icon; archives and scripts are refused, with why and what to do instead.
+
 ### Added
 - `housekeeper inspect <file>`: what a downloaded installer is (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak
   bundle, `.snap`, AppImage, archive, script, `.run` program), told by its name and first bytes, with the package's
