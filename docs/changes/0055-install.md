@@ -3,7 +3,7 @@
 - **Date:** 2026-11-28
 - **Branch / PR:** `feat/install`, #45
 - **Plan chunks:** 5.5 (see [plan](../planning/plan.md))
-- **Commits:** filled in below before merging
+- **Commits:** 67d3595, a2584f6, 39dfa83, c251dc9, 7632107, bff0627, 486462d
 
 ## What changed
 - **Decision D47** (new): how an install is carried out, and why the root helper checks a checksum rather than the
