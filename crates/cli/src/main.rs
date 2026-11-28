@@ -91,12 +91,13 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Install a downloaded file (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak bundle, `.snap`) the way its
-    /// format intends, after showing what `inspect` shows and asking. Package files go through the system's package
-    /// tool and Housekeeper's root helper (an administrator's password is asked), which installs its own copy of the
-    /// file only if it is still the file inspected. Exits 0 when it was installed, 2 when there is no such file or its
-    /// format is unknown, 3 when nothing was changed (it does not fit, has no install plan, is blocked, declined,
-    /// changed since it was inspected), 4 when a step failed.
+    /// Install a downloaded file (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak bundle, `.snap`, AppImage) the
+    /// way its format intends, after showing what `inspect` shows and asking. An AppImage is kept in `~/Applications`
+    /// with a menu entry and its icon. Package files go through the system's package tool and Housekeeper's root helper
+    /// (an administrator's password is asked), which installs its own copy of the file only if it is still the file
+    /// inspected. Exits 0 when it was installed, 2 when there is no such file or its format is unknown, 3 when nothing
+    /// was changed (it does not fit, has no install plan, is blocked, declined, changed since it was inspected), 4 when
+    /// a step failed.
     Install {
         /// The file (`~/Downloads/app.deb`, `./app.flatpakref`).
         file: String,
