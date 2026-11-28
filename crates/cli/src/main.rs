@@ -426,6 +426,88 @@ fn inspect(housekeeper: &Housekeeper, file: &str, json: bool, out: &mut impl Wri
     })
 }
 
+/// Inspects the file, shows its plan, asks, checks the file and the plan again (D37, D47), installs, and says how each
+/// step went. Exit codes as `install` documents.
+fn install(housekeeper: &Housekeeper, file: &str, yes: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    let Some(inspection) = inspected(housekeeper, file)? else {
+        return Ok(ExitCode::from(2));
+    };
+    if !json {
+        inspect::render(&inspection, housekeeper.system(), out)?;
+    }
+    let not_done = ExitCode::from(3);
+    let title = inspection.display_name();
+    if let Some(why) = inspection.refusal() {
+        eprintln!("housekeeper: {title} is not installed: {why}. Nothing was changed.");
+        return Ok(not_done);
+    }
+    if !yes && !confirm(&format!("install {title}"), &format!("Install {title}?"))? {
+        return Ok(not_done);
+    }
+    if let Err(change) = housekeeper.still_as_inspected(&inspection) {
+        eprintln!("housekeeper: {title} changed since it was inspected ({change}). Nothing was changed.");
+        return Ok(not_done);
+    }
+    let installed = housekeeper.install(
+        &inspection,
+        &Cancel::default(),
+        &progress(format!("Installing {title}")),
+    );
+    finish(&installed, json, out)
+}
+
+/// Asks `question` on the terminal; `false` (after saying so) when the answer is not yes or there is no terminal to
+/// ask on, where `--yes` would `doing` without asking.
+fn confirm(doing: &str, question: &str) -> io::Result<bool> {
+    if !io::stdin().is_terminal() {
+        eprintln!("housekeeper: add --yes to {doing} without being asked. Nothing was changed.");
+        return Ok(false);
+    }
+    eprint!("\n{question} [y/N] ");
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    let yes = matches!(answer.trim().to_lowercase().as_str(), "y" | "yes");
+    if !yes {
+        eprintln!("Nothing was changed.");
+    }
+    Ok(yes)
+}
+
+/// What the operation queue says, on standard error: who holds a lock the change waits for, and `doing` when it starts.
+fn progress(doing: String) -> impl Fn(Event) + Sync {
+    move |event| match event {
+        Event::Waiting { holder, .. } => eprintln!(
+            "Waiting for {} to let go of {}…",
+            match (&holder.program, holder.pid) {
+                (Some(program), Some(pid)) => format!("{program} (process {pid})"),
+                _ => "another program".to_string(),
+            },
+            holder.lock.display()
+        ),
+        Event::Started { .. } => eprintln!("{doing}…"),
+        Event::Finished { .. } | Event::Cancelled { .. } => {}
+    }
+}
+
+/// Says how each step of a carried-out change went (or prints its history entry as JSON), and gives the exit code for
+/// how it ended: 0 done, 3 not done, 4 failed.
+fn finish(recorded: &Recorded, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    if json {
+        serde_json::to_writer_pretty(&mut *out, &recorded.entry)?;
+        writeln!(out)?;
+    } else {
+        show::render_outcome(&recorded.entry, out)?;
+    }
+    if let Some(error) = &recorded.history_error {
+        eprintln!("warning: the history could not be written: {error}");
+    }
+    Ok(match recorded.entry.outcome {
+        ChangeOutcome::Done => ExitCode::SUCCESS,
+        ChangeOutcome::NotDone => ExitCode::from(3),
+        ChangeOutcome::Failed => ExitCode::from(4),
+    })
+}
+
 fn show(housekeeper: &Housekeeper, query: &str, all_files: bool, json: bool, out: &mut impl Write) -> Result<ExitCode> {
     lookup(housekeeper, query, "show", json, out, |details, out| {
         if json {
@@ -531,32 +613,13 @@ fn carry_out(
         eprintln!("housekeeper: {title} changed since its removal was planned ({change}). Nothing was changed.");
         return Ok(not_done);
     }
-    let removal = housekeeper.remove(details, &chosen, &Cancel::default(), &|event| match event {
-        Event::Waiting { holder, .. } => eprintln!(
-            "Waiting for {} to let go of {}…",
-            match (&holder.program, holder.pid) {
-                (Some(program), Some(pid)) => format!("{program} (process {pid})"),
-                _ => "another program".to_string(),
-            },
-            holder.lock.display()
-        ),
-        Event::Started { .. } => eprintln!("Removing {title}…"),
-        Event::Finished { .. } | Event::Cancelled { .. } => {}
-    });
-    if options.json {
-        serde_json::to_writer_pretty(&mut *out, &removal.entry)?;
-        writeln!(out)?;
-    } else {
-        show::render_outcome(&removal.entry, out)?;
-    }
-    if let Some(error) = removal.history_error {
-        eprintln!("warning: the history could not be written: {error}");
-    }
-    Ok(match removal.entry.outcome {
-        ChangeOutcome::Done => ExitCode::SUCCESS,
-        ChangeOutcome::NotDone => not_done,
-        ChangeOutcome::Failed => ExitCode::from(4),
-    })
+    let removal = housekeeper.remove(
+        details,
+        &chosen,
+        &Cancel::default(),
+        &progress(format!("Removing {title}")),
+    );
+    finish(&removal, options.json, out)
 }
 
 /// Finds the one item `query` names and hands it to `found`, whose exit code it returns, or lists the items it matches
