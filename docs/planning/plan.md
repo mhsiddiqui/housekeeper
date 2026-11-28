@@ -62,13 +62,13 @@ source, without root and without changing anything.
 | 4.4 ✅ | Leftovers go to the freedesktop Trash, never `rm -rf`: only caches nothing else uses are preselected (D38), and each folder is checked again just before it moves (D37, D43); `remove --dry-run` marks which go (change 0048) |
 | 4.5 ✅ | `housekeeper remove` executes the reviewed plan, checking each package again (version, protection, simulation) before anything changes (D37, D44); the helper also trashes system paths (D40); tested by Housekeeper removing its own package on every distribution (change 0049) |
 
-## Phase 5: Install from file 🚧
+## Phase 5: Install from file ✅
 | Chunk | Delivers |
 |---|---|
 | 5.1 ✅ | File type detection: `.deb`, `.rpm`, `.pkg.tar.zst`, `.flatpakref`, `.flatpak`, `.snap`, AppImage, archives, `.run`/`.sh`, by name ending and first bytes, each format declared by its source and recognised on every distribution; what is inside (name, version, processor) and whether it fits this system; `housekeeper inspect` (D45, change 0051) |
 | 5.2 ✅ | Install plans per type, shown by `housekeeper inspect`: `.deb`, `.rpm` and Arch packages through the system's package tool (dependencies resolved by it, simulated without root, refusals and protected packages it would remove block the plan; rpm-ostree after a restart), Flatpak references and bundles for the user, snaps acknowledged with their `.assert` or flagged `--dangerous`; the installed version it replaces (D46, change 0054) |
 | 5.3 ✅ | AppImage integration: move to `~/Applications`, desktop entry, icon; removal reverses it (D48, change 0056) |
-| 5.4 | Archives and scripts: run in the tracked mode (Phase 11) or refuse with an explanation |
+| 5.4 ✅ | Archives and scripts: run in the tracked mode (Phase 11) or refuse with an explanation. Refused, with why and what to do instead, until the tracked terminal exists (D49, change 0057) |
 | 5.5 ✅ | Carrying out install plans: the root helper's install operation (the file copied where only root can write and checked against the checksum it was inspected with before installing), `housekeeper install <file>` through the operation queue, history (added in 5.2, as 4.5 did for removal; D47, change 0055) |
 
 ## Phase 6: Desktop app (v1 release) ⬜
