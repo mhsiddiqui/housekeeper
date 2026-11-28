@@ -28,6 +28,10 @@ the project uses [Semantic Versioning](https://semver.org/).
   root helper from its own copy, and only when the copy has the checksum the inspection showed. An `.rpm` nobody
   signed is installed by zypper with `--allow-unsigned-rpm`, which the plan says. Every install goes into the history.
   Exits 0 when installed, 2 for no such file or an unknown format, 3 when nothing was changed, 4 when a step failed.
+- `housekeeper install` installs an AppImage the way AppImages are installed: moved into `~/Applications`, made
+  executable, with a menu entry made from the one it carries and its icon (taken out with `unsquashfs` where
+  squashfs-tools is installed). Nothing already there is replaced; other copies of the app stay and the plan names
+  them. `housekeeper remove` takes the AppImage, its menu entry and its icon away together.
 
 ## 0.2.0 (2026-11-26)
 
