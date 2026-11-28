@@ -153,7 +153,7 @@ pub enum Tier {
     Unknown,
 }
 
-/// One thing a removal does.
+/// One thing a removal or an install does.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Step {
     /// Who carries it out (D25).
@@ -181,6 +181,28 @@ impl Step {
         Self {
             by,
             action: Action::Trash { path: path.into() },
+        }
+    }
+
+    /// Moves the file `from` to `to` (both logical, absolute) on the same file system, never over something there.
+    pub fn move_file(by: Actor, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> Self {
+        Self {
+            by,
+            action: Action::Move {
+                from: from.into(),
+                to: to.into(),
+            },
+        }
+    }
+
+    /// Writes a new file at `path` (logical, absolute) holding `contents`, never over one that is there.
+    pub fn write_file(by: Actor, path: impl Into<PathBuf>, contents: impl Into<String>) -> Self {
+        Self {
+            by,
+            action: Action::WriteFile {
+                path: path.into(),
+                contents: contents.into(),
+            },
         }
     }
 
@@ -223,6 +245,12 @@ pub enum Action {
         packages: Vec<String>,
         argv: Vec<String>,
     },
+    /// Moves a file to another folder of the same file system (an AppImage into `~/Applications`), never replacing
+    /// what is there.
+    Move { from: PathBuf, to: PathBuf },
+    /// Writes a new text file (an AppImage's menu entry), never replacing one that is there; `contents` is what the
+    /// file will hold, for review.
+    WriteFile { path: PathBuf, contents: String },
     /// Installs a package file through the system's package tool (D24, D46). The root helper is given `tool`, `file`
     /// and the file's checksum when it was inspected, installs its own copy and builds the command itself (D47);
     /// `argv` is that command with the file's path, for review.

@@ -2,6 +2,9 @@
 //! The plan's steps run in order as one job of the operation queue, as the user or through the root helper; a removal
 //! then moves the leftovers the user chose to the Trash; one history entry records how it went.
 
+use std::io;
+use std::path::Path;
+
 use crate::command::Cmd;
 use crate::helper::{HELPER_PROTOCOL, HelperOperation, HelperReply, HelperRequest, STEP_TIMEOUT};
 use crate::history::{Change, ChangeOutcome, HistoryEntry, StepOutcome, StepRecord, record, unix_now};
@@ -11,6 +14,7 @@ use crate::leftovers::Leftover;
 use crate::queue::{Cancel, Event, Job, Outcome, Queue};
 use crate::remove::{Action, Actor, RemovalPlan, Step};
 use crate::show::{Details, Lookup};
+use crate::source::SourceError;
 use crate::trash::{TrashError, trash};
 
 /// What came of a change.
@@ -208,8 +212,43 @@ impl Housekeeper {
                     reason: "a package file is installed only after it is inspected".into(),
                 },
             },
+            (Actor::User, Action::Move { from, to }) => self.move_file(from, to),
+            (Actor::User, Action::WriteFile { path, contents }) => {
+                match self.host.create_new(path, contents.as_bytes()) {
+                    Ok(true) => StepOutcome::Done,
+                    Ok(false) => StepOutcome::Failed {
+                        reason: format!("{} is there already", path.display()),
+                    },
+                    Err(e) => StepOutcome::Failed { reason: e.to_string() },
+                }
+            }
             (Actor::Helper, Action::Run { .. }) => StepOutcome::Failed {
                 reason: "the root helper does not run commands it is given".into(),
+            },
+            (Actor::Helper, Action::Move { .. } | Action::WriteFile { .. }) => StepOutcome::Failed {
+                reason: "the root helper does not move or write files it is told to".into(),
+            },
+        }
+    }
+
+    /// Moves `from` to `to`, making `to`'s folder, unless something is at `to` already. A rename, so only within one
+    /// file system.
+    fn move_file(&self, from: &Path, to: &Path) -> StepOutcome {
+        if self.host.symlink_metadata(to).is_some() {
+            return StepOutcome::Failed {
+                reason: format!("{} is there already", to.display()),
+            };
+        }
+        if let Some(Err(e)) = to.parent().map(|dir| self.host.create_dir_all(dir)) {
+            return StepOutcome::Failed { reason: e.to_string() };
+        }
+        match self.host.rename(from, to) {
+            Ok(()) => StepOutcome::Done,
+            Err(e) if e.kind() == io::ErrorKind::CrossesDevices => StepOutcome::Failed {
+                reason: format!("{} is on another file system than {}", from.display(), to.display()),
+            },
+            Err(e) => StepOutcome::Failed {
+                reason: SourceError::io(from, e).to_string(),
             },
         }
     }
@@ -331,8 +370,6 @@ fn failure(code: Option<i32>, stderr: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use super::*;
     use crate::history::history;
     use crate::install::InstallPlan;
@@ -525,5 +562,50 @@ mod tests {
             helper.asked.lock().unwrap().is_empty(),
             "a blocked plan asks nothing of the helper"
         );
+    }
+
+    #[test]
+    fn an_install_as_the_user_moves_the_file_and_writes_its_entry_but_replaces_nothing() {
+        let fixture = Fixture::new();
+        fixture
+            .file(&home("Downloads/app.pkg"), "PKG app 1.0")
+            .file(&home(".local/share/applications/taken.desktop"), "mine");
+        let entry = home(".local/share/applications/app.desktop");
+        let taken = home(".local/share/applications/taken.desktop");
+        let stub = Stub {
+            id: "stub",
+            install: Some(InstallPlan::new(vec![
+                Step::move_file(Actor::User, home("Downloads/app.pkg"), home("Applications/app.pkg")),
+                Step::write_file(Actor::User, &entry, "[Desktop Entry]\n"),
+                Step::write_file(Actor::User, &taken, "theirs"),
+                Step::run(Actor::User, ["true"]),
+            ])),
+            ..Stub::default()
+        };
+        let (hk, helper) = housekeeper_removing(&fixture, vec![stub], FakeRunner::new(), done());
+        let installed = hk.install(&inspected(&hk), &Cancel::default(), &|_| {});
+        assert_eq!(
+            outcomes(&installed),
+            [
+                &StepOutcome::Done,
+                &StepOutcome::Done,
+                &StepOutcome::Failed {
+                    reason: format!("{taken} is there already")
+                },
+                &StepOutcome::Skipped {
+                    reason: "an earlier step failed".into()
+                },
+            ]
+        );
+        assert_eq!(installed.entry.outcome, ChangeOutcome::Failed);
+        let host = fixture.host(FakeRunner::new());
+        assert!(host.exists(home("Applications/app.pkg")) && !host.exists(home("Downloads/app.pkg")));
+        assert_eq!(host.read_to_string(&entry).unwrap(), "[Desktop Entry]\n");
+        assert_eq!(
+            host.read_to_string(&taken).unwrap(),
+            "mine",
+            "a file already there is kept"
+        );
+        assert!(helper.asked.lock().unwrap().is_empty());
     }
 }

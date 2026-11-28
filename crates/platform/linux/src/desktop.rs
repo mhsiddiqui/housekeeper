@@ -176,9 +176,18 @@ fn unescape(value: &str) -> String {
     out
 }
 
-/// The program an `Exec` command line starts, as written: past `env` and its variables. `None` when the line cannot
-/// be read or runs a shell, whose script could start anything.
+/// The program an `Exec` command line starts, as written: past `env` and its variables, `%%` read as `%`. `None` when
+/// the line cannot be read or runs a shell, whose script could start anything.
 fn program(exec: &str) -> Option<String> {
+    let (program, _) = command(exec)?;
+    if matches!(base_name(&program), "sh" | "bash" | "dash" | "zsh" | "fish") {
+        return None;
+    }
+    Some(program.replace("%%", "%"))
+}
+
+/// The program an `Exec` command line starts, past `env` and its variables, and the arguments it is given.
+fn command(exec: &str) -> Option<(String, Vec<String>)> {
     let mut args = split(exec)?.into_iter();
     let mut program = args.next()?;
     if base_name(&program) == "env" {
@@ -191,10 +200,110 @@ fn program(exec: &str) -> Option<String> {
             }
         };
     }
-    if matches!(base_name(&program), "sh" | "bash" | "dash" | "zsh" | "fish") {
-        return None;
+    Some((program, args.collect()))
+}
+
+/// The `Icon` of an application entry's main group, as written.
+pub(crate) fn icon_of(text: &str) -> Option<String> {
+    parse(text)?.icon
+}
+
+/// A menu entry for the AppImage at `program` (logical, absolute), made from `entry`, the one the AppImage carries:
+/// every `Exec` starts `program` with the arguments it had (past `env` and its variables), `TryExec` and
+/// `DBusActivatable` go (nothing else is installed to answer them), and the main group's `Icon` is `icon` when there is
+/// one. Without a usable entry (`None`, or not an application's), a plain one named `name`.
+pub(crate) fn appimage_entry(entry: Option<&str>, program: &Path, name: &str, icon: Option<&Path>) -> String {
+    let header = format!(
+        "# Made by Housekeeper for {}; removing the AppImage with Housekeeper removes this too.\n",
+        program.display()
+    );
+    let icon_line = icon.map(|icon| format!("Icon={}", escape(&icon.to_string_lossy())));
+    let Some(entry) = entry.filter(|entry| parse(entry).is_some()) else {
+        let mut text = format!(
+            "{header}[Desktop Entry]\nType=Application\nName={}\nExec={}\nTerminal=false\n",
+            escape(name),
+            escape(&exec_arg(&program.to_string_lossy(), true))
+        );
+        if let Some(line) = icon_line {
+            text.push_str(&line);
+            text.push('\n');
+        }
+        return text;
+    };
+    let mut out = header;
+    let mut group = "";
+    for line in entry.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            group = trimmed;
+            out.push_str(line);
+            out.push('\n');
+            if group == "[Desktop Entry]" {
+                if let Some(line) = &icon_line {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            continue;
+        }
+        let key = trimmed.split_once('=').map(|(key, _)| key.trim_end());
+        match key {
+            Some("TryExec" | "DBusActivatable") => continue,
+            Some("Icon") if group == "[Desktop Entry]" && icon_line.is_some() => continue,
+            Some("Exec") => {
+                let value = trimmed.split_once('=').map_or("", |(_, value)| value.trim_start());
+                let args = command(&unescape(value)).map(|(_, args)| args).unwrap_or_default();
+                let exec: Vec<String> = std::iter::once(exec_arg(&program.to_string_lossy(), true))
+                    .chain(args.iter().map(|arg| exec_arg(arg, false)))
+                    .collect();
+                out.push_str("Exec=");
+                out.push_str(&escape(&exec.join(" ")));
+            }
+            _ => out.push_str(line),
+        }
+        out.push('\n');
     }
-    Some(program)
+    out
+}
+
+/// One argument of an `Exec` line: in double quotes when it holds a character the specification reserves, with `"`,
+/// `` ` ``, `$` and `\` escaped inside them. A `literal` path has its `%` doubled, which would otherwise start a field
+/// code; an argument copied from another `Exec` keeps its field codes.
+fn exec_arg(arg: &str, literal: bool) -> String {
+    let text = if literal {
+        arg.replace('%', "%%")
+    } else {
+        arg.to_string()
+    };
+    let reserved = |c: char| " \t\n\"'\\><~|&;$*?#()`".contains(c);
+    if !text.contains(reserved) {
+        return text;
+    }
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for c in text.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            quoted.push('\\');
+        }
+        quoted.push(c);
+    }
+    quoted.push('"');
+    quoted
+}
+
+/// A string value for a desktop entry: `\`, newlines, tabs and carriage returns escaped, as [`unescape`] reads them.
+fn escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Splits an `Exec` value into arguments. Double quotes group an argument; inside them `\"`, `` \` ``, `\$` and `\\`
@@ -385,5 +494,34 @@ mod tests {
         assert_eq!(launchers.len(), 1);
         assert_eq!(launchers[0].name, "Tool");
         assert_eq!(launchers[0].program, None, "tool is not installed");
+    }
+
+    #[test]
+    fn an_appimage_entry_starts_the_appimage_wherever_it_is_and_shows_its_icon() {
+        let appimage = Path::new(r#"/home/user/Applications/My "100%" App $1\.AppImage"#);
+        let icon = Path::new("/home/user/.local/share/icons/appimage/my-app/icon.png");
+        let carried = "[Desktop Entry]\nType=Application\nName=My App\nExec=env LANG=C app --open %U\n\
+                       TryExec=app\nIcon=app\nDBusActivatable=true\n\n[Desktop Action new]\nName=New\nExec=app --new\n";
+        let made = appimage_entry(Some(carried), appimage, "My", Some(icon));
+        let read = parse(&made).unwrap();
+        assert_eq!(read.name, "My App");
+        assert_eq!(read.icon.as_deref(), Some(icon.to_str().unwrap()));
+        let exec = read.exec.unwrap();
+        assert_eq!(program(&exec).as_deref(), appimage.to_str());
+        assert!(exec.ends_with(" --open %U"), "{exec}");
+        assert!(!made.contains("TryExec") && !made.contains("DBusActivatable"), "{made}");
+        assert!(made.contains("[Desktop Action new]\nName=New\nExec=\""), "{made}");
+
+        let plain = parse(&appimage_entry(
+            None,
+            Path::new("/home/user/Applications/x.AppImage"),
+            "X",
+            None,
+        ))
+        .unwrap();
+        assert_eq!(
+            (plain.name.as_str(), plain.exec.as_deref(), plain.icon),
+            ("X", Some("/home/user/Applications/x.AppImage"), None)
+        );
     }
 }

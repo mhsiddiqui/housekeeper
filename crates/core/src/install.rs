@@ -23,6 +23,12 @@ pub trait FileInstaller: Send + Sync {
     fn simulator(&self) -> Option<&dyn InstallSimulator> {
         None
     }
+
+    /// Whether installing replaces an installed copy of the same package, as a package manager does. An AppImage is
+    /// one file among others, so a copy already installed stays.
+    fn replaces_installed(&self) -> bool {
+        true
+    }
 }
 
 /// Ability: tell what installing a file would take, as its package manager sees it, without changing anything.
@@ -121,9 +127,10 @@ impl Step {
 }
 
 /// `file`'s plan from `installer`, simulated when it can be. A refusal blocks it, and so does a protected package of
-/// the source (`installed`) that it would remove. The installed copy of the same package, if any, is what it replaces;
-/// the same version installed already is a caution. A simulation that fails leaves the plan without one and says why
-/// in `warnings`.
+/// the source (`installed`) that it would remove. The installed copy of the same package, if any, is what it replaces,
+/// and the same version installed already is a caution; for an installer that installs beside other copies, each copy
+/// that stays is a caution instead. The file itself, when its source lists it where it is, is no other copy. A
+/// simulation that fails leaves the plan without one and says why in `warnings`.
 pub(crate) fn plan(
     installer: &dyn FileInstaller,
     host: &Host,
@@ -132,19 +139,30 @@ pub(crate) fn plan(
     warnings: &mut Vec<String>,
 ) -> Result<InstallPlan, SourceError> {
     let mut plan = installer.plan(host, file)?;
-    plan.replaces = file
-        .package
-        .and_then(|package| package.name.as_deref())
-        .and_then(|name| {
-            installed
-                .iter()
-                .find(|p| p.name == name || p.app_ids.iter().any(|id| id == name))
-        })
-        .map(|p| p.version.clone().unwrap_or_else(|| "an unknown version".into()));
-    let same = file.package.and_then(|package| package.version.as_ref());
-    if same.is_some() && plan.replaces.as_ref() == same {
-        plan.cautions
-            .push("this version is installed already, so installing it changes nothing".into());
+    let name = file.package.and_then(|package| package.name.as_deref());
+    let mut copies = installed.iter().filter(|p| {
+        p.location.as_deref() != Some(file.path)
+            && name.is_some_and(|name| p.name == name || p.app_ids.iter().any(|id| id == name))
+    });
+    if !installer.replaces_installed() {
+        for copy in copies {
+            plan.cautions.push(format!(
+                "{} {} stays installed at {}; `housekeeper remove {}` removes it",
+                copy.display_name(),
+                copy.version.as_deref().unwrap_or("(version unknown)"),
+                copy.location.as_deref().unwrap_or(Path::new(&copy.id)).display(),
+                copy.key()
+            ));
+        }
+    } else {
+        plan.replaces = copies
+            .next()
+            .map(|p| p.version.clone().unwrap_or_else(|| "an unknown version".into()));
+        let same = file.package.and_then(|package| package.version.as_ref());
+        if same.is_some() && plan.replaces.as_ref() == same {
+            plan.cautions
+                .push("this version is installed already, so installing it changes nothing".into());
+        }
     }
     let Some(simulator) = installer.simulator() else {
         return Ok(plan);

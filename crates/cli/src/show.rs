@@ -190,6 +190,8 @@ pub fn step_text(step: &Step) -> String {
             command_line(argv)
         }
         Action::Trash { path } => format!("move {} to the Trash", path.display()),
+        Action::Move { from, to } => format!("move {} to {}", from.display(), to.display()),
+        Action::WriteFile { path, .. } => format!("write {}", path.display()),
     };
     format!("{by}: {what}")
 }
