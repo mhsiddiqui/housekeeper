@@ -20,6 +20,14 @@ the project uses [Semantic Versioning](https://semver.org/).
   and the version installed now that it would replace. A refusal (a conflict, a newer version installed, an installed
   package it would break) or a protected package it would remove blocks the install. Exits 0 when the file fits and
   nothing blocks it, 1 otherwise, 2 for no such file or an unknown format; `--json` has the plan as `install`.
+- `housekeeper inspect` shows the file's SHA-256 checksum (`sha256` in `--json`), to compare with the one its publisher
+  gives.
+- `housekeeper install <file>`: installs a `.deb`, `.rpm`, Arch package, Flatpak reference or bundle, or snap the way
+  its plan says, after showing the plan and asking (`--yes` skips the question). Just before acting it inspects the
+  file again and changes nothing if the file, whether it fits or the plan changed. Package files are installed by the
+  root helper from its own copy, and only when the copy has the checksum the inspection showed. An `.rpm` nobody
+  signed is installed by zypper with `--allow-unsigned-rpm`, which the plan says. Every install goes into the history.
+  Exits 0 when installed, 2 for no such file or an unknown format, 3 when nothing was changed, 4 when a step failed.
 
 ## 0.2.0 (2026-11-26)
 
