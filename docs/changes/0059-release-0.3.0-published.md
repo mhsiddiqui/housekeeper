@@ -3,7 +3,7 @@
 - **Date:** 2026-11-29
 - **Branch / PR:** `docs/release-0.3.0-done`, #49
 - **Plan chunks:** none (release of the work prepared in 0058)
-- **Commits:** filled in below before merging
+- **Commits:** bbc18ff
 
 ## What changed
 - This record only; no code or other document changed.
