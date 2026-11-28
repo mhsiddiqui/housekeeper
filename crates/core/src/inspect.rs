@@ -200,7 +200,7 @@ impl Housekeeper {
     }
 
     /// The source's plan for `file`, checked against what the source has installed now; `None` when the source does
-    /// not install files.
+    /// not install files. A plan with nothing to do (a format the source refuses) is not checked.
     fn plan_install(
         &self,
         source: &dyn Source,
@@ -210,6 +210,10 @@ impl Housekeeper {
         let Some(installer) = source.file_installer() else {
             return Ok(None);
         };
+        let plan = installer.plan(&self.host, file)?;
+        if plan.steps.is_empty() {
+            return Ok(Some(plan));
+        }
         let info = source.info();
         let only = [info.id.to_string()];
         let scan = self.read(&Selection::Only(&only), false, |_, _| {});
@@ -218,6 +222,13 @@ impl Housekeeper {
                 warnings.push(format!("could not read {}: {error}", report.info.label));
             }
         }
-        install::plan(installer, &self.host, file, &scan.packages, warnings).map(Some)
+        Ok(Some(install::check(
+            installer,
+            plan,
+            &self.host,
+            file,
+            &scan.packages,
+            warnings,
+        )))
     }
 }
