@@ -101,6 +101,13 @@ printf '{"protocol":1,"operation":{"kind":"install-package-file","tool":"%s","fi
 grep -q 'changed since it was inspected' /tmp/helper.json \
   || { cat /tmp/helper.json >&2; fail "the helper did not refuse a file whose checksum differs"; }
 
+# A script is not run: `install` refuses it, says why, and changes nothing (exit 3).
+printf '#!/bin/sh\ntouch /tmp/script-ran\n' > /tmp/setup.sh
+code=0
+housekeeper install --yes /tmp/setup.sh > /tmp/script.txt 2>&1 || code=$?
+[ "$code" = 3 ] && grep -q 'does not run it' /tmp/script.txt && [ ! -e /tmp/script-ran ] \
+  || { cat /tmp/script.txt >&2; fail "housekeeper install of a script exited with $code, not a refusal"; }
+
 if [ "$installed" = yes ]; then
   # The package just installed is this system's own format, read with the format's tool (dpkg-deb, rpm, bsdtar),
   # built for this processor. Its install plan goes through the package tool and knows this version is installed
