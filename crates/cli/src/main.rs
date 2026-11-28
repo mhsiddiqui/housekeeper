@@ -16,8 +16,8 @@ use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use housekeeper_core::history::ChangeOutcome;
 use housekeeper_core::{
-    Availability, Cancel, Details, Event, Host, Housekeeper, Leftover, Leftovers, Lookup, MEASURE_BUDGET, Package,
-    RemovalPlan, Selection, SourceStatus,
+    Availability, Cancel, Details, Event, Host, Housekeeper, Inspection, Leftover, Leftovers, Lookup, MEASURE_BUDGET,
+    Package, Recorded, RemovalPlan, Selection, SourceStatus,
 };
 use serde::Serialize;
 
@@ -91,6 +91,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Install a downloaded file (`.deb`, `.rpm`, Arch package, `.flatpakref`, Flatpak bundle, `.snap`) the way its
+    /// format intends, after showing what `inspect` shows and asking. Package files go through the system's package
+    /// tool and Housekeeper's root helper (an administrator's password is asked), which installs its own copy of the
+    /// file only if it is still the file inspected. Exits 0 when it was installed, 2 when there is no such file or its
+    /// format is unknown, 3 when nothing was changed (it does not fit, has no install plan, is blocked, declined,
+    /// changed since it was inspected), 4 when a step failed.
+    Install {
+        /// The file (`~/Downloads/app.deb`, `./app.flatpakref`).
+        file: String,
+        /// Install without asking first.
+        #[arg(long, short = 'y')]
+        yes: bool,
+        /// Print JSON instead of text: what was done, as the history keeps it.
+        #[arg(long)]
+        json: bool,
+    },
     /// Remove one installed item the way its installer intended, after showing the plan and asking. Steps that need
     /// root go through Housekeeper's root helper (an administrator's password is asked). Exits 0 when it was removed,
     /// 1 when the name matches several items, 2 when nothing matches, 3 when nothing was changed (blocked, declined,
@@ -145,6 +161,7 @@ fn main() -> Result<ExitCode> {
         Command::Who { query, json } => who(&housekeeper, &query, json, &mut out),
         Command::Show { query, files, json } => show(&housekeeper, &query, files, json, &mut out),
         Command::Inspect { file, json } => inspect(&housekeeper, &file, json, &mut out),
+        Command::Install { file, yes, json } => install(&housekeeper, &file, yes, json, &mut out),
         Command::Remove {
             query,
             dry_run,
@@ -362,33 +379,41 @@ fn who(housekeeper: &Housekeeper, query: &str, json: bool, out: &mut impl Write)
     })
 }
 
-fn inspect(housekeeper: &Housekeeper, file: &str, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+/// The file named on the command line, inspected, after printing its warnings; `None` after saying why there is no
+/// inspection (no such file, an unknown format).
+fn inspected(housekeeper: &Housekeeper, file: &str) -> Result<Option<Inspection>> {
     // Core wants absolute paths; a relative one is relative to where the command runs. `components` drops `./`.
     let path: PathBuf = std::env::current_dir()?.join(file).components().collect();
-    let mut err = io::stderr().lock();
-    let inspection = match housekeeper.inspect(&path) {
-        Ok(Some(inspection)) => inspection,
+    match housekeeper.inspect(&path) {
+        Ok(Some(inspection)) => {
+            for warning in &inspection.warnings {
+                eprintln!("warning: {warning}");
+            }
+            Ok(Some(inspection))
+        }
         Ok(None) => {
-            writeln!(
-                err,
+            eprintln!(
                 "housekeeper: {} is no installer format Housekeeper knows",
                 path.display()
-            )?;
-            return Ok(ExitCode::from(2));
+            );
+            Ok(None)
         }
         Err(error) => {
-            writeln!(err, "housekeeper: {error}")?;
-            return Ok(ExitCode::from(2));
+            eprintln!("housekeeper: {error}");
+            Ok(None)
         }
+    }
+}
+
+fn inspect(housekeeper: &Housekeeper, file: &str, json: bool, out: &mut impl Write) -> Result<ExitCode> {
+    let Some(inspection) = inspected(housekeeper, file)? else {
+        return Ok(ExitCode::from(2));
     };
     if json {
         serde_json::to_writer_pretty(&mut *out, &inspection)?;
         writeln!(out)?;
     } else {
         inspect::render(&inspection, housekeeper.system(), out)?;
-    }
-    for warning in &inspection.warnings {
-        writeln!(err, "warning: {warning}")?;
     }
     let blocked = inspection
         .install
@@ -495,22 +520,12 @@ fn carry_out(
         })
         .cloned()
         .collect();
-    if !options.yes {
-        if !io::stdin().is_terminal() {
-            eprintln!("housekeeper: add --yes to remove {title} without being asked. Nothing was changed.");
-            return Ok(not_done);
-        }
-        let also = match chosen.len() {
-            0 => String::new(),
-            n => format!(" and move {} to the Trash", count(n, "leftover folder")),
-        };
-        eprint!("\nRemove {title}{also}? [y/N] ");
-        let mut answer = String::new();
-        io::stdin().read_line(&mut answer)?;
-        if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-            eprintln!("Nothing was changed.");
-            return Ok(not_done);
-        }
+    let also = match chosen.len() {
+        0 => String::new(),
+        n => format!(" and move {} to the Trash", count(n, "leftover folder")),
+    };
+    if !options.yes && !confirm(&format!("remove {title}"), &format!("Remove {title}{also}?"))? {
+        return Ok(not_done);
     }
     if let Err(change) = housekeeper.still_as_reviewed(details) {
         eprintln!("housekeeper: {title} changed since its removal was planned ({change}). Nothing was changed.");

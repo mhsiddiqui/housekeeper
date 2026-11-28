@@ -6,12 +6,13 @@ use housekeeper_core::{Fit, Inspection, InstallPlan, SystemInfo};
 
 use crate::show::{SIMULATED_SHOWN, step_text};
 
-/// The file, its format and how it was told, what is inside, the source that lists it once installed, whether it
-/// fits, and how it would be installed.
+/// The file, its format and how it was told, its checksum, what is inside, the source that lists it once installed,
+/// whether it fits, and how it would be installed.
 pub fn render(inspection: &Inspection, system: &SystemInfo, out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "{}", inspection.path.display())?;
     writeln!(out, "Format:    {}", inspection.format.title)?;
     writeln!(out, "Told by:   {}", inspection.evidence)?;
+    writeln!(out, "SHA-256:   {}", inspection.sha256)?;
     if let Some(package) = &inspection.package {
         let name: Vec<&str> = package
             .name
