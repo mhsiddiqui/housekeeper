@@ -19,6 +19,7 @@ pub fn render(entries: &[HistoryEntry], out: &mut impl Write) -> io::Result<()> 
             utc_timestamp(entry.at)[..16].replace('T', " "),
             match entry.change {
                 Change::Remove => "remove".to_string(),
+                Change::Install => "install".to_string(),
             },
             entry.title.clone(),
             entry.item.clone(),

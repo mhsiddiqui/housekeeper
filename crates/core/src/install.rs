@@ -1,7 +1,8 @@
 //! Install plans: how a downloaded file that fits this system would be installed, the way its format intends
 //! (decision D46).
 //!
-//! A plan only describes; nothing here installs anything. Carrying plans out is plan chunk 5.5.
+//! A plan only describes; nothing here installs anything.
+//! [`Housekeeper::install`](crate::inventory::Housekeeper::install) carries a reviewed plan out (D47).
 
 use std::path::{Path, PathBuf};
 
@@ -106,13 +107,13 @@ impl InstallPlan {
 }
 
 impl Step {
-    /// Installs package `files` through the system's package tool `tool`, which `argv` runs. Always the root helper.
-    pub fn install_package_files(tool: &str, files: Vec<PathBuf>, argv: Vec<String>) -> Self {
+    /// Installs the package `file` through the system's package tool `tool`, which `argv` runs. Always the root helper.
+    pub fn install_package_file(tool: &str, file: impl Into<PathBuf>, argv: Vec<String>) -> Self {
         Self {
             by: Actor::Helper,
-            action: Action::InstallPackageFiles {
+            action: Action::InstallPackageFile {
                 tool: tool.to_string(),
-                files,
+                file: file.into(),
                 argv,
             },
         }

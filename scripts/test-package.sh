@@ -94,6 +94,12 @@ housekeeper history | grep -q '^Housekeeper has not changed anything' || fail "h
   || { cat /tmp/helper.json >&2; fail "the helper did not refuse a package that is not installed"; }
 [ "$(run_helper --purge)" = 2 ] && grep -q 'is not a package name' /tmp/helper.json \
   || { cat /tmp/helper.json >&2; fail "the helper did not refuse an option passed as a package name"; }
+# It installs a package file only from its own copy, and only when the copy has the checksum the file was inspected
+# with; anything else is refused before a package tool runs.
+printf '{"protocol":1,"operation":{"kind":"install-package-file","tool":"%s","file":"%s","sha256":"%064d"}}' \
+  "$tool" "$pkg" 0 | "$helper" > /tmp/helper.json && fail "the helper installed a file whose checksum differs"
+grep -q 'changed since it was inspected' /tmp/helper.json \
+  || { cat /tmp/helper.json >&2; fail "the helper did not refuse a file whose checksum differs"; }
 
 if [ "$installed" = yes ]; then
   # The package just installed is this system's own format, read with the format's tool (dpkg-deb, rpm, bsdtar),
@@ -111,6 +117,24 @@ if [ "$installed" = yes ]; then
     || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not plan installing $pkg with $tool"; }
   grep -q 'this version is installed already' /tmp/inspect.txt \
     || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not see that $pkg is installed already"; }
+  grep -q "^SHA-256: *$(sha256sum "$pkg" | cut -d' ' -f1)$" /tmp/inspect.txt \
+    || { cat /tmp/inspect.txt >&2; fail "housekeeper inspect did not give the checksum sha256sum gives for $pkg"; }
+
+  # Installing it again goes through the root helper (run directly, as the tests run as root), which installs its own
+  # copy of the file. apt finds it installed already and pacman reinstalls it; rpm refuses the version installed, so
+  # on RPM systems the plan is blocked and nothing changes (exit 3). Either way the history says so.
+  code=0
+  housekeeper install --yes "$pkg" > /tmp/install.txt 2>&1 || code=$?
+  if [ "$native" = rpm ]; then
+    [ "$code" = 3 ] && grep -q 'housekeeper is not installed: the plan is blocked' /tmp/install.txt \
+      || { cat /tmp/install.txt >&2; fail "housekeeper install of the installed rpm exited with $code, not 3"; }
+  else
+    [ "$code" = 0 ] && grep -q "^done: *as root, by Housekeeper's helper: $tool" /tmp/install.txt \
+      || { cat /tmp/install.txt >&2; fail "housekeeper install did not install $pkg through the helper"; }
+    grep -q '"change":"install".*"outcome":"done"' "${XDG_STATE_HOME:-$HOME/.local/state}/housekeeper/history.jsonl" \
+      || fail "the history does not record the install"
+  fi
+  [ -z "$(ls -A /var/cache/housekeeper 2>/dev/null)" ] || fail "the helper left its copy in /var/cache/housekeeper"
 
   # Housekeeper sees itself, installed by the native package manager.
   housekeeper list --all --source "$native" --search housekeeper | grep -q '^housekeeper ' \

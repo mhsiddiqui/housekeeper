@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::helper::{PackageRemoval, RootHelper};
+use crate::helper::{PackageInstall, PackageRemoval, RootHelper};
 use crate::host::Host;
 use crate::inspect::Recognised;
 use crate::leftovers::LeftoverKind;
@@ -53,6 +53,18 @@ pub trait Platform: Send + Sync {
     /// How the system's package tool removes packages, for the root helper (D25); `None` when the system has no tool
     /// Housekeeper can use.
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
+        None
+    }
+
+    /// How the system's package tool installs the system's own package files, for the root helper (D46, D47); `None`
+    /// when the system has no tool Housekeeper can use.
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
+        None
+    }
+
+    /// A folder only root may change, where the root helper keeps its copy of a package file while installing it
+    /// (D47); `None` when the system has none.
+    fn helper_staging(&self) -> Option<&'static str> {
         None
     }
 

@@ -165,7 +165,7 @@ pub fn render_removal(details: &Details, dry_run: bool, out: &mut impl Write) ->
     Ok(())
 }
 
-/// How each step of a removal went.
+/// How each step of a removal or an install went.
 pub fn render_outcome(entry: &HistoryEntry, out: &mut impl Write) -> io::Result<()> {
     writeln!(out)?;
     for record in &entry.steps {
@@ -186,7 +186,7 @@ pub fn step_text(step: &Step) -> String {
         Actor::Helper => "as root, by Housekeeper's helper",
     };
     let what = match &step.action {
-        Action::Run { argv } | Action::RemovePackages { argv, .. } | Action::InstallPackageFiles { argv, .. } => {
+        Action::Run { argv } | Action::RemovePackages { argv, .. } | Action::InstallPackageFile { argv, .. } => {
             command_line(argv)
         }
         Action::Trash { path } => format!("move {} to the Trash", path.display()),

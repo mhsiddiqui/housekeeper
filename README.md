@@ -6,13 +6,15 @@
 
 Housekeeper shows every app installed on a Linux machine, whatever installed it: the distribution's package manager
 (apt/dpkg, dnf/rpm, zypper, pacman), Flatpak, Snap, Homebrew, AppImage, npm, pipx, uv, pip, cargo, or a script you
-ran once and forgot. Later versions will also remove each one the way its own installer intended.
+ran once and forgot. It removes each one the way its own installer intended, and installs downloaded files the way
+their format intends.
 
 It is a front door to the native tools, not a replacement for them: it reads what they already know and, when it
-changes something, it will ask them to do it.
+changes something, it asks them to do it.
 
-> **Status:** 0.1, early development. Housekeeper lists software and changes nothing. Removal, installing downloaded
-> files and the desktop app are planned; see the [build plan](docs/planning/plan.md).
+> **Status:** early development. Housekeeper lists software, removes it, and installs downloaded package files and
+> Flatpak and Snap files. More installer formats and the desktop app are planned; see the
+> [build plan](docs/planning/plan.md).
 
 ## Why
 Linux software arrives through many channels, and each keeps its own list. `apt list --installed` knows nothing about
@@ -60,10 +62,11 @@ install -Dm755 housekeeper-*-x86_64-linux/housekeeper ~/.local/bin/housekeeper
 ```
 
 The packages also install Housekeeper's root helper (`/usr/lib/housekeeper/housekeeper-helper`) and its polkit
-action, which `housekeeper remove` uses for what needs root. Only `pkexec` starts it, asking for an administrator's
-password each time, and it does nothing but remove checked, installed packages through the system's own package tool
+action, which `housekeeper remove` and `housekeeper install` use for what needs root. Only `pkexec` starts it, asking
+for an administrator's password each time, and it does nothing but remove checked, installed packages through the
+system's own package tool, install a package file of the system's own format that is still the file you inspected,
 and move a checked file outside every home folder (an AppImage in `/opt`) to root's Trash. The tarball carries both
-files; `housekeeper remove` uses the helper only where the packages put it, so install them there by hand to use it.
+files; Housekeeper uses the helper only where the packages put it, so install them there by hand to use it.
 
 **Uninstall** the same way you installed: `sudo apt remove housekeeper`, `sudo dnf remove housekeeper`,
 `sudo zypper remove housekeeper`, `sudo pacman -R housekeeper`, or delete `~/.local/bin/housekeeper`.
@@ -83,6 +86,7 @@ housekeeper remove --dry-run code              # how it would be removed and wha
 housekeeper remove code                        # remove it that way, after asking (root steps ask for a password)
 housekeeper history                            # what Housekeeper changed on this computer
 housekeeper inspect ~/Downloads/app.deb        # what a downloaded installer is, and whether it fits this system
+housekeeper install ~/Downloads/app.deb        # install it the way its format intends, after asking
 ```
 
 `housekeeper sources` shows what was detected:
@@ -286,6 +290,7 @@ $ housekeeper inspect ~/Downloads/cowsay.rpm
 /home/me/Downloads/cowsay.rpm
 Format:    RPM package
 Told by:   RPM's lead (`ED AB EE DB`), marked as a binary package
+SHA-256:   5c4b7e9f0e0d1f3a2b6c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c
 Package:   cowsay 3.8.4-3.fc43
 Source:    RPM packages
 Fits:      yes
@@ -301,13 +306,36 @@ Arch packages (as root, through Housekeeper's helper; on Silverblue `rpm-ostree 
 (as `snap download` saves it) it is acknowledged first, without one only `--dangerous` installs it, which the plan
 flags. The package manager is asked, without root, what would come with it: apt and pacman name every package, the
 RPM database names what the repositories must supply. The plan also says which installed version it would replace.
-AppImages, archives and scripts have no plan yet.
+AppImages, archives and scripts have no plan yet. `SHA-256` is the file's checksum, to compare with the one its
+publisher gives.
 
 It exits with 0 when the file fits and nothing blocks installing it, 1 when it does not fit (another distribution's
 package, a `.snap` without snapd, a program built for another processor) or the package manager refuses (a conflict,
 a newer version installed) or it would remove a protected package, and 2 when there is no such file or Housekeeper
-does not know its format. `--json` prints the same as a document, with the plan as `install`. Installing is the next
-step (see the roadmap).
+does not know its format. `--json` prints the same as a document, with the plan as `install`.
+
+### Installing a downloaded file
+`housekeeper install` shows what `inspect` shows, asks, and then carries the plan out:
+
+```text
+$ housekeeper install ~/Downloads/cowsay.rpm
+…
+Install cowsay? [y/N] y
+Installing cowsay…
+
+done:     as root, by Housekeeper's helper: dnf install --assumeyes /home/me/Downloads/cowsay.rpm
+```
+
+- A file that does not fit, or whose plan is blocked, is not installed. Without a terminal to ask on it needs `--yes`.
+- Just before acting, the file is inspected again: if its checksum, whether it fits or its plan changed since you
+  saw it, nothing is installed.
+- A package file is installed by the root helper from its own copy, in a folder only root can change, and only when
+  the copy has the checksum the inspection showed, so a file swapped after you reviewed it is never installed. zypper
+  installs a package nobody signed only with `--allow-unsigned-rpm`, which the plan says before you are asked.
+- Flatpak and Snap files are installed as you; Flatpak and snapd ask for a password themselves when they need one.
+- Every install is written to the history (`housekeeper history`). Exit codes: 0 installed, 2 no such file or an
+  unknown format, 3 nothing was changed (it does not fit, has no plan, is blocked, you declined, or it changed since it
+  was inspected), 4 a step failed. `--json` prints what was done, as the history keeps it.
 
 ### JSON output
 `housekeeper list --json` prints one document with the machine (`system`), every source's outcome (`sources`, with
@@ -331,15 +359,18 @@ which keeps the groups it shows and their installs.
 ## Privacy and safety
 - **Changes only what you approve.** `list`, `show`, `who`, `inspect`, `history` and `remove --dry-run` only read the
   system: package databases, metadata files and the package managers' query commands, each with a timeout.
-  `housekeeper remove` is the one command that changes the system. It shows the plan first, asks (unless `--yes`),
-  checks the plan again just before acting, and runs the steps the way the item's installer intended.
+  `housekeeper remove` and `housekeeper install` are the commands that change the system. They show the plan first,
+  ask (unless `--yes`), check the plan again just before acting, and run the steps the way the item's installer (or
+  the file's format) intends.
 - **Root only when a step needs it.** Run Housekeeper as yourself. A step that needs root goes through its root
   helper, which `pkexec` starts after asking for an administrator's password, every time. The helper takes one
-  request, removes only installed packages through the system's own package tool, or moves a file outside every home
-  folder to root's Trash; it does nothing else.
+  request, removes only installed packages through the system's own package tool, installs only its own copy of a
+  package file that still has the checksum you reviewed, or moves a file outside every home folder to root's Trash; it
+  does nothing else.
 - **Housekeeper deletes nothing itself.** Packages are removed by their own tool (apt, dnf, Flatpak, npm…), and
   leftover folders and AppImages go to the Trash, where you can restore them. Housekeeper writes only its own files in
-  `~/.local/state/housekeeper`: the history of every change and the record of items each scan saw.
+  `~/.local/state/housekeeper`: the history of every change and the record of items each scan saw; and, while it
+  installs a package file, the root helper's copy of it in `/var/cache/housekeeper`, removed afterwards.
 - **Nothing leaves the machine.** Housekeeper makes no network connections, and has no account and no telemetry.
 
 ## Supported distributions
@@ -369,11 +400,11 @@ target and [nfpm](https://nfpm.goreleaser.com)). Running the checks and contribu
 ## Roadmap
 The [build plan](docs/planning/plan.md) has the details. Done: the inventory, identity and ownership (`who`, `show`,
 duplicates), removal planning (the way each installer intended, simulated, protected packages blocked, leftovers
-listed), and removing safely (`housekeeper remove`: a root helper started through polkit, an operation queue that
-waits for busy package managers, leftovers moved to the Trash, a history). Next, in order:
+listed), removing safely (`housekeeper remove`: a root helper started through polkit, an operation queue that waits
+for busy package managers, leftovers moved to the Trash, a history), and installing package, Flatpak and Snap files
+(`housekeeper inspect`, `housekeeper install`). Next, in order:
 
-1. **Installing downloaded files** (`.deb`, `.rpm`, AppImage, Flatpak references…) the right way for the distribution.
-   Telling what such a file is, whether it fits and how it would be installed (`housekeeper inspect`) is done.
+1. **The rest of installing downloaded files**: AppImages integrated into the menu, and archives and scripts.
 2. **Desktop app** (v1), then updates, environment and PATH, discovery, cleanup and a tracked terminal for install
    scripts.
 

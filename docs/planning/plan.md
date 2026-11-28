@@ -69,7 +69,7 @@ source, without root and without changing anything.
 | 5.2 ✅ | Install plans per type, shown by `housekeeper inspect`: `.deb`, `.rpm` and Arch packages through the system's package tool (dependencies resolved by it, simulated without root, refusals and protected packages it would remove block the plan; rpm-ostree after a restart), Flatpak references and bundles for the user, snaps acknowledged with their `.assert` or flagged `--dangerous`; the installed version it replaces (D46, change 0054) |
 | 5.3 | AppImage integration: move to `~/Applications`, desktop entry, icon; removal reverses it |
 | 5.4 | Archives and scripts: run in the tracked mode (Phase 11) or refuse with an explanation |
-| 5.5 | Carrying out install plans: the root helper's install operation (the file copied where only root can write and checked against the reviewed package before installing), `housekeeper install <file>` through the operation queue, history (added in 5.2, as 4.5 did for removal) |
+| 5.5 ✅ | Carrying out install plans: the root helper's install operation (the file copied where only root can write and checked against the checksum it was inspected with before installing), `housekeeper install <file>` through the operation queue, history (added in 5.2, as 4.5 did for removal; D47, change 0055) |
 
 ## Phase 6: Desktop app (v1 release) ⬜
 | Chunk | Delivers |

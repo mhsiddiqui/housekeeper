@@ -1,11 +1,16 @@
 //! dnf, which changes the RPM database on Fedora, RHEL and their rebuilds.
 
+use std::path::Path;
+
 use housekeeper_core::{
     FileInstaller, Host, InstallFile, InstallPlan, InstallSimulation, InstallSimulator, LockHolder, Package,
-    PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
+    PackageInstall, PackageLock, PackageRemoval, RemovalPlan, Remover, Simulation, Simulator, SourceError,
 };
 
-use super::{RPM_LOCKS, command_for, installation, removal, rpm_install_simulation, rpm_installed, rpm_simulation};
+use super::{
+    RPM_LOCKS, command_for, install_command_for, installation, removal, rpm_install_simulation, rpm_installed,
+    rpm_simulation,
+};
 use crate::lock;
 use crate::provider::{LinuxTool, PackageTool, Serves, register_package_tool};
 
@@ -32,6 +37,10 @@ impl PackageTool for Dnf {
         Some(self)
     }
 
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
+        Some(self)
+    }
+
     fn file_installer(&self) -> Option<&dyn FileInstaller> {
         Some(self)
     }
@@ -41,10 +50,20 @@ impl PackageTool for Dnf {
     }
 }
 
+/// `dnf install` with the file's path, which installs what it requires from the repositories too.
+impl PackageInstall for Dnf {
+    fn formats(&self) -> &'static [&'static str] {
+        &["rpm"]
+    }
+
+    fn install_command(&self, host: &Host, file: &Path) -> Result<Vec<String>, SourceError> {
+        Ok(install_command_for(&["dnf", "install", "--assumeyes"], host, file))
+    }
+}
+
 impl FileInstaller for Dnf {
-    /// `dnf install` with the file's path, which installs what it requires from the repositories too.
     fn plan(&self, host: &Host, file: &InstallFile<'_>) -> Result<InstallPlan, SourceError> {
-        Ok(installation(self, host, file, &["dnf", "install", "--assumeyes"]))
+        installation(self, host, file)
     }
 
     fn simulator(&self) -> Option<&dyn InstallSimulator> {

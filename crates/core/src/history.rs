@@ -36,10 +36,13 @@ pub struct HistoryEntry {
     /// When it ended, in seconds since the Unix epoch.
     pub at: i64,
     pub change: Change,
-    /// The item's `source:id`.
+    /// The item's `source:id`; for an install, the source and the package's name (`dpkg:hello`).
     pub item: String,
     /// The item's display name when it was changed.
     pub title: String,
+    /// The file it was installed from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<PathBuf>,
     /// Each step of the plan and how it went, in order.
     pub steps: Vec<StepRecord>,
     pub outcome: ChangeOutcome,
@@ -50,6 +53,7 @@ pub struct HistoryEntry {
 #[serde(rename_all = "kebab-case")]
 pub enum Change {
     Remove,
+    Install,
 }
 
 /// How a whole change ended.
@@ -335,6 +339,7 @@ mod tests {
             change: Change::Remove,
             item: "dpkg:vim".into(),
             title: "Vim".into(),
+            file: None,
             steps: vec![StepRecord {
                 step: Step::remove_packages("apt", vec!["vim".into()], vec!["apt-get".into(), "remove".into()]),
                 outcome: StepOutcome::Done,

@@ -454,8 +454,8 @@ added as <strong>separate traits</strong> that a source offers as an optional co
     <span class="k">fn</span> owner_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> OwnerLookup&gt;   { None }  <span class="c">// today: dpkg, rpm, pacman name the package that owns a file</span>
     <span class="k">fn</span> file_list(&amp;self)    -&gt; Option&lt;&amp;<span class="k">dyn</span> FileList&gt;      { None }  <span class="c">// today: package managers, pip, cargo</span>
     <span class="k">fn</span> dependant_lookup(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> Dependants&gt; { None } <span class="c">// today: package managers, Flatpak, Snap</span>
-    <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// today: a removal plan (D31); Phase 4 runs it</span>
-    <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// Phase 5: install a downloaded file</span>
+    <span class="k">fn</span> remover(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Remover&gt;       { None }  <span class="c">// a removal plan (D31), which `housekeeper remove` runs</span>
+    <span class="k">fn</span> file_installer(&amp;self) -&gt; Option&lt;&amp;<span class="k">dyn</span> FileInstaller&gt; { None } <span class="c">// an install plan (D46), which `housekeeper install` runs</span>
     <span class="k">fn</span> updater(&amp;self)      -&gt; Option&lt;&amp;<span class="k">dyn</span> Updater&gt;       { None }  <span class="c">// Phase 7</span>
 }</code></pre>
 <ul>
@@ -640,8 +640,8 @@ there must be valid Rust identifiers; the build stops with a clear message other
   <tr><td><code>crates/platform/linux/src/owner.rs</code></td><td>Shared plumbing for the native sources' ownership queries</td></tr>
   <tr><td><code>crates/platform/src/lib.rs</code></td><td><code>detect</code>: the platform for the OS Housekeeper was built for; each OS crate sits beside it in <code>crates/platform/&lt;os&gt;/</code> (D35)</td></tr>
   <tr><td><code>crates/cli/src/main.rs</code></td><td>The command line</td></tr>
-  <tr><td><code>crates/helper/src/main.rs</code>, <code>crates/core/src/helper.rs</code></td><td>The root helper that <code>pkexec</code> starts: one checked request in, one reply out (D40)</td></tr>
-  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D46)</td></tr>
+  <tr><td><code>crates/helper/src/main.rs</code>, <code>crates/core/src/helper.rs</code></td><td>The root helper that <code>pkexec</code> starts: one checked request in, one reply out (D40, D47)</td></tr>
+  <tr><td><code>docs/architecture/README.md</code></td><td>The same architecture in short, plus every design decision (D1–D47)</td></tr>
   <tr><td><code>docs/README.md</code></td><td>Index of all documentation; <code>docs/changes/</code> holds one record per change</td></tr>
 </table>
 

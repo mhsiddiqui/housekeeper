@@ -68,3 +68,4 @@ links back.
 | [0052](0052-release-0.2.0-published.md) | Release 0.2.0 published and checked | — | #42 |
 | [0053](0053-release-steps-and-safety.md) | Tag the release commit; describe what Housekeeper changes | — | #43 |
 | [0054](0054-install-plans.md) | Plan how a downloaded file would be installed | 5.2 | #44 |
+| [0055](0055-install.md) | Install a downloaded file the way its plan says | 5.5 | #45 |

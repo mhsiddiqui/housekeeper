@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use housekeeper_core::{
-    Host, Launcher, LeftoverKind, Metainfo, PackageLock, PackageRemoval, Platform, Recognised, RootHelper, ScanContext,
-    Source, SourceError, SourceKind, SystemInfo, path_dirs,
+    Host, Launcher, LeftoverKind, Metainfo, PackageInstall, PackageLock, PackageRemoval, Platform, Recognised,
+    RootHelper, ScanContext, Source, SourceError, SourceKind, SystemInfo, path_dirs,
 };
 
 use crate::distro::Distro;
@@ -113,6 +113,15 @@ impl Platform for LinuxPlatform {
 
     fn package_removal(&self) -> Option<&dyn PackageRemoval> {
         self.tool.as_deref().and_then(PackageTool::package_removal)
+    }
+
+    fn package_install(&self) -> Option<&dyn PackageInstall> {
+        self.tool.as_deref().and_then(PackageTool::package_install)
+    }
+
+    /// Under `/var/cache`, which only root writes to, and which stays writable on image-based systems (D47).
+    fn helper_staging(&self) -> Option<&'static str> {
+        Some("/var/cache/housekeeper")
     }
 
     /// The package tool's lock, for changes made with that tool (`backend` is its name in plans, `apt`).
