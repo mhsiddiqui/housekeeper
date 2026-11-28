@@ -3,7 +3,7 @@
 - **Date:** 2026-11-29
 - **Branch / PR:** `feat/refuse-archives-scripts`, #47
 - **Plan chunks:** 5.4 (see [plan](../planning/plan.md)); completes Phase 5
-- **Commits:** filled in below before merging
+- **Commits:** d14e870, 84b0053, 3d01584, 506448d, db53dda
 
 ## What changed
 - **Scope, agreed with the owner:** the plan's choice for 5.4 is to run these files in the tracked mode (Phase 11) or
