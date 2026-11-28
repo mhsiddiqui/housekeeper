@@ -72,3 +72,4 @@ links back.
 | [0056](0056-appimage-install.md) | Install an AppImage into the menu, and remove it the same way | 5.3 | #46 |
 | [0057](0057-refuse-archives-and-scripts.md) | Refuse archives, scripts and installer programs, saying why | 5.4 | #47 |
 | [0058](0058-release-0.3.0.md) | Prepare release 0.3.0 | — | #48 |
+| [0059](0059-release-0.3.0-published.md) | Release 0.3.0 published and checked | — | #49 |
